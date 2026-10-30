@@ -10,7 +10,7 @@
 
 用户明确接受既有Linux race断言失败，作为已知待办保留，不阻塞单机场景的本次M0验收。**这是用户批准的阶段验收，不声称Frozen原版所有治理/Hook/MCP/负载门禁均已实现。** 下表原M0编号中尚未交付或验证的项目保留真实状态，转后续增强；不得把它们伪记为已完成。
 
-**下一里程碑：M1／待开始。** 独立解析代理按既有范围另行开展，不重构原生解析器。
+**当前里程碑：M1／进行中（2026-10-30启动）。** 从M0提交`d1c62cd`继续；已核实用户已有MinerU4.0.1，首批实施页级信号纯路由。源映射及全部文件/验收清单见`docs/design/M1-Source-Mapping-2026-10-30.md`；本批计划见`docs/superpowers/plans/2026-10-30-m1-routing-policy.md`。M0接受结论保留，M1尚未验收。
 
 ## 待办
 
@@ -24,7 +24,7 @@
 | M0-04／进行中，C-10接受为Baseline Limitation | 标签队列/API Store/KB映射/Outbox Handler已接入Host，多KB共用唯一Writer已测；null标签安全拒绝获用户接受，无标签首写留后续只读API，真实服务仍待验。只声明扩展内部串行，不保证原生UI并发安全。 | 架构6、用户C-02及2026-10-30 C-10决定；本批不改原生API。 | 首次真实投影、标签只读API接入及并发来源变化后。 |
 | M0-05／待开始 | 使用原生 MCP 按需发现注册本机 Extension MCP Server，采用 Streamable HTTP `/mcp` 与本机认证；不改 ToolRegistry。 | 架构 3.5、16；`query_related_docs`／`discover_peers` 目标能力。 | 首次开发 MCP 工具前；上游注册／发现实现变化时。 |
 | M0-06／进行中 | 独立门禁、专用CI定义、SQLite/FK/事务/Outbox及Host本地联合测试已通过；真实QA全链路、真实来源对账和上游混合并发待验。并发2有上游竞态则记录后降至1重跑。 | 架构4.4/15–16；M0范围按用户四项决定限定；远端Actions尚未运行。 | 首个实现PR前；module/workflow/DB变化后。 |
-| M1／待开始 | PDF/Image 通过 Cheap Preflight 选择 MinerU 档位且只正式 parse 一次；Office 走 native Flash/builtin；保存带版本的 parser artifacts；按库完成阈值标定。 | 架构 7、15；路由准确率 ≥ 85%、高估率 ≤ 10%、低估率 ≤ 15%。 | M0 通过并开始解析扩展前；MinerU 或源文档分布变化时。 |
+| M1／进行中 | PDF/Image Cheap Preflight后选四档且只正式parse一次；Office native/builtin；版本化产物及每库阈值标定。当前完成源映射/4.0.1核实，纯路由定向测试已通过；代理/预检/产物/真实标定仍待做。 | 架构7/15；准确率≥85%、高估≤10%、低估≤15%；M1 Source Map的C-11/C-12/C-13。 | 首次实连、scope/部署OS/后端版本和真实语料变化时。 |
 | M1.5／待开始 | 完成库级检索基线、RRF 参数实验、重排降级与查询扩展门控；量化只通过 feature flag 验证，保留原生 RRF 实现。 | 架构 14–15；Recall@5 ≥ 0.85、MRR ≥ 0.80（或基线 95%）；量化 Recall@10 退化 ≤ 2%。 | 开始检索优化前；模型、语料或 sqlite-vec 基线变化时。 |
 | M2／待开始 | 实现含 scheduled 的生命周期状态机、库级规则与 stale 区分，event/current/outbox 同事务；通过崩溃注入与事实重建验证。 | 架构不变量 A、4、15。 | M0 持久化门禁通过且开始生命周期业务前；状态迁移规则变化时。 |
 | M3／待开始 | 建立版本族、版本节点和分级 lineage DAG；provenance 与 version-ancestry 分离；Critical Edge 同事务，递归具备 cycle guard。 | 架构不变量 D、5、8、15。 | 开始血缘实现前；新增边类型或修改版本事实模型时。 |
@@ -55,8 +55,8 @@
 | M0-05／待开始 | 本机MCP与认证：`extensions/mcp/server.go`、`auth.go`、`server_test.go`；使用原生MCP设置注册。 | MC-1：按需schema、token、stdio拒绝、回环allowlist及容器拓扑。 | 架构3.5；C-08配置核实后。 |
 | M0-06A／已完成（本地门禁与CI定义） | `extensions/scripts/check_module_boundary.py`、`check_module_boundary_test.py`、`.github/workflows/extensions.yml`。 | CI-1：7个真实临时module案例和实际module通过；workflow本地解析通过；远端Actions/race未运行。 | 架构15；module/import/workflow变化时重审。 |
 | M0-06B／待开始，依赖上述M0接线 | `extensions/integration/bridge_test.go`、`ingest_recovery_test.go`、`concurrency_test.go`。 | 2文档真实ingest+1000feedback+lifecycle+投影，终态后核对；并发失败按流程降至1重跑。 | 架构4.4/15；可用Lite环境/持久层/适配就绪后；验收范围按用户M0决定限定。 |
-| M0-06C／待处理（用户接受，M0非阻塞） | 既有Linux race命令中的Outbox报告次数断言失败保留：`extensions/outbox/worker_test.go:102`、候选`worker.go`；未修复，不将它描述为已通过。 | 已有证据：完整race及单独该测试均退出1，calls=3 reports=2；没有DATA RACE报告。后续记录错误种类并区分正常取消/投影故障，不放宽断言。 | 用户2026-10-30明确接受现状，不阻塞本次单机M0验收。进入后续修复、扩大部署或更改Worker语义时重审。 |
-| M1-A／后续阶段，M0不实施 | 独立解析代理/预检：`extensions/parser/preflight.go`、`router.go`、`mineru_proxy.go`、`router_test.go`。 | PA-1：预检不parse、正式job=1、Office不进四档、按库标定。 | 用户C-04决定；M0完成后独立POC。 |
+| M0-06C／待处理（用户接受M0非阻塞） | 既有Outbox TestRunRetriesReportsAndDrainsHealthyBacklog报告次数偶发失败保留，候选worker.go/worker_test.go；本轮Windows普通完整测试也触发calls=3 reports=2，已不限于Linux race命令。 | 先前Linux race及定向失败；本轮普通完整suite一次退出1，补齐图像用例后最后十三包退出0；没有修复、放宽断言或把复跑绿色当作问题消失。 | 后续Worker语义、部署扩大和M1最终稳定性验收时；M0豁免不能代替M1稳定性证据。 |
+| M1-A／进行中 | 独立解析代理/预检；首批`extensions/parser/router.go`及测试已实现，预检和HTTP接线尚未完成。详单M1-00至07；核心只读。 | PA-1：预检不parse、正常正式job=1、Office不进四档、按库标定；纯路由不等于已完成预检。 | 用户本轮正式进入M1；接线前先过C-12作用域POC。 |
 | M1-B／待开始，依赖M1-A | 版本化原始产物：`extensions/parser/artifacts.go`、计划`extensions/store/migrations/003_parser_artifacts.sql`（002已用于M0，实施时核实下一版本）。 | PA-1：真实服务产物、schema/MinerU版本、无二次解析，失败与重试可追踪。 | 架构7.4；真实MinerU服务及产物契约验证后。 |
 | M1.5／待开始 | 评估/调参/量化实验：`extensions/eval/retrieval.go`、`rrf_grid.go`、`quantization.go`、`testdata/retrieval/`；原生租户retrieval-config API。 | RE-1：每库30–50查询，Recall/MRR基线、flag隔离、Recall@10退化≤2%。 | 架构14/15；M0通过，模型/语料/sqlite-vec变化时重审。 |
 | M2／待开始 | 生命周期业务、规则和stale：`extensions/lifecycle/machine.go`、`rules.go`、`stale.go`、`machine_test.go`；按库配置。 | LC-1/TX-1/OB-1；正式状态矩阵含scheduled，时钟、非法迁移、重放、两种stale分测。 | 架构M2；M0持久化门禁通过及状态设计明确后。 |
@@ -68,6 +68,21 @@
 | M6-B／待开始 | 独立UI与最薄bootstrap：计划 `extensions/ui/src/routes.ts`、`views/`、`api/`；受控候选 `frontend/src/router/index.ts`。 | DS-1；前端测试/type-check/build；库切换权限，溯源/版本历史分离，运维真实状态。 | 架构13；独立构建/发布路由方案核实后，不提前重构前端。 |
 | POST-M0-GOV／后续机制 | Agent直接读/旧handle/图谱/中途停用的完整治理；候选 `internal/agent/tools/read_document.go`、`query_knowledge_graph.go` 或共用执行门禁。 | FC-3；M0未验证，不得宣称所有工具已受控。 | 用户C-03决定；M0后结合真实绕过案例和补丁预算重审。 |
 | POST-M0-TAGS／后续，未实施 | 独立标签只读API，候选`internal/handler/knowledge.go`、`internal/router/routes_knowledge.go`；扩展`taggov/http_store.go`适配。 | 无标签显式[]、查询故障非2xx、跨tenant/KB拒绝；保留业务标签，重试后收敛；核心补丁范围须单独核实。 | 用户2026-10-30接受C-10安全拒绝并选择后续只读API；启动该任务并明确核心薄补丁授权时重审。 |
+
+## M1细分任务（2026-10-30启动）
+
+完整源码映射、文件路径及测试步骤见M1 Source Map；下表的预期不代表已验收。
+
+| ID／状态 | 期望结果 | 依据 | 何时重新审视 |
+|---|---|---|---|
+| M1-00／已完成 | 源码映射与首批计划落盘，M0提交及本机4.0.1/可用PDF库核实。 | 本轮Git/包元数据/固定源码读取；Source Map。 | HEAD、MinerU或运行OS变化。 |
+| M1-01／进行中 | 4.0.1协议和显式scope端到端POC；当前仅静态协议及版本已核实，不冒充HTTP实连。 | C-04/C-11/C-12；计划parser/scope.go、mineru_proxy_test.go。 | 正式代理接线前及来源/身份传输变化。 |
+| M1-02／已完成（纯决策函数） | parser/router.go及router_test.go覆盖四档/跨页/native/空预检/稀疏比例；定向与最后完整十三包测试退出0，Linux parser race退出0，一次实际独立复核无实质问题。不代表文件预检或M1已验收。 | Frozen7.1/7.2；本批RED→GREEN及最新执行记录。 | 规则变化、真实预检接线及每库标定时。 |
+| M1-03／未开始 | 真实文件Cheap Preflight及资源/取消约束；preflight.go、pdf_probe.py和测试，不创建正式job。 | Frozen7.2/7.3；可复用Windows4.0.1环境的pypdf；WSL部署需验证。 | 探测器选型、跨系统取消及真实样本齐备时。 |
+| M1-04／未开始 | 独立V1代理/Host接线，正常job计数1，未知结果先恢复不盲目重复；mineru_proxy.go、host配置/生命周期及测试。 | C-04/C-12/C-13；依赖01/03。 | 生产启用、重试/身份/端点变化前。 |
+| M1-05／未开始 | 带格式/schema/MinerU版本的原始产物与归属、并发/崩溃/取消验证；parser/artifacts.go、候选ext迁移003及migrate.go。 | Frozen7.4；依赖明确产物与scope契约。 | 实际产物核实、数据库或存储路径变化。 |
+| M1-06／未开始 | 每库独立标注/验证集及准确率≥85%、高估≤10%、低估≤15%；calibrate.go、testdata/parser/manifest.json。 | Frozen7.3；不以合成信号表替代真实语料指标。 | 文档分布、模型、提取器或阈值变化。 |
+| M1-07／未开始 | 隔离原生上传→预检→单job→产物→索引E2E，并回归M0门卫；m1-e2e-test.sh、m1_e2e_test.py及报告。 | PA-1；依赖01–06、真实模型/语料。 | M1最终验收前；不得因单个纯函数通过完成M1。 |
 
 ## 执行记录：Bridge基础（2026-10-29）
 
@@ -182,6 +197,19 @@
 - Final: Ruling: M0按用户确认的HTTP门卫+默认Pass-Through范围已完成 — 真实断网与通网均有日志/SSE证明，脚本退出0 — 代价是复杂治理/范围消费及原冻结剩余任务继续保留后续，不以阶段完成抹去限制。
 - Final: Ruling: 空文档范围用非200拒绝，不把200中的deny_all当作原生已执行 — 维持空范围不得回退whole-KB的安全边界 — 代价是无显式文档范围的原生整库请求暂不能使用本层默认透传，需C-09另行接线。
 - Final: Ruling: 完整Linux race的Outbox报告次数断言失败按用户决定后移 — 当前两包race通过不表示旧失败消失 — 代价是仍需后续真实并发和事务复核，M0-06C不能标为已修复。
+
+## 执行记录：M1启动与首批纯路由（2026-10-30）
+
+- 基点：用户确认M0已验收/提交，本地HEAD为d1c62cd，开工clean；在当前D:/LanRAG-Next建立codex/m1-parser-routing分支，未创建额外worktree、提交或推送。
+- 环境：用户指定D:/mineru-venv，元数据实测MinerU4.0.1、pypdf6.19.0、pypdfium2 5.13.0。包源码保留Uploads/Jobs及版本化产物；尚未实连API Server/推理模型。未安装、升级或修改venv，未启动GPU服务或下载模型。WSL默认Python不具备这些库，Docker守护进程不可连接，均只记录实际可见证据。
+- 交付：新增M1 Source Map、首批实施计划和extensions/parser/router.go、router_test.go；同步PROJECT_CONTEXT与本backlog。core、Frozen、BASELINE及两module依赖与HEAD相同；M0门卫和Host未更改。
+- RED→GREEN：先写路由测试，go test -mod=readonly ./parser -count=1因no non-test Go files退出1，再最小实现退出0。覆盖四类OCR、所有布局信号、同页/跨页最大档位、各图像四档、native不入档、空预检/未知类型拒绝、稀疏1/2与2/3，以及Advanced页之后继续统计。
+- 验证：开工十二包完整测试退出0；新增后普通完整suite一次Outbox旧断言calls=3 reports=2退出1；补齐图像四档覆盖后的最后go test -mod=readonly ./... -count=1十三包退出0，旧问题未修复。build/vet、模块门禁245 imports均退出0；Python十六例退出0（Windows SIGTERM一例skip）；最新Linux Go1.26 parser包race退出0。gofmt无输出；最终Git范围/依赖检查通过。
+- 独立复核：第一次Astra调用因额度限制未产生评审结论，随后可用模型完成一次实际只读复核，无Critical/Important/Minor实质问题；独立parser测试和diff --check退出0，确认core无改动。未派第二次实际复核或修改既有Outbox。
+- 边界：未验证真实文件提取、信号完整性、HTTP/scope、MinerU实连/单job、产物与恢复、每库标定和M1 E2E；未重跑上游全量/前端/生产模型/远端CI，也没有对M0持久组件全面重审。独立复核没有替代主任务的完整suite。
+- Ruling: 继续沿用Frozen和已有4.0.1，首批只交付无I/O纯路由 — 避免新协议/环境升级及核心改动 — 代价是实际预检、代理和业务闭环仍未交付，M1不能标完成。
+- Ruling: 同页OCR+DenseGraphics选Advanced，其他布局Standard，文档取页级最大需求 — Frozen允许的高密度布局选择具体化，避免跨页错误升级 — 代价是密度信号与真实档位仍需每库标定，不能宣称85%准确率。
+- Ruling: 既有Outbox偶发断言只补证、不顺手修或减弱断言 — 本轮路由无共享状态且Outbox源码未改，M0接受决定保留 — 代价是完整suite仍有已知不稳定性，最终复跑0不能代表已解决。
 
 ## 新任务占位（待填充）
 

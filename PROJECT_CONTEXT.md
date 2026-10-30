@@ -20,6 +20,7 @@ WeKnora 核心通过四类本机 HTTP Hook 与独立 Extension Host 交换公开
 | 上游仓库 | `https://github.com/Tencent/WeKnora` |
 | 上游 tag / VERSION | `v0.9.0` / `0.9.0` |
 | 基线提交 | `f17ee8a8da901bd658a4cb25f40b5fd41adbfdd7` |
+| M0已提交基点 | `d1c62cd900f76823b7a9fca0279a97426682e25a`；2026-10-30用户确认验收，M1从此继续 |
 | fork | `https://github.com/ybochuan/LanRAG-Next` |
 | 基线记录分支 | `baseline/v0.9.0` |
 | 基线冻结日期 | 2026-10-29 |
@@ -68,6 +69,7 @@ WeKnora 核心通过四类本机 HTTP Hook 与独立 Extension Host 交换公开
 | `extensions/taggov/writer.go`、`http_store.go` | 扩展共享标签单写者，原生公开GET/PUT适配，完整read/merge/replace/verify；null标签读取拒绝覆盖 |
 | `extensions/taggov/mapping.go`、`projector.go` | 按tenant/KB持久映射原生tag ID；队列内读取当前治理truth，Outbox驱动投影，失败单独持久记录 |
 | `extensions/retrieval/exclusions.go` | 从已枚举的授权文档中减去 excluded_document_ids，空结果显式 DenyAll |
+| `extensions/parser/router.go` | 消费已给定页级信号的纯路由规则；不提取文件信号、不创建job、不修改原生引擎选择或M0门卫 |
 | `extensions/host/config.go`、`runtime.go` | probe/worker配置验证；固定回环监听、独立DB、周期对账、限定tenant/KB的Outbox与唯一标签Writer的生命周期管理 |
 | `extensions/README.md`、`.env.example` | Host运行说明和环境变量示例；程序只读取进程环境，不自动加载.env文件 |
 | `extensions/scripts/`、`.github/workflows/extensions.yml` | 独立模块边界检查及其回归测试、扩展专用CI；开发检查需要Python 3.11+，Python不参与Host运行 |
@@ -159,3 +161,7 @@ Host对版本合法的检索前请求仅记录固定`bridge_before_retrieve_rece
 2026-10-30后续决定覆盖实施顺序：M0先采用原生HTTP门卫与默认Pass-Through，暂不启用复杂治理排除；前述过滤目标保留后续，不声称active、Agent直接读或图谱门禁已实现。当前默认透传要求显式非空文档范围，不能把未知/空范围当作whole-KB许可。
 
 基线没有公开的 `excluded_document_ids` 搜索参数。底层 `internal/types/retriever.go:58` 虽有 ExcludeKnowledgeIDs，但 `internal/types/search.go` 的 SearchParams 未贯通，SQLite `repository.go:877–908` 也未应用该列表。扩展计算必须由薄适配变成显式文档范围/结果排除；空范围不能变成整库。具体差异、验证和残余风险见 `docs/design/M0-Change-Map-2026-10-29.md`。
+
+## M1解析接入依据
+
+用户指定复用本机`D:/mineru-venv`，实测包版本MinerU4.0.1，含pypdf/pypdfium2；这是已核实的本机环境，不是仓库自动安装依赖，也不证明模型或服务ready。原生自建MinerUReader使用Uploads/Jobs，优先通过现有mineru_endpoint接扩展代理，保留原生响应转换与分块/索引流程。原生请求无tenant/KB/document身份；库级阈值及产物归属需显式scope绑定POC，不能从文件名猜测。源码映射和版本风险见`docs/design/M1-Source-Mapping-2026-10-30.md`。
