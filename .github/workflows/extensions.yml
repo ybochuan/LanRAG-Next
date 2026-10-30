@@ -1,0 +1,67 @@
+name: AgentRAG Extensions
+
+on:
+  pull_request:
+    paths:
+      - "extensions/**"
+      - ".github/workflows/extensions.yml"
+  push:
+    branches: [main]
+    paths:
+      - "extensions/**"
+      - ".github/workflows/extensions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      GOWORK: "off"
+      PYTHONDONTWRITEBYTECODE: "1"
+    defaults:
+      run:
+        working-directory: extensions
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: extensions/go.mod
+          cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Check standalone module boundary
+        run: python scripts/check_module_boundary.py
+      - name: Test module guard against isolated fixtures
+        run: python -m unittest discover -s scripts -p '*_test.py' -v
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Build
+        run: go build -mod=readonly ./...
+      - name: Test
+        run: go test -mod=readonly ./... -count=1
+      - name: Vet
+        run: go vet -mod=readonly ./...
+      - name: Race detector
+        if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: "1"
+        run: go test -mod=readonly -race ./... -count=1

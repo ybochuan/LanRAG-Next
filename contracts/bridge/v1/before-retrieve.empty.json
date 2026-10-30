@@ -1,0 +1,14 @@
+{
+  "request_id": "request-empty",
+  "session_id": "session-1",
+  "mode": "rag",
+  "agent_round": 0,
+  "tenant_id": 7,
+  "knowledge_base_ids": ["kb-a"],
+  "knowledge_ids": [],
+  "tag_scopes": {},
+  "original_query": "source query",
+  "rewritten_query": "",
+  "token_budget": 0,
+  "metadata": {}
+}

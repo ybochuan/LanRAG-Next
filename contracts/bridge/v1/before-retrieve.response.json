@@ -1,0 +1,8 @@
+{
+  "request_id": "request-1",
+  "tenant_id": 7,
+  "knowledge_base_ids": ["kb-a", "kb-b"],
+  "knowledge_ids": ["doc-a", "doc-c"],
+  "excluded_document_ids": ["doc-b"],
+  "deny_all": false
+}

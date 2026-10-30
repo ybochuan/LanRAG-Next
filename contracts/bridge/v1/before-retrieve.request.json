@@ -1,0 +1,14 @@
+{
+  "request_id": "request-1",
+  "session_id": "session-1",
+  "mode": "agent",
+  "agent_round": 2,
+  "tenant_id": 7,
+  "knowledge_base_ids": ["kb-a", "kb-b"],
+  "knowledge_ids": ["doc-a", "doc-b", "doc-c"],
+  "tag_scopes": {"kb-a": ["tag-business"]},
+  "original_query": "source query",
+  "rewritten_query": "rewritten query",
+  "token_budget": 800,
+  "metadata": {"trace": {"counter": 9007199254740993}, "feature": "m0"}
+}

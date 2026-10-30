@@ -1,0 +1,7 @@
+# The upstream binary rule matches this package name on case-insensitive hosts.
+!/weknora/
+
+# Local extension data is runtime state, never source material.
+*.db
+*.db-wal
+*.db-shm

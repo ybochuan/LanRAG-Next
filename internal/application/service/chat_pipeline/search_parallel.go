@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -97,6 +98,25 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 			"reason":     "intent_no_search",
 		})
 		return next()
+	}
+
+	requestID, _ := types.RequestIDFromContext(ctx)
+	if err := extensionbridge.BeforeRetrieve(ctx, map[string]any{
+		"request_id":         requestID,
+		"session_id":         chatManage.SessionID,
+		"mode":               "rag",
+		"tenant_id":          chatManage.TenantID,
+		"knowledge_base_ids": chatManage.KnowledgeBaseIDs,
+		"knowledge_ids":      chatManage.KnowledgeIDs,
+		"original_query":     chatManage.Query,
+		"rewritten_query":    chatManage.RewriteQuery,
+	}); err != nil {
+		logger.Error(ctx, "[Bridge] before_retrieve failed, blocking search to prevent policy bypass")
+		return &PluginError{
+			Err:         err,
+			Description: "Extension Bridge before_retrieve failed",
+			ErrorType:   "bridge_before_retrieve_failed",
+		}
 	}
 
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
