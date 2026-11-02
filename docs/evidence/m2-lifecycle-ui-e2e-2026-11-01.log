@@ -1,0 +1,8 @@
+[AUTH] Native register/login PASS; private credentials omitted
+[OFFLINE] Management facade returns 503 with Host stopped PASS
+[UPLOAD] Real upload -> native chunks -> Observer active -> titled UI overview PASS
+[DATES] Past expiry -> stale, labels retained, event timeline, stale CAS rejected PASS
+[POLICY] Same document excluded by real DB policy immediately after date edit PASS
+[CONCURRENCY] Eight real HTTP writers: one 200 + seven 409, no lost update PASS
+[AUTHORIZATION] Missing login 401, machine key 403, foreign document 404, viewer read-only/write403 PASS
+[RESULT] M2 lifecycle management E2E PASS; real Core/Host/SQLite; deterministic local model fixture

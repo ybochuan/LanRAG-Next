@@ -87,6 +87,9 @@ func NewSearchMemoryTool(memoryService interfaces.MemoryService) *SearchMemoryTo
 func (t *SearchMemoryTool) Execute(
 	ctx context.Context, args json.RawMessage,
 ) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var input SearchMemoryInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		return &types.ToolResult{

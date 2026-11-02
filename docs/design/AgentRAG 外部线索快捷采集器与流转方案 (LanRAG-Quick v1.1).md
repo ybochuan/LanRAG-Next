@@ -1,5 +1,9 @@
 # AgentRAG 外部线索快捷采集器与流转方案 (LanRAG-Quick v1.1)
 
+> **状态：已废弃（Superseded），勿据此实施。**
+> 本文 §3 的采集主路径会在人工审批之前把内容写入目标知识库并被索引（`internal/application/service/knowledge_create.go:412-427,485`），与"审批准入"语义直接冲突；另有 `ext_feedback_staging` 等不存在于仓库的引用。
+> 实现依据改见：`AgentRAG 外部线索快捷采集器与流转方案 (LanRAG-Quick v1.2).md`。本文仅作历史记录保留，内容未修改。
+
 ## 1. 定位与目标
 
 构建一个常驻桌面的极简采集工具。通过快捷键或右键菜单抓取外部网页、本地文件或文本片段，作为“外部线索 (Clue)”进入治理流水线。

@@ -1,0 +1,30 @@
+[RUN] M0 E2E 20261030-211107 Asia/Shanghai
+[SCOPE] Real core + real Extension Host; local model fixture; isolated DB backup; no Bridge 200 stub
+[PREFLIGHT] Gate text present in compiled core; 8080 and 8090 unoccupied
+[DB] Consistent SQLite backup created; original database will not be written
+[UI] GET / HTTP 200 with explicit WEKNORA_WEB_DIR; API authentication remains enabled
+[AUTH] Anonymous /auth/me HTTP 401 (expected 401; RBAC=false does not disable authentication)
+[AUTH] Anonymous auto-setup HTTP 403 (standard edition rejects it; Lite requires a desktop capability)
+[AUTH] Public registration 201; login 200; authenticated /auth/me 200; credential=[REDACTED]
+[FIXTURE] Native APIs created chat/embedding models, KB, completed document and session in isolated DB
+[MODEL] Deterministic local OpenAI-compatible fixture; no external model credentials or charges
+[OFFLINE] RAG HTTP 200; SSE kinds=["agent_query", "complete", "error", "tool_call", "tool_result"]; duration=0.262s; generation_calls=0
+[CORE] 2026-10-30 21:11:12.658 ERROR e2e-016c42c7610a-offline [Bridge] before_retrieve failed, blocking search to prevent policy bypass
+[CORE] 2026-10-30 21:11:12.658 ERROR e2e-016c42c7610a-offline [PIPELINE] stage=Pipeline action=stage_failed description="Extension Bridge before_retrieve failed" duration_ms=2 error_type="bridge_before_retrieve_failed" event="chunk_search_parallel"
+[CORE] 2026-10-30 21:11:12.658 ERROR e2e-016c42c7610a-offline 发生错误 error=call before_retrieve: Post "http://127.0.0.1:8090/bridge/before-retrieve": dial tcp 127.0.0.1:8090: connect: connection refused session_id=ed8b616c-cd79-4af4-9a73-58dbceaad899
+[CORE] 2026-10-30 21:11:12.658 ERROR e2e-016c42c7610a-offline 发生错误 error=call before_retrieve: Post "http://127.0.0.1:8090/bridge/before-retrieve": dial tcp 127.0.0.1:8090: connect: connection refused
+[OFFLINE] PASS: correlated Bridge refusal; no answer generation
+[HOST] Started actual go run ./cmd/extension-host; healthz 200; no 200 Bridge stub
+[ONLINE] RAG HTTP 200; SSE kinds=["agent_query", "complete", "error", "tool_call", "tool_result"]; duration=0.255s; generation_calls=0
+[CORE] 2026-10-30 21:11:14.175 ERROR e2e-016c42c7610a-online [Bridge] before_retrieve failed, blocking search to prevent policy bypass
+[CORE] 2026-10-30 21:11:14.175 ERROR e2e-016c42c7610a-online [PIPELINE] stage=Pipeline action=stage_failed description="Extension Bridge before_retrieve failed" duration_ms=1 error_type="bridge_before_retrieve_failed" event="chunk_search_parallel"
+[CORE] 2026-10-30 21:11:14.175 ERROR e2e-016c42c7610a-online 发生错误 error=before_retrieve returned HTTP 503 session_id=ed8b616c-cd79-4af4-9a73-58dbceaad899
+[CORE] 2026-10-30 21:11:14.175 ERROR e2e-016c42c7610a-online 发生错误 error=before_retrieve returned HTTP 503
+[HOST] 2026/10/30 21:11:14 host_probe_started
+[HOST] 2026/10/30 21:11:14 bridge_before_retrieve_received
+[ONLINE] Host receipt verified=True; same JWT/session/query/KB/document payload reused
+[ONLINE] FAIL: Host reachable but normal RAG did not complete; a 503 business Hook is not ready
+[CLEANUP] Owned processes stopped; isolated DB/credentials removed; original DB preserved
+[RESULT] AUTH/RAG offline=True; online=False; M0=NOT_ACCEPTED
+[SCOPE] Passing these checks alone would not certify other M0 backlog gates
+[REPORT] /mnt/d/LanRAG-Next/docs/evidence/m0-e2e-2026-10-30.log

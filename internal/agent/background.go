@@ -42,6 +42,9 @@ func (e *AgentEngine) injectBackground(
 	if e.backgroundRun == nil {
 		return 0
 	}
+	if rejectGovernanceReplay(ctx) != nil {
+		return 0
+	}
 	read := e.backgroundRun.RoundStart
 	if beforeFinal {
 		read = e.backgroundRun.BeforeFinal

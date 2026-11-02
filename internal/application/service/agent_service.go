@@ -276,6 +276,11 @@ func (s *agentService) CreateAgentEngine(
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
+	_, owners := knowledgeBaseScopesForPrompt(config)
+	kbInfos, policyErr := governPromptKBInfo(ctx, kbInfos, owners)
+	if policyErr != nil {
+		return nil, policyErr
+	}
 
 	// 4. Resolve system prompt template
 	systemPromptTemplate := ""
@@ -294,11 +299,13 @@ func (s *agentService) CreateAgentEngine(
 	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
 	engine.SetPinnedMentions(
 		pinnedMCP,
-		s.resolvePinnedSkillInfos(config),
+		s.resolvePinnedSkillInfos(ctx, config),
 	)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
-	engine.SetPageContext(s.resolvePageContextInfo(
-		ctx, config.PageContext, config.SearchTargets, kbInfos, config.OperationsAgentID != ""))
+	if rejectUnattributed(ctx) == nil {
+		engine.SetPageContext(s.resolvePageContextInfo(
+			ctx, config.PageContext, config.SearchTargets, kbInfos, config.OperationsAgentID != ""))
+	}
 	engine.SetAssistantName(config.AssistantName)
 
 	// Non-vision chat models use the configured VLM to describe tool images.
@@ -422,6 +429,11 @@ func (s *agentService) registerMCPTools(
 	toolRegistry *tools.ToolRegistry,
 	config *types.AgentConfig,
 ) {
+	// Catalog summaries and discovered schemas are model-visible inputs too.
+	// Opaque external services have no trusted source proof in this phase.
+	if rejectUnattributed(ctx) != nil {
+		return
+	}
 	tenantID := uint64(0)
 	if tid, ok := types.TenantIDFromContext(ctx); ok {
 		tenantID = tid
@@ -2070,6 +2082,10 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 		return nil, fmt.Errorf("failed to get knowledge batch: %w", err)
 	}
 
+	knowledges, err = filterGovernedKnowledge(ctx, knowledges)
+	if err != nil {
+		return nil, err
+	}
 	// Build map for quick lookup
 	knowledgeMap := make(map[string]*types.Knowledge)
 	for _, k := range knowledges {
@@ -2106,6 +2122,9 @@ func (s *agentService) resolvePinnedMCPServiceInfos(
 	ctx context.Context,
 	config *types.AgentConfig,
 ) []*agent.PinnedMCPServiceInfo {
+	if rejectUnattributed(ctx) != nil {
+		return nil
+	}
 	if len(config.PinnedMCPServiceIDs) == 0 || s.mcpServiceService == nil {
 		return nil
 	}
@@ -2174,7 +2193,10 @@ func fallbackPinnedMCPInfos(ids []string) []*agent.PinnedMCPServiceInfo {
 	return result
 }
 
-func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*agent.PinnedSkillInfo {
+func (s *agentService) resolvePinnedSkillInfos(ctx context.Context, config *types.AgentConfig) []*agent.PinnedSkillInfo {
+	if rejectUnattributed(ctx) != nil {
+		return nil
+	}
 	if len(config.PinnedSkillNames) == 0 {
 		return nil
 	}

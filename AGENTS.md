@@ -67,3 +67,18 @@
 8. 投影不是事实源；投影失败不得改变 lifecycle / lineage / governance 的 truth。独立解析代理已由用户明确放到后续阶段，不能混入M0或重写原生解析器。
 9. MCP 使用上游原生按需发现；禁止为了挂载扩展重构 `ToolRegistry` 或启用 stdio。mDNS 广播不包含知识库 ID、名称或领域；跨库语义关联需用户明确确认。
 10. 不在输出、日志或提交中暴露 `.env`、token、密钥及用户数据。不擅自删除原件、迁移真实数据、执行破坏性命令或提交／推送；保留用户已有改动。
+
+## 6. M2真实策略接管（2026-10-31用户新增授权）
+
+1. M0默认透传决定保留为历史验收；当前Host worker必须使用持久DB策略，probe无业务DB时before_retrieve返回503，不得回退Pass-Through。未有生命周期记录或任意非active文档均排除。
+2. 原生before_retrieve仍固定回环、500ms、非200/传输/响应解码失败一律fail-closed；必须验证响应trace/tenant/KB和允许/排除集合为原授权范围的完整分割。deny_all不得进入检索或回退whole-KB。
+3. 用户批准的原生补丁范围是Bridge DTO解析和SearchParallel结果过滤；过滤chunk/entity合并结果，显式排除优先，普通文档还必须属于返回允许集；原生WebSearch类型结果保留。不得据此宣称Agent直接读、旧handle、图谱独立入口或生成过程中停用已受控。
+4. pending/scheduled/active超过effective_until可直接stale；completed观察按日期初始化pending后active/scheduled/stale，不复活已有失效状态。scheduled到期激活必须在同一决策事务内确认最新持久观察为completed，缺失/failed/processing拒绝；不限制过期转stale。每日任务启动先补扫、默认间隔24h，取消时join后再关DB。
+
+## 7. M2 模型来源治理（2026-11-01 用户授权补充）
+
+1. 用户已扩围批准摘要、Agent search/read/list/schema/analysis、原生MCP文档读取的薄校验；第6.3条“Agent未接入”属于此前批次边界。新入口必须先保留原生权限约束，再通过现有before_retrieve协议获取许可，禁止把原生范围扩成whole-KB。
+2. 文档正文、标题、描述进入工具结果、重排或模型上下文前应服从当前active许可；协议仍固定回环、500ms、严格响应校验、失败关闭。不可使用测试放行夹具启动生产服务。
+3. 用户接受M2拒绝无完整来源的历史回答/压缩/恢复、Wiki/图谱混合内容。原生页面快照、旧答案来源记忆背景、任意SQL/会话检索、通用操作及不透明外部MCP结果按此拒绝或省略；存储不删除。恢复能力须先补齐来源链并验证撤销。
+4. 不宣称普通REST管理、已签发资源权限、显式复制到工作区/文件/记忆的副本、用户附件或生成过程中的持续撤销已受控。测试须区分当前来源门禁与内容级删除。
+5. 回归运行 `python3 extensions/scripts/governance_e2e.py`（8090需空闲，或按运维文档使用隔离网络空间）；检查active正向、真实stale迁移、同会话/已知ID负向、断Host答案生成零次。模型夹具必须捕获所有请求与重排输入，正文/描述/旧答案标记独立，不能只检查最终答案。

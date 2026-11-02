@@ -9120,6 +9120,8 @@ export default {
     }
   },
   menu: {
+    lifecycle: 'Жизненный цикл',
+    modelSupervisor: 'Процессы моделей',
     sessionInProgress: 'Диалог выполняется',
     sessionUnread: 'Новый ответ',
     knowledgeBase: 'База знаний',

@@ -1,0 +1,18 @@
+[SCOPE] Real patched core + real worker Host; isolated SQLite; local model fixture; original user documents untouched
+[RAG-ACTIVE] PASS: active document body reached actual generation prompt
+[PROVENANCE-RAG] PASS: native identity and actual model call persisted by real worker Host
+[RAG-FALLBACK-ACTIVE] PASS: independent description canary reached actual empty-search fallback prompt
+[AGENT-SEARCH-ACTIVE] PASS: real tool ran and permitted source reached actual follow-up prompt
+[AGENT-READ-ACTIVE] PASS: real tool ran and permitted source reached actual follow-up prompt
+[AGENT-LIST-ACTIVE] PASS: real tool ran and permitted source reached actual follow-up prompt
+[PROVENANCE-AGENT] PASS: actual native execution sealed; real fields verified against native source snapshots; unsupported composition remains unattributed; FK check clean
+[LIFECYCLE] PASS: real startup sweep active -> stale from annotation input
+[RAG-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[RAG-FALLBACK-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[AGENT-SEARCH-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[AGENT-READ-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[AGENT-LIST-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[PROVENANCE-TERMINAL] PASS: finished requests leave no open run
+[RAG-OFFLINE] PASS: Host unavailable; answer_generation_calls=0; no governed source content in query-understanding requests
+[AGENT-SEARCH-OFFLINE] PASS: Host unavailable; answer_generation_calls=0; no governed source content in query-understanding requests
+[RESULT] Governance leak E2E PASS; exit=0; local fixtures only, no cloud model claim

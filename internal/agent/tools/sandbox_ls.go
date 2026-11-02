@@ -129,6 +129,10 @@ const hostListSandboxFilesDescription = "List files in %s. Relative paths resolv
 // Execute enumerates files under the requested path inside the current
 // session's sandbox.
 func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
+
 	logger.Infof(ctx, "[Tool][ListSandboxFiles] Execute started")
 
 	var input ListSandboxFilesInput

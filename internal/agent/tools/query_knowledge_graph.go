@@ -225,6 +225,9 @@ func NewQueryKnowledgeGraphTool(
 
 // Execute performs the knowledge graph query with concurrent KB processing
 func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	// Parse args from json.RawMessage
 	var input QueryKnowledgeGraphInput
 	if err := json.Unmarshal(args, &input); err != nil {

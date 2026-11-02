@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -48,6 +49,12 @@ func (s *sessionService) AgentQA(
 	req *types.QARequest,
 	eventBus *event.EventBus,
 ) error {
+	if req.Resume != nil {
+		if err := rejectUnattributed(ctx); err != nil {
+			return err
+		}
+	}
+
 	sessionID := req.Session.ID
 	if req.Session.Kind == types.SessionKindAgentDelegated {
 		b := collaboration.FromContext(ctx)
@@ -219,7 +226,7 @@ func (s *sessionService) AgentQA(
 	// canonical assistant message. History is sized by the window, not by a
 	// turn count: compaction and its persisted checkpoints keep it in bounds.
 	var llmContext []chat.Message
-	if agentConfig.MultiTurnEnabled {
+	if agentConfig.MultiTurnEnabled && rejectUnattributed(ctx) == nil {
 		budget := agent.HistoryTokenBudget(agentConfig)
 		llmContext, agentConfig.ContextTokenScale, err = LoadAgentHistory(
 			ctx, s.messageRepo, sessionID, budget, agentConfig.RetainRetrievalHistory,
@@ -305,6 +312,11 @@ func (s *sessionService) AgentQA(
 	})
 
 	// Create agent engine with EventBus
+	if sourceCtx, sourceErr := extensionbridge.BeginSourceRunForTargets(ctx, types.SessionOwnerIDFromContext(ctx), sessionID, req.AssistantMessageID, agentConfig.SearchTargets); sourceErr == nil {
+		ctx = sourceCtx
+	} else if len(agentConfig.SearchTargets) != 0 {
+		logger.Warn(ctx, "[Bridge] source run unavailable; derived copies remain unreadable")
+	}
 	logger.Info(ctx, "Creating agent engine")
 	engine, err := s.agentService.CreateAgentEngine(
 		ctx,
@@ -323,7 +335,7 @@ func (s *sessionService) AgentQA(
 	// Recall long-term memory for this turn. Like the RAG path this is a
 	// no-model read, and an agent may opt out of it entirely.
 	memoryCtx := types.ApplyAgentMemoryPreference(ctx, agentConfig.MemoryEnabled)
-	if s.memoryService != nil {
+	if s.memoryService != nil && rejectUnattributed(ctx) == nil {
 		recall := s.memoryService.Recall(memoryCtx, req.Query)
 		if recall.Prompt != "" {
 			engine.SetMemoryPrompt(recall.Prompt)
@@ -415,11 +427,18 @@ func (s *sessionService) AgentQA(
 	// Execute agent with streaming (asynchronously)
 	// Events will be emitted to EventBus and handled by the Handler layer
 	logger.Info(ctx, "Executing agent with streaming")
+	var sourceState *types.AgentState
 	if req.Resume != nil {
-		_, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext,
+		sourceState, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext,
 			req.Resume.Snapshot, req.Resume.Prompt)
 	} else {
-		_, err = engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
+		sourceState, err = engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
+	}
+	if _, tracked := extensionbridge.SourceRunFromContext(ctx); tracked {
+		if extensionbridge.FinishSourceRun(context.WithoutCancel(ctx), err != nil || sourceState == nil || !sourceState.IsComplete) != nil {
+			logger.Warn(ctx, "[Bridge] Agent run not sealed")
+			_ = extensionbridge.FinishSourceRun(context.WithoutCancel(ctx), true)
+		}
 	}
 	if err != nil {
 		logger.Errorf(ctx, "Agent execution failed: %v", err)

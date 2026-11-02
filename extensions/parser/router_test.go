@@ -6,7 +6,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/parser"
 )
 
-func TestDecidePDFUsesFrozenPageRules(t *testing.T) {
+func TestDecideRasterUsesFrozenPageRules(t *testing.T) {
 	tests := []struct {
 		name string
 		page parser.PageSignals
@@ -29,7 +29,7 @@ func TestDecidePDFUsesFrozenPageRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := parser.Decide("pdf", []parser.PageSignals{tt.page})
+			got, err := parser.Decide("png", []parser.PageSignals{tt.page})
 			want := parser.Decision{Path: "mineru", Tier: parser.Tier(tt.tier)}
 			if err != nil || got != want {
 				t.Fatalf("Decide = %+v, %v; want %+v", got, err, want)
@@ -52,7 +52,7 @@ func TestDecideKeepsOCRAndDenseLayoutOnTheSamePage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := parser.Decide("pdf", tt.pages)
+			got, err := parser.Decide("png", tt.pages)
 			if err != nil || got.Path != "mineru" || string(got.Tier) != tt.tier {
 				t.Fatalf("Decide = %+v, %v; want mineru/%s", got, err, tt.tier)
 			}
@@ -75,7 +75,7 @@ func TestDecideReviewsOnlyWhenSparsePagesExceedHalf(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := parser.Decide("pdf", tt.pages)
+			got, err := parser.Decide("png", tt.pages)
 			if err != nil || got.ReviewRequired != tt.review || string(got.Tier) != tt.tier {
 				t.Fatalf("Decide = %+v, %v; want tier=%s review=%v", got, err, tt.tier, tt.review)
 			}

@@ -295,6 +295,11 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	if modeErr != "" {
 		return &types.ToolResult{Success: false, Error: modeErr}, nil
 	}
+	if mode == writeModeAppend {
+		if err := rejectUnattributed(ctx); err != nil {
+			return blockedKnowledgeResult(err)
+		}
+	}
 
 	// Held across the read and the write: an append that reads its base while
 	// a sibling call is mid-write appends to bytes that no longer exist.

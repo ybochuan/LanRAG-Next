@@ -74,6 +74,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
 		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
 		kbRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
+		kbRead.GET("/:document_id/source-snapshot", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionSourceSnapshot)
 		// 原始文件下载沿用单文件下载的 Contributor + Editor 权限边界。
 		kbRead.POST("/batch-download", g.Contributor(), g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)
 		kbRead.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
@@ -224,6 +225,17 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	// 空 allow-list 的 key 则是全租户 KB 管理、新建天然在范围内。KB 内容写入（文档/
 	// 分块/FAQ/Tag/Wiki）由对应子路由的 ingest 能力控制，不在本组。
 	kbgrp := r.Group("/knowledge-bases")
+	// Intentionally JWT-only: no API-key policy is registered for these management routes.
+	kbgrp.GET("/:id/lifecycle", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.GET("/:id/lifecycle/documents/:document_id", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.GET("/:id/lifecycle/documents/:document_id/supplements", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.PUT("/:id/lifecycle/documents/:document_id/supplements", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)
+	kbgrp.PUT("/:id/lifecycle/documents/:document_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)
+	kbgrp.GET("/:id/lifecycle/rules", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.PUT("/:id/lifecycle/rules", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)
+	kbgrp.GET("/:id/lifecycle/reviews", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.GET("/:id/lifecycle/business/:business_action", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.PUT("/:id/lifecycle/business/:business_action", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
 	kbManagement := kb.With(apiKeyManageKnowledgeBases(apiKeyFullAccess()))
 	{

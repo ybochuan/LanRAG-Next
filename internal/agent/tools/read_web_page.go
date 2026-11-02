@@ -9,6 +9,10 @@ import (
 )
 
 func (t *ReadFileTool) readWebPage(ctx context.Context, input ReadFileInput) *types.ToolResult {
+	if err := rejectUnattributed(ctx); err != nil {
+		result, _ := blockedKnowledgeResult(err)
+		return result
+	}
 	if input.Offset < 0 || input.LineOffset < 0 || input.Limit < 0 || input.MaxBytes < 0 {
 		return &types.ToolResult{Success: false, Error: "read offsets and limits must be non-negative"}
 	}

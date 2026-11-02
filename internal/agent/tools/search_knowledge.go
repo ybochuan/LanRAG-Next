@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/reranking"
@@ -268,11 +269,18 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		return &types.ToolResult{Success: false, Output: msg, Error: msg}, nil
 	}
 
+	allResults, err = filterGovernedSearchResults(ctx, searchTargets, t.knowledgeService, allResults)
+	if err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	deduplicated := t.deduplicateResultsForRerank(allResults)
 
 	ranked := deduplicated
 	rerankRejected := 0
 	if t.rerankModel != nil && len(deduplicated) > 0 {
+		if err := extensionbridge.CaptureSourceInputs(ctx, nil, false); err != nil {
+			return blockedKnowledgeResult(err)
+		}
 		reranked, err := t.rerankResults(ctx, query, deduplicated, mode == SearchModeKeyword)
 		if err != nil {
 			logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank failed, using retrieval order: %v", err)
@@ -334,6 +342,12 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		result.Data["omitted_for_budget"] = omitted
 	}
 	t.attachContextImages(ctx, result, final[:len(final)-omitted])
+	if t.rerankModel == nil {
+		inputs, known := searchSourceInputs(final[:len(final)-omitted])
+		if err := extensionbridge.CaptureSourceInputs(ctx, inputs, known); err != nil {
+			return blockedKnowledgeResult(err)
+		}
+	}
 	if len(searchFailures) > 0 {
 		result.Data["partial_failures"] = searchFailures
 	}

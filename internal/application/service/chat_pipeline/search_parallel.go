@@ -101,7 +101,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	}
 
 	requestID, _ := types.RequestIDFromContext(ctx)
-	if err := extensionbridge.BeforeRetrieve(ctx, map[string]any{
+	decision, err := extensionbridge.BeforeRetrieve(ctx, map[string]any{
 		"request_id":         requestID,
 		"session_id":         chatManage.SessionID,
 		"mode":               "rag",
@@ -110,13 +110,18 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		"knowledge_ids":      chatManage.KnowledgeIDs,
 		"original_query":     chatManage.Query,
 		"rewritten_query":    chatManage.RewriteQuery,
-	}); err != nil {
+	})
+	if err != nil {
 		logger.Error(ctx, "[Bridge] before_retrieve failed, blocking search to prevent policy bypass")
 		return &PluginError{
 			Err:         err,
 			Description: "Extension Bridge before_retrieve failed",
 			ErrorType:   "bridge_before_retrieve_failed",
 		}
+	}
+	if decision.DenyAll {
+		chatManage.SearchResult = nil
+		return ErrSearchNothing
 	}
 
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
@@ -175,6 +180,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	// Merge results from both searches
 	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
+	chatManage.SearchResult = filterBridgeResults(chatManage.SearchResult, decision.KnowledgeIDs, decision.ExcludedDocumentIDs)
 
 	for name, err := range errs {
 		logger.Warnf(ctx, "[SearchParallel] %s error: %v", name, err.Err)
@@ -196,4 +202,23 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	}
 
 	return next()
+}
+
+// Apply the same exclusion to chunk and entity results before any later stage.
+func filterBridgeResults(results []*types.SearchResult, allowedIDs, excludedIDs []string) []*types.SearchResult {
+	allowed := make(map[string]bool, len(allowedIDs))
+	for _, id := range allowedIDs {
+		allowed[id] = true
+	}
+	excluded := make(map[string]bool, len(excludedIDs))
+	for _, id := range excludedIDs {
+		excluded[id] = true
+	}
+	filtered := results[:0]
+	for _, result := range results {
+		if result != nil && !excluded[result.KnowledgeID] && (allowed[result.KnowledgeID] || result.MatchType == types.MatchTypeWebSearch) {
+			filtered = append(filtered, result)
+		}
+	}
+	return filtered
 }

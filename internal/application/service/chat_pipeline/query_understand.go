@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"regexp"
 	"strings"
 
@@ -340,6 +341,9 @@ func (p *PluginQueryUnderstand) buildPrompts(
 // excludes no knowledge base: a stale note about last quarter's project must
 // not be able to make this quarter's documents unreachable.
 func (p *PluginQueryUnderstand) memoryBackground(ctx context.Context, chatManage *types.ChatManage) string {
+	if extensionbridge.RejectUnattributed(ctx) != nil {
+		return ""
+	}
 	if p.memoryService == nil {
 		return ""
 	}

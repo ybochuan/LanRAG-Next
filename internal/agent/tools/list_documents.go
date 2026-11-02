@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"sort"
 	"strings"
 
@@ -110,6 +111,20 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 	filtered, total, err := t.listScoped(ctx, kbID, keyword, page, pageSize)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to list documents: %v", err)}, err
+	}
+
+	policyTenant := t.searchTargets.GetTenantIDForKB(kbID)
+	if policyTenant == 0 {
+		policyTenant, _ = types.TenantIDFromContext(ctx)
+	}
+	filtered, err = filterGovernedDocuments(ctx, policyTenant, kbID, filtered)
+	if err != nil {
+		return blockedKnowledgeResult(err)
+	}
+	// updated_at is exposed by the native formatter but is deliberately absent
+	// from v1 source snapshots. Preserve listing; do not assert a complete proof.
+	if err := extensionbridge.CaptureSourceInputs(ctx, nil, false); err != nil {
+		return blockedKnowledgeResult(err)
 	}
 
 	documents := make([]map[string]interface{}, 0, len(filtered))

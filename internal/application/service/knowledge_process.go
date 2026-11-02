@@ -4370,10 +4370,21 @@ func (s *knowledgeService) convert(
 		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
 	}
 
+	proxyAddr := docparser.ParserProxyAddress(fileType, isURL)
+	if proxyAddr != "" {
+		parserEngine = docparser.MinerUEngineName
+	}
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
 
-	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, mergedOverrides)
+	var reader interfaces.DocReader
+	if proxyAddr != "" {
+		reader = docparser.NewParserProxyReader(proxyAddr, docparser.ParserProxyIdentity{
+			TenantID: knowledge.TenantID, KBID: knowledge.KnowledgeBaseID, DocID: knowledge.ID,
+		}, mergedOverrides)
+	} else {
+		reader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, mergedOverrides)
+	}
 	if reader == nil {
 		logger.Errorf(ctx, "[convert] no doc reader for kb=%s knowledge=%s fileType=%s engine=%q isURL=%v",
 			kb.ID, knowledge.ID, fileType, parserEngine, isURL)

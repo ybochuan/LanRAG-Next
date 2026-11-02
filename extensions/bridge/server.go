@@ -2,6 +2,7 @@
 package bridge
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -10,10 +11,13 @@ import (
 // Address restricts the Extension Host listener to the local IPv4 loopback.
 const Address = "127.0.0.1:8090"
 
-// Services explicitly enables individual typed hooks; zero values reject.
-// Readiness remains unavailable until the full business boundary is connected.
+// Services explicitly enables individual typed hooks and optional local
+// readiness; zero values reject business requests and readiness checks.
 type Services struct {
-	BeforeRetrieve *RetrieveHandler
+	Ready             func(context.Context) bool // Local DB/services only; never depends on Core availability.
+	BeforeRetrieve    *RetrieveHandler
+	Parser            http.Handler  // Optional identity-bearing V1 parser; disabled unless configured.
+	ParserReadTimeout time.Duration // Zero uses 1000s; applies only to the parser body.
 }
 
 // NewServer constructs the protocol foundation without business services.
@@ -24,15 +28,37 @@ func NewServer() *http.Server {
 // NewServerWithServices configures typed hooks without implying full readiness.
 func NewServerWithServices(services Services) *http.Server {
 	mux := http.NewServeMux()
+	if services.Parser != nil {
+		mux.Handle("/parser/native/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			budget := services.ParserReadTimeout
+			if budget <= 0 {
+				budget = 1000 * time.Second
+			}
+			controller := http.NewResponseController(w)
+			// ReadHeaderTimeout and all Bridge routes keep their original 5s bound.
+			_ = controller.SetReadDeadline(time.Now().Add(budget))
+			defer controller.SetReadDeadline(time.Time{})
+			services.Parser.ServeHTTP(w, r)
+		}))
+	}
 	health := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("{\"status\":\"ok\"}\n"))
 	}
 	mux.HandleFunc("GET /bridge/healthz", health)
 	mux.HandleFunc("GET /healthz", health)
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusServiceUnavailable, "not_ready")
-	})
+	ready := func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 200*time.Millisecond)
+		defer cancel()
+		if services.Ready == nil || !services.Ready(ctx) {
+			writeError(w, http.StatusServiceUnavailable, "not_ready")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"status\":\"ready\",\"scope\":\"local\"}\n"))
+	}
+	mux.HandleFunc("GET /readyz", ready)
+	mux.HandleFunc("GET /health", ready)
 	for _, path := range []string{
 		"/bridge/before-retrieve",
 		"/bridge/after-retrieve",

@@ -98,6 +98,8 @@ const router = createRouter({
       component: () => import("../views/platform/index.vue"),
       meta: { requiresInit: true, requiresAuth: true },
       children: [
+        { path: "lifecycle", name: "lifecycle", component: () => import("../views/lifecycle/LifecycleView.vue"), meta: { requiresInit: true, requiresAuth: true } },
+        { path: "model-supervisor", name: "model-supervisor", component: () => import("../views/model-supervisor/ModelSupervisorView.vue"), meta: { requiresInit: true, requiresAuth: true } },
         {
           path: "tenant",
           redirect: "/platform/settings"

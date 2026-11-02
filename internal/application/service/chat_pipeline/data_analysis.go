@@ -65,6 +65,9 @@ func (p *PluginDataAnalysis) OnEvent(
 	if !chatManage.NeedsRetrieval() {
 		return next()
 	}
+	if err := guardPromptResults(ctx, chatManage); err != nil {
+		return &PluginError{Err: err, Description: "Extension Bridge data-analysis policy failed", ErrorType: "bridge_data_policy_failed"}
+	}
 	// 1. Check if there are any CSV/Excel files in MergeResult
 	var dataFiles []*types.SearchResult
 	for _, result := range chatManage.MergeResult {

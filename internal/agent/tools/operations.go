@@ -343,6 +343,9 @@ func parseRunOperationInput(args json.RawMessage) (runOperationInput, error) {
 // Execute runs one catalog operation as the user, asking for confirmation
 // first when the access level requires it.
 func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	input, err := parseRunOperationInput(args)
 	if err != nil {
 		return operationFailure(err.Error()), nil
@@ -684,6 +687,9 @@ func (t *RunOperationTool) readTarget(
 	params map[string]json.RawMessage,
 	identity operations.Identity,
 ) (operations.Projected, *types.ToolResult) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return operations.Projected{}, operationFailure(err.Error())
+	}
 	target, ok := t.rt.Catalog.Get(targetID)
 	if !ok {
 		return operations.Projected{}, operationFailure(fmt.Sprintf("%s is misconfigured", op.ID))

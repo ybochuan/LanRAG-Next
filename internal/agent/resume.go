@@ -6,10 +6,13 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+var rejectGovernanceReplay = extensionbridge.RejectUnattributed
 
 // Resume continues a run that was suspended on a prompt, now answered. It
 // rebuilds the transcript from the snapshot, finishes the interrupted round
@@ -22,6 +25,10 @@ func (e *AgentEngine) Resume(
 	snapshot []byte,
 	answered *types.AgentPrompt,
 ) (*types.AgentState, error) {
+	if err := rejectGovernanceReplay(ctx); err != nil {
+		return nil, err
+	}
+
 	snap, err := DecodeRunSnapshot(snapshot)
 	if err != nil {
 		return nil, err

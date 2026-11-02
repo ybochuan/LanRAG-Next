@@ -51,7 +51,7 @@ func waitCode(t *testing.T, codes <-chan string, want string) {
 	}
 }
 
-func TestProbeServesRealLoopbackWithDefaultPassThrough(t *testing.T) {
+func TestProbeServesHealthButRefusesRetrievalWithoutDatabase(t *testing.T) {
 	cfg, err := LoadConfig(envReader(nil))
 	if err != nil {
 		t.Fatal(err)
@@ -87,9 +87,6 @@ func TestProbeServesRealLoopbackWithDefaultPassThrough(t *testing.T) {
 		if path == "/healthz" || path == "/bridge/healthz" {
 			want = 200
 		}
-		if path == "/bridge/before-retrieve" {
-			want = 400 // Empty HTTP body is malformed, even in pass-through mode.
-		}
 		if response.StatusCode != want || strings.Contains(string(body), "API") {
 			t.Fatalf("%s status=%d body=%s", path, response.StatusCode, body)
 		}
@@ -110,8 +107,8 @@ func TestProbeServesRealLoopbackWithDefaultPassThrough(t *testing.T) {
 	}
 	err = json.NewDecoder(response.Body).Decode(&selection)
 	response.Body.Close()
-	if err != nil || response.StatusCode != 200 || selection.DenyAll || len(selection.KnowledgeIDs) != 1 || selection.KnowledgeIDs[0] != "doc-a" {
-		t.Fatalf("Host default pass-through unavailable: status=%d selection=%+v error=%v", response.StatusCode, selection, err)
+	if err != nil || response.StatusCode != 503 {
+		t.Fatalf("Host without governance database permitted retrieval: status=%d error=%v", response.StatusCode, err)
 	}
 	cancel()
 	if err := <-done; err != nil {

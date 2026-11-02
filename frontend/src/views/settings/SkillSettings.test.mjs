@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const source = readFileSync(new URL('./SkillSettings.vue', import.meta.url), 'utf8')
+const source = readFileSync(new URL('./SkillSettings.vue', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 test('skill settings lists the catalog instead of switching sandboxes', () => {
   assert.match(source, /listSkillCatalog/)

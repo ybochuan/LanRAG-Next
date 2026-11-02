@@ -115,6 +115,7 @@ func TestDataSourceReplacementPreservesOldResourcesOnFailure(t *testing.T) {
 }
 
 func TestDataSourceReplacementCommitsBeforeEnqueueAndCleanup(t *testing.T) {
+	withSSRFWhitelist(t, "example.com")
 	for _, kind := range []string{"file", "url", "file_url"} {
 		t.Run(kind, func(t *testing.T) {
 			h, _, chunks, queue := datasourceReplacementFixture(t)

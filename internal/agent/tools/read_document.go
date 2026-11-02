@@ -160,6 +160,10 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
 
+	if err := requireGovernedDocument(ctx, knowledge); err != nil {
+		return blockedKnowledgeResult(err)
+	}
+
 	var matchers []*regexp.Regexp
 	switch {
 	case query == "":
@@ -331,6 +335,9 @@ func (t *ReadDocumentTool) readPage(
 		rows = append(rows, readChunkRow{chunk: c})
 	}
 	data := t.buildData(knowledge, total, rows)
+	if err := captureDocumentSource(ctx, knowledge, rows); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	data["offset"] = offset
 	data["page_size"] = limit
 	data["page"] = offset/limit + 1
@@ -387,6 +394,9 @@ func (t *ReadDocumentTool) readAroundChunk(
 	enrichChunkImageInfo(ctx, t.chunkService.GetRepository(), t.tenantFor(knowledge), chunks)
 
 	data := t.buildData(knowledge, total, rows)
+	if err := captureDocumentSource(ctx, knowledge, rows); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	data["single_chunk"] = len(rows) == 1
 	data["focus_chunk_id"] = focus.ID
 	if q := faqStandardQuestion(focus); q != "" {
@@ -482,6 +492,9 @@ scan:
 	}
 
 	data := t.buildData(knowledge, total, rows)
+	if err := captureDocumentSource(ctx, knowledge, rows); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	data["query"] = query
 	data["match_count"] = matchCount
 	data["truncated"] = truncated

@@ -2,12 +2,51 @@ package bridge_test
 
 import (
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/bridge"
 )
+
+func TestParserSlowUploadDoesNotInheritBridgeFiveSecondDeadline(t *testing.T) {
+	server := bridge.NewServerWithServices(bridge.Services{Parser: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		w.WriteHeader(204)
+	})})
+	if server.ReadTimeout != 5*time.Second {
+		t.Fatal("M0 deadline changed")
+	}
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(l) }()
+	t.Cleanup(func() { server.Close(); <-done })
+	reader, writer := io.Pipe()
+	go func() {
+		defer writer.Close()
+		_, _ = writer.Write([]byte("start"))
+		time.Sleep(5200 * time.Millisecond)
+		_, _ = writer.Write([]byte("end"))
+	}()
+	client := &http.Client{Timeout: 8 * time.Second}
+	response, err := client.Post("http://"+l.Addr().String()+"/parser/native/v1/uploads/test/content", "application/octet-stream", reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 204 {
+		t.Fatalf("slow parser upload HTTP %d", response.StatusCode)
+	}
+}
 
 func TestBridgeHealthAndReadiness(t *testing.T) {
 	server := httptest.NewServer(bridge.NewServer().Handler)

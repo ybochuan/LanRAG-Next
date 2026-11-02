@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -98,8 +99,15 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
+	inputs, complete := sourceInputsForModel(chatManage)
+	ctx, sourceCall, err := extensionbridge.BeginSourceCall(ctx, "model", struct{ Messages, Options any }{chatMessages, opt}, inputs, complete)
+	if err != nil {
+		finishSourceModelRun(ctx, nil, false)
+		return ErrModelCall.WithError(err)
+	}
 	responseChan, err := chatModel.ChatStream(ctx, chatMessages, opt)
 	if err != nil {
+		finishSourceModelRun(ctx, sourceCall, false)
 		pipelineError(ctx, "Stream", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
 			"error":      err.Error(),
@@ -107,6 +115,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		return ErrModelCall.WithError(err)
 	}
 	if responseChan == nil {
+		finishSourceModelRun(ctx, sourceCall, false)
 		pipelineError(ctx, "Stream", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
 			"error":      "nil_channel",
@@ -131,6 +140,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingOpen := false
 		answerCompleted := false
 		answerProduced := false
+		sourceSucceeded, sourceFailed := false, false
+		defer func() { finishSourceModelRun(ctx, sourceCall, sourceSucceeded && !sourceFailed) }()
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -185,6 +196,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 			case response, ok := <-responseChan:
 				if !ok {
+					sourceSucceeded = answerCompleted
 					flushDecoders()
 					closeThinking()
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
@@ -192,6 +204,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					})
 					return
 				}
+				sourceCall.Record(response)
 
 				// A stream that stopped without a finish reason is a broken
 				// one, not a short answer: report it the way a read error is
@@ -202,6 +215,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					response.Content = types.StreamEndedEarlyError
 				}
 				if response.ResponseType == types.ResponseTypeError {
+					sourceFailed = true
 					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
 						"session_id": chatManage.SessionID,
 						"error":      response.Content,

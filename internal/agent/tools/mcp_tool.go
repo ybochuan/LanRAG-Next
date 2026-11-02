@@ -144,6 +144,9 @@ func (t *MCPTool) callToolTimeout(engineTimeout time.Duration) time.Duration {
 
 // Execute executes the MCP tool
 func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	logger.GetLogger(ctx).Infof("Executing MCP tool: %s from service: %s", t.mcpTool.Name, t.service.Name)
 
 	// Re-check the policy at call time as well as during registration. An agent

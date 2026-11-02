@@ -23,15 +23,15 @@ var (
 
 // Scope identifies one document within its tenant and knowledge base.
 type Scope struct {
-	TenantID        uint64
-	KnowledgeBaseID string
-	DocumentID      string
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	DocumentID      string `json:"document_id"`
 }
 
 // Current is the materialized lifecycle fact, reproducible from the event log.
 type Current struct {
-	State       State
-	LastEventID string
+	State       State  `json:"state"`
+	LastEventID string `json:"last_event_id"`
 }
 
 // Store persists lifecycle facts and their projection intent in the extension DB.
@@ -55,6 +55,25 @@ func (scope Scope) args() []any {
 // equivalent canonical retry is a no-op, even after subsequent transitions. State
 // policy belongs to M2: this layer only checks scope, identity and from_state.
 func (s *Store) Append(ctx context.Context, event Event) (bool, error) {
+	return s.appendChecked(ctx, event, nil)
+}
+
+// guard runs within the same transaction, including on an exact event replay.
+func (s *Store) appendChecked(ctx context.Context, event Event, guard func(*sql.Tx, bool) error) (inserted bool, err error) {
+	err = s.db.Write(ctx, func(tx *sql.Tx) error { var e error; inserted, e = appendTxChecked(ctx, tx, event, guard); return e })
+	if err != nil {
+		return false, err
+	}
+	return inserted, nil
+}
+
+// AppendTx joins an existing extension transaction. The caller must commit event,
+// current, outbox and its own governance audit together; this function never commits.
+func AppendTx(ctx context.Context, tx *sql.Tx, event Event) (bool, error) {
+	return appendTxChecked(ctx, tx, event, nil)
+}
+
+func appendTxChecked(ctx context.Context, tx *sql.Tx, event Event, guard func(*sql.Tx, bool) error) (bool, error) {
 	scope := Scope{event.TenantID, event.KnowledgeBaseID, event.DocumentID}
 	if err := scope.validate(); err != nil {
 		return false, err
@@ -68,7 +87,7 @@ func (s *Store) Append(ctx context.Context, event Event) (bool, error) {
 		return false, err
 	}
 	inserted := false
-	err = s.db.Write(ctx, func(tx *sql.Tx) error {
+	err = func() error {
 		query := "SELECT payload_json FROM ext_lifecycle_events WHERE event_id=?"
 		args := []any{event.EventID}
 		if event.SourceEventID != "" {
@@ -99,15 +118,24 @@ func (s *Store) Append(ctx context.Context, event Event) (bool, error) {
 			return err
 		}
 		if duplicate {
+			if guard != nil {
+				return guard(tx, true)
+			}
 			return nil
 		}
 		var from State
-		err = tx.QueryRowContext(ctx, "SELECT state FROM ext_lifecycle_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scope.args()...).Scan(&from)
+		state, _, readErr := store.ReadLifecycleCurrentTx(ctx, tx, scope.TenantID, scope.KnowledgeBaseID, scope.DocumentID)
+		from, err = State(state), readErr
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if event.FromState != from {
 			return ErrStateConflict
+		}
+		if guard != nil {
+			if err := guard(tx, false); err != nil {
+				return err
+			}
 		}
 		var source any
 		if event.SourceEventID != "" {
@@ -140,7 +168,7 @@ func (s *Store) Append(ctx context.Context, event Event) (bool, error) {
 		}
 		inserted = true
 		return nil
-	})
+	}()
 	if err != nil {
 		return false, fmt.Errorf("append lifecycle event: %w", err)
 	}
@@ -154,7 +182,9 @@ func (s *Store) Current(ctx context.Context, scope Scope) (Current, error) {
 		return current, err
 	}
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, "SELECT state,last_event_id FROM ext_lifecycle_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scope.args()...).Scan(&current.State, &current.LastEventID)
+		state, event, e := store.ReadLifecycleCurrentTx(ctx, tx, scope.TenantID, scope.KnowledgeBaseID, scope.DocumentID)
+		current.State, current.LastEventID = State(state), event
+		return e
 	})
 	return current, err
 }

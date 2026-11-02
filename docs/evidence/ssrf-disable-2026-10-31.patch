@@ -1,0 +1,174 @@
+diff --git a/internal/utils/security.go b/internal/utils/security.go
+index fb94fb9..a85ebb9 100644
+--- a/internal/utils/security.go
++++ b/internal/utils/security.go
+@@ -758,7 +758,7 @@ func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request)
+ 			return fmt.Errorf("%w: invalid scheme %s", ErrSSRFRedirectBlocked, redirectScheme)
+ 		}
+ 		redirectHost := req.URL.Hostname()
+-		if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
++		if ssrfDisabled() || (redirectHost != "" && IsSSRFWhitelisted(redirectHost)) {
+ 			return nil
+ 		}
+ 		if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
+@@ -870,7 +870,7 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
+ 	// ValidateURLForSSRF which skips isSSRFSafeURL for whitelisted hosts.
+ 	// NOTE: This intentionally relaxes DNS-rebinding protection for whitelisted
+ 	// hosts. Admins must ensure whitelisted domains are under their control.
+-	if IsSystemProxy(addr) || IsSSRFWhitelisted(host) {
++	if ssrfDisabled() || IsSystemProxy(addr) || IsSSRFWhitelisted(host) {
+ 		dialer := &net.Dialer{
+ 			Timeout:   OutboundDialTimeout(),
+ 			KeepAlive: 30 * time.Second,
+@@ -1230,7 +1230,7 @@ var ErrSSRFHostNotWhitelisted = errors.New("host is not in the SSRF whitelist")
+ // admits everything and the usual checks apply. An IP literal is judged here
+ // too: the URL layer is where "no direct IP" belongs.
+ func CheckSSRFWhitelistOnly(host string) error {
+-	if !SSRFWhitelistOnlyEnabled() || isSSRFWhitelistedByName(host) {
++	if ssrfDisabled() || !SSRFWhitelistOnlyEnabled() || isSSRFWhitelistedByName(host) {
+ 		return nil
+ 	}
+ 	return fmt.Errorf("%w: %s (SSRF_DNS_WHITELIST_ONLY is on; add it to SSRF_WHITELIST to allow it)",
+@@ -1320,6 +1320,11 @@ func parseHostForHint(rawURL string) (string, error) {
+ 	return u.Hostname(), nil
+ }
+ 
++// ssrfDisabled is an explicit local-development override; unset or invalid is off.
++func ssrfDisabled() bool {
++	return strings.EqualFold(strings.TrimSpace(os.Getenv("SSRF_DISABLE")), "true")
++}
++
+ // ValidateURLForSSRF is the centralised entry-point that all handlers should
+ // call to validate a user-supplied URL. It first checks the SSRF_WHITELIST;
+ // whitelisted hosts skip the full isSSRFSafeURL check.
+@@ -1330,6 +1335,9 @@ func parseHostForHint(rawURL string) (string, error) {
+ //
+ // Returns nil when the URL is safe, or an error describing the problem.
+ func ValidateURLForSSRF(rawURL string) error {
++	if ssrfDisabled() {
++		return nil
++	}
+ 	if rawURL == "" {
+ 		return nil // callers that require non-empty should validate separately
+ 	}
+diff --git a/internal/utils/ssrf_outbound_cache.go b/internal/utils/ssrf_outbound_cache.go
+index d7ffdbb..9f3c1c8 100644
+--- a/internal/utils/ssrf_outbound_cache.go
++++ b/internal/utils/ssrf_outbound_cache.go
+@@ -33,7 +33,7 @@ type ssrfOutboundCacheEntry struct {
+ // TTL so high-frequency clients do not repeat DNS lookups on every request.
+ // Handler/input boundaries should keep calling ValidateURLForSSRF directly.
+ func validateURLForSSRFForOutbound(rawURL string) error {
+-	if rawURL == "" {
++	if ssrfDisabled() || rawURL == "" {
+ 		return nil
+ 	}
+ 
+diff --git a/internal/utils/security_disable_test.go b/internal/utils/security_disable_test.go
+new file mode 100644
+index 0000000..d607d7c
+--- /dev/null
++++ b/internal/utils/security_disable_test.go
+@@ -0,0 +1,84 @@
++package utils
++
++import (
++	"context"
++	"io"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++func TestSSRFDisableSwitchAcrossOutboundLayers(t *testing.T) {
++	t.Setenv("SSRF_WHITELIST", "")
++	t.Setenv("SSRF_WHITELIST_EXTRA", "")
++	t.Setenv("SSRF_DNS_WHITELIST_ONLY", "true")
++	t.Setenv("SSRF_DISABLE", "false")
++	ResetSSRFWhitelistForTest()
++	t.Cleanup(ResetSSRFWhitelistForTest)
++
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
++	defer server.Close()
++	client := NewSSRFSafeHTTPClient(DefaultSSRFSafeHTTPClientConfig())
++	defer client.CloseIdleConnections()
++	// Prime the actual outbound rejection cache before enabling the bypass.
++	if err := validateURLForSSRFForOutbound(server.URL); err == nil {
++		t.Fatal("disabled switch unexpectedly bypassed SSRF")
++	}
++	t.Setenv("SSRF_DISABLE", "true")
++	if err := ValidateURLForSSRF("http://unresolved.invalid:6379"); err != nil {
++		t.Fatalf("URL validation still blocked: %v", err)
++	}
++	if err := CheckSSRFWhitelistOnly("unresolved.invalid"); err != nil {
++		t.Fatalf("whitelist-only check still blocked: %v", err)
++	}
++	response, err := client.Get(server.URL)
++	if err != nil {
++		t.Fatalf("cache/transport/dial still blocked local HTTP: %v", err)
++	}
++	response.Body.Close()
++	if response.StatusCode != http.StatusOK {
++		t.Fatal(response.StatusCode)
++	}
++	listener, err := net.Listen("tcp4", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	conn, err := SSRFSafeDialContext(context.Background(), "tcp", listener.Addr().String())
++	if err != nil {
++		t.Fatalf("direct dial still blocked: %v", err)
++	}
++	conn.Close()
++	// Bypassed successes must not poison the enabled-policy cache.
++	for _, value := range []string{"", "false", "yes", "typo"} {
++		t.Setenv("SSRF_DISABLE", value)
++		if err := validateURLForSSRFForOutbound(server.URL); err == nil {
++			t.Fatalf("SSRF_DISABLE=%q permitted outbound URL", value)
++		}
++	}
++}
++
++func TestSSRFDisableAllowsLocalRedirect(t *testing.T) {
++	t.Setenv("SSRF_DISABLE", "true")
++	t.Setenv("SSRF_WHITELIST", "")
++	t.Setenv("SSRF_WHITELIST_EXTRA", "")
++	t.Setenv("SSRF_DNS_WHITELIST_ONLY", "true")
++	ResetSSRFWhitelistForTest()
++	t.Cleanup(ResetSSRFWhitelistForTest)
++	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "redirected") }))
++	defer target.Close()
++	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) }))
++	defer source.Close()
++	client := NewSSRFSafeHTTPClient(DefaultSSRFSafeHTTPClientConfig())
++	defer client.CloseIdleConnections()
++	response, err := client.Get(source.URL)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer response.Body.Close()
++	body, err := io.ReadAll(response.Body)
++	if err != nil || string(body) != "redirected" {
++		t.Fatalf("body=%s error=%v", body, err)
++	}
++}
+diff --git a/PATCHES.md b/PATCHES.md
+new file mode 100644
+index 0000000..c9363a9
+--- /dev/null
++++ b/PATCHES.md
+@@ -0,0 +1,12 @@
++# 原生薄补丁记录
++
++## SSRF-DISABLE（2026-10-31）
++
++- 授权：用户要求本地单机模型接入可显式跳过SSRF防护，保留原安全代码。
++- 文件：`internal/utils/security.go`、`internal/utils/ssrf_outbound_cache.go`；回归：`internal/utils/security_disable_test.go`。
++- 配置：`SSRF_DISABLE=true`启用（忽略首尾空格与大小写）；未设置、false及其他值保持原检查。优先于SSRF_WHITELIST、SSRF_WHITELIST_EXTRA、SSRF_DNS_WHITELIST_ONLY。
++- 覆盖：共享URL校验、白名单模式、HTTP出站缓存、重定向目标SSRF检查、共享TCP/gRPC/MySQL拨号。开启时不做安全DNS/IP/端口黑名单校验，普通连接仍正常解析域名；重定向次数/跨源凭据处理及HTTP协议约束保留。其他组件自行实现的独立限制不因本补丁被删除。
++- 缓存：开启时在缓存读取/写入前直接放行，旧拒绝缓存不阻断，也不缓存新的绕过成功。
++- 启动（需重新编译核心）：WSL/Bash `SSRF_DISABLE=true ./WeKnora-lite`；PowerShell先执行 `$env:SSRF_DISABLE="true"` 再启动核心。
++- 验证：`go test -mod=readonly ./internal/utils -count=1`；Linux补充 `go test -mod=readonly -race ./internal/utils -count=1`，覆盖默认拒绝、开关放行、真实本机HTTP/TCP/重定向、旧拒绝缓存及恢复检查。
++- 本轮实测：WSL定向SSRF/race、utils build/vet退出0；utils全包退出1，两项公网DNS用例因example.com解析到198.18.0.159而失败，未改动这些断言。完整本批diff见`docs/evidence/ssrf-disable-2026-10-31.patch`。

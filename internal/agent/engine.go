@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	appconfig "github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -205,8 +206,11 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 		ProtocolPrompt:   e.modelContext.ProtocolPrompt(),
 		WorkspaceLayout:  e.workspaceLayout,
 	}
-	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
+	if e.skillsManager != nil && e.skillsManager.IsEnabled() && rejectGovernanceReplay(ctx) == nil {
 		opts.SkillsMetadata = e.skillsManager.GetAllMetadata()
+	}
+	if rejectGovernanceReplay(ctx) != nil {
+		opts.MemoryPrompt = ""
 	}
 	if e.toolRegistry != nil {
 		opts.SelectedTools = e.toolRegistry.ListTools()
@@ -223,6 +227,29 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 		opts.ShellExecEnabled = err == nil
 	}
 	return opts
+}
+
+// modelSourceInputs binds document metadata actually placed in runtime_context.
+// Unknown page/skill/vision composition cannot produce a sealed run.
+func (e *AgentEngine) modelSourceInputs(messages []chat.Message) ([]extensionbridge.SourceInput, bool) {
+	if e.pageContext != nil || e.questionOrigin != nil || len(e.pinnedMCPServices) != 0 || len(e.pinnedSkills) != 0 || e.memoryPrompt != "" || e.contextRewrites != 0 {
+		return nil, false
+	}
+	for _, message := range messages {
+		if len(message.Images) != 0 || len(message.MultiContent) != 0 {
+			return nil, false
+		}
+	}
+	var inputs []extensionbridge.SourceInput
+	for _, doc := range e.selectedDocs {
+		if doc == nil || doc.KnowledgeID == "" {
+			return nil, false
+		}
+		for _, field := range []struct{ name, value string }{{"title", doc.Title}, {"file_name", doc.FileName}, {"file_type", doc.FileType}} {
+			inputs = append(inputs, extensionbridge.SourceInput{DocumentID: doc.KnowledgeID, Field: field.name, ValueHash: extensionbridge.SourceFieldHash(field.value)})
+		}
+	}
+	return inputs, true
 }
 
 func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {

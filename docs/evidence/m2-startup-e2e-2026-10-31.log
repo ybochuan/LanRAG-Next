@@ -1,0 +1,13 @@
+[SCOPE] Real Linux Core + real worker Host; native multipart TXT upload; local model fixture; separate DBs on repository filesystem
+[SETUP] Isolated native account/models/KB prepared through official APIs; setup Core stopped before launcher test
+[ORDER] PASS: /health status=ready before Core launch; scoped machine credential verified
+[UPLOAD] PASS: real multipart upload -> native parsing/indexing completed; chunks=2
+[OBSERVER] PASS: authenticated native source reconciliation initialized lifecycle active
+[ACTIVE-RAG] PASS: native streaming answer + uploaded document reference; answer_generation_calls=1
+[TRAP] PASS: Ctrl+C stopped Core and Host; both owned ports released
+[ORDER] PASS: /health status=ready before Core launch; scoped machine credential verified
+[SWEEP] PASS: production startup scan evaluated expired annotation -> stale (no direct state edits)
+[STALE-CHECK] HTTP=200; answer_generation_calls=1; raw_document_id_present=False
+[STALE-RAG] PASS: expired document absent from references AND actual LLM prompts; native no-knowledge fallback generation_calls=1
+[ISOLATION] PASS: original native DB SHA256 unchanged; no foreign key violations; original processes not replaced
+[RESULT] M2 startup/upload/interception E2E PASS; exit=0

@@ -13,6 +13,7 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -622,11 +623,28 @@ func (e *AgentEngine) runToolCallAnswered(
 		err = fmt.Errorf("tool arguments contain unresolved model handles: %v", tc.UnresolvedHandles)
 	} else {
 		execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
-		result, err = e.toolRegistry.ExecuteTool(
-			execCtx, tc.Function.Name,
-			json.RawMessage(tc.Function.Arguments),
-		)
+		kind, complete := "tool", tc.Function.Name == agenttools.ToolSearchKnowledge || tc.Function.Name == agenttools.ToolReadDocument || tc.Function.Name == agenttools.ToolListDocuments
+		if tc.Function.Name == agenttools.ToolWriteSandboxFile || tc.Function.Name == agenttools.ToolEditSandboxFile {
+			kind, complete = "write", false
+		}
+		execCtx, sourceCall, sourceErr := extensionbridge.BeginSourceCall(execCtx, kind, tc, nil, complete)
+		if sourceErr != nil {
+			err = sourceErr
+		} else {
+			result, err = e.toolRegistry.ExecuteTool(execCtx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+			sourceCall.Record(result)
+			outcome := "success"
+			if err != nil || result == nil || !result.Success {
+				outcome = "error"
+			}
+			if sourceCall.Finish(outcome) != nil {
+				logger.Warn(ctx, "[Bridge] tool provenance unacknowledged; run cannot seal")
+			}
+		}
 		toolCancel()
+		if err == nil {
+			err = guardToolImageInputs(toolCtx, tc.Function.Name, result)
+		}
 		if err == nil {
 			e.describeToolImages(toolCtx, result)
 		}
@@ -694,6 +712,16 @@ func (e *AgentEngine) runToolCallAnswered(
 	}
 
 	return toolCall
+}
+
+// guardToolImageInputs runs before automatic vision. read_file retains its
+// independently authorized user-attachment boundary; all of its other file
+// sources have their own unknown-copy gates before returning images.
+func guardToolImageInputs(ctx context.Context, toolName string, result *types.ToolResult) error {
+	if result != nil && len(result.Images) > 0 && toolName != agenttools.ToolReadFile && rejectGovernanceReplay(ctx) != nil {
+		return extensionbridge.ErrUnattributed
+	}
+	return nil
 }
 
 // web_fetch validates each URL before any I/O. Unknown web references are item

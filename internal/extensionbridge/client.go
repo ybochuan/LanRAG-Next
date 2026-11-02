@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -18,27 +19,32 @@ var bridgeHTTPClient = &http.Client{
 	},
 }
 
-// BeforeRetrieve performs the HTTP gate only; it does not alter native search
-// targets or implement governance filtering. Only HTTP 200 permits continuation.
-func BeforeRetrieve(ctx context.Context, payload any) error {
+// BeforeRetrieve validates a bounded HTTP policy decision. The native adapter
+// must enforce DenyAll and remove ExcludedDocumentIDs before forwarding results.
+func BeforeRetrieve(ctx context.Context, payload any) (Decision, error) {
+	var decision Decision
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("encode before_retrieve request: %w", err)
+		return decision, fmt.Errorf("encode before_retrieve request: %w", err)
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"http://127.0.0.1:8090/bridge/before-retrieve", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create before_retrieve request: %w", err)
+		return decision, fmt.Errorf("create before_retrieve request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-AgentRAG-Bridge-Version", "1")
 	response, err := bridgeHTTPClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("call before_retrieve: %w", err)
+		return decision, fmt.Errorf("call before_retrieve: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("before_retrieve returned HTTP %d", response.StatusCode)
+		return decision, fmt.Errorf("before_retrieve returned HTTP %d", response.StatusCode)
 	}
-	return nil
+	data, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil {
+		return decision, fmt.Errorf("read before_retrieve response: %w", err)
+	}
+	return decodeDecision(data, body)
 }

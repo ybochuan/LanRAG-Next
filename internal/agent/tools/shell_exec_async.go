@@ -147,6 +147,10 @@ func (t *ShellExecAsyncTool) OutputLimitChars(json.RawMessage) int {
 
 // Execute validates the command, wraps stdin the way shell_exec does, and submits.
 func (t *ShellExecAsyncTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
+
 	logger.Infof(ctx, "[Tool][ShellExecAsync] Execute started")
 
 	var input ShellExecAsyncInput

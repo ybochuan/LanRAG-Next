@@ -176,6 +176,9 @@ type fillPageInput struct {
 
 // Execute implements types.Tool.
 func (t *ReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var input struct {
 		Ref       string `json:"ref"`
 		StartLine int    `json:"start_line"`
@@ -221,6 +224,9 @@ func (t *ReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*type
 
 // Execute implements types.Tool.
 func (t *FillPageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var input fillPageInput
 	if err := decodeStrict(args, &input); err != nil {
 		return operationFailure(fmt.Sprintf("invalid arguments: %v", err)), nil
@@ -278,6 +284,9 @@ func (t *FillPageTool) Execute(ctx context.Context, args json.RawMessage) (*type
 
 // Execute implements types.Tool.
 func (t *SelectTabTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var input struct {
 		Ref string `json:"ref"`
 	}

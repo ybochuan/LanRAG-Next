@@ -33,7 +33,7 @@ type ssrfOutboundCacheEntry struct {
 // TTL so high-frequency clients do not repeat DNS lookups on every request.
 // Handler/input boundaries should keep calling ValidateURLForSSRF directly.
 func validateURLForSSRFForOutbound(rawURL string) error {
-	if rawURL == "" {
+	if ssrfDisabled() || rawURL == "" {
 		return nil
 	}
 

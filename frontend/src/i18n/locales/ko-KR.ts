@@ -9120,6 +9120,8 @@ export default {
     }
   },
   menu: {
+    lifecycle: '수명 주기',
+    modelSupervisor: '모델 프로세스 관리',
     sessionInProgress: '대화 진행 중',
     sessionUnread: '새 답변',
     knowledgeBase: '지식베이스',

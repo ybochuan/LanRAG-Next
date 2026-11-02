@@ -94,6 +94,9 @@ type readCacheEntry struct {
 func (t *workspaceFileReader) readWithCache(
 	ctx context.Context, sessionID, filePath string, stat *sandbox.RemoteStatEntry,
 ) ([]byte, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return nil, err
+	}
 	epoch := sandboxMutationEpoch()
 
 	t.mu.Lock()
@@ -125,6 +128,9 @@ func (t *workspaceFileReader) readWithCache(
 }
 
 func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	if t.source == nil {
 		return &types.ToolResult{
 			Success: false,

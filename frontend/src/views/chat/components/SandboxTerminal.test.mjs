@@ -3,6 +3,7 @@ import test from 'node:test'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { posixShell } from '../../../test-utils/posixShell.ts'
 
 const terminal = readFileSync(new URL('./SandboxTerminal.vue', import.meta.url), 'utf8')
 const theme = readFileSync(new URL('../../../assets/theme/theme.css', import.meta.url), 'utf8')
@@ -85,12 +86,14 @@ test('a non-reattachable (Docker) terminal never redials silently after ready', 
 })
 
 test('interactive bash defines Debian-style ls aliases', () => {
-  const out = execFileSync('bash', [
+  const out = execFileSync(posixShell('bash'), [
     '--norc',
     '--noprofile',
     '-ic',
-    `. '${promptPath}'; alias ll; alias la; alias l; alias ls; alias grep`,
-  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    '. "$1"; alias ll; alias la; alias l; alias ls; alias grep',
+    'sandbox-alias-test',
+    promptPath.replace(/\\/g, '/'),
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 })
   assert.match(out, /alias ll='ls -alF'/)
   assert.match(out, /alias la='ls -A'/)
   assert.match(out, /alias l='ls -CF'/)

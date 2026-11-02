@@ -66,6 +66,11 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
 
 // Execute runs the inner tool once the access level allows it.
 func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if strings.HasPrefix(t.Name(), "wiki_") {
+		if err := rejectUnattributed(ctx); err != nil {
+			return blockedKnowledgeResult(err)
+		}
+	}
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
 	action := policy.Action{Risk: t.risk}

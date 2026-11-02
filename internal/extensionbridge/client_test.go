@@ -67,11 +67,15 @@ func TestBeforeRetrievePostsContextAndRejectsHTTPFailure(t *testing.T) {
 					w.Header().Set("Location", "/unexpected")
 				}
 				w.WriteHeader(status)
-				_, _ = w.Write([]byte(`{"details":"private backend content"}`))
+				if status == 200 {
+					_, _ = w.Write([]byte(`{"request_id":"request-1","tenant_id":7,"knowledge_base_ids":["kb"],"knowledge_ids":["doc"],"excluded_document_ids":[],"deny_all":false}`))
+				} else {
+					_, _ = w.Write([]byte(`{"details":"private backend content"}`))
+				}
 			}))
 			t.Cleanup(s.Close)
 			routeTo(t, s.URL)
-			err := BeforeRetrieve(context.Background(), map[string]any{"request_id": "request-1", "tenant_id": 7})
+			_, err := BeforeRetrieve(context.Background(), map[string]any{"request_id": "request-1", "tenant_id": 7, "knowledge_base_ids": []string{"kb"}, "knowledge_ids": []string{"doc"}})
 			if (err == nil) != (status == 200) || calls.Load() != 1 {
 				t.Fatalf("status %d: err=%v calls=%d", status, err, calls.Load())
 			}
@@ -88,7 +92,7 @@ func TestBeforeRetrieveUnavailableTimeoutAndCancellation(t *testing.T) {
 		destination := s.URL
 		s.Close()
 		routeTo(t, destination)
-		if err := BeforeRetrieve(context.Background(), struct{}{}); err == nil {
+		if _, err := BeforeRetrieve(context.Background(), struct{}{}); err == nil {
 			t.Fatal("stopped Host permitted retrieval")
 		}
 	})
@@ -103,7 +107,7 @@ func TestBeforeRetrieveUnavailableTimeoutAndCancellation(t *testing.T) {
 		t.Cleanup(s.Close)
 		routeTo(t, s.URL)
 		start := time.Now()
-		err := BeforeRetrieve(context.Background(), struct{}{})
+		_, err := BeforeRetrieve(context.Background(), struct{}{})
 		var timeout net.Error
 		if err == nil || !errors.As(err, &timeout) || !timeout.Timeout() || time.Since(start) > 1500*time.Millisecond {
 			t.Fatalf("500ms deadline not enforced: %v duration=%s", err, time.Since(start))
@@ -112,12 +116,12 @@ func TestBeforeRetrieveUnavailableTimeoutAndCancellation(t *testing.T) {
 	t.Run("canceled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if err := BeforeRetrieve(ctx, struct{}{}); !errors.Is(err, context.Canceled) {
+		if _, err := BeforeRetrieve(ctx, struct{}{}); !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancellation lost: %v", err)
 		}
 	})
 	t.Run("bad_payload", func(t *testing.T) {
-		if err := BeforeRetrieve(context.Background(), make(chan int)); err == nil {
+		if _, err := BeforeRetrieve(context.Background(), make(chan int)); err == nil {
 			t.Fatal("unencodable payload permitted")
 		}
 	})

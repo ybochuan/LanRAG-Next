@@ -74,6 +74,9 @@ func (t *wikiFlagIssueTool) WithKnowledgeScope(
 }
 
 func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var params struct {
 		Slug                  string   `json:"slug"`
 		IssueType             string   `json:"issue_type"`

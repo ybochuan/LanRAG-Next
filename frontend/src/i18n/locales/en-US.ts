@@ -538,6 +538,8 @@ export default {
     nameDescending: 'Z–A',
   },
   menu: {
+    lifecycle: 'Lifecycle',
+    modelSupervisor: 'Model Supervisor',
     sessionInProgress: 'Conversation in progress',
     sessionUnread: 'New reply',
     knowledgeBase: 'Knowledge Base',

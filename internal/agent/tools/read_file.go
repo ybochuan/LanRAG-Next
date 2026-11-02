@@ -210,6 +210,9 @@ func (t *ReadFileTool) read(ctx context.Context, input ReadFileInput) (*types.To
 
 func (t *ReadFileTool) readSkillResource(ctx context.Context, input ReadFileInput) *types.ToolResult {
 	fail := func(err error) *types.ToolResult { return &types.ToolResult{Success: false, Error: err.Error()} }
+	if err := rejectUnattributed(ctx); err != nil {
+		return fail(err)
+	}
 	if t.skills == nil || !t.skills.IsEnabled() {
 		return fail(fmt.Errorf("skills are not enabled for this reader"))
 	}

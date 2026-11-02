@@ -21,6 +21,10 @@ func (t *ReadFileTool) WithArtifacts(source ArtifactFileSource) *ReadFileTool {
 }
 
 func (t *ReadFileTool) readArtifact(ctx context.Context, input ReadFileInput) *types.ToolResult {
+	if err := rejectUnattributed(ctx); err != nil {
+		result, _ := blockedKnowledgeResult(err)
+		return result
+	}
 	if t.artifacts == nil {
 		return &types.ToolResult{Success: false, Error: "generated file access is unavailable in this conversation"}
 	}

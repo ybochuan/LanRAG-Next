@@ -1,0 +1,19 @@
+[MODELS] Live embeddings ready; dimension=2560; generation=DeepSeek/deepseek-flash; credentials redacted
+[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes
+[PORTS] Owned core=8080 Host=8090; unknown existing owners are never stopped by this script
+[AUTH] Native registration/login succeeded; credentials redacted
+[VERIFY] chunks=2 raw_marker_chunks=1 normalized_marker_chunks=2 jobs=1 policy=['flash', 'txt'] pages=1
+[VERIFY] public identity fields={'id': True, 'tenant_id': True, 'knowledge_base_id': True} manifest scope matches={'doc_id': True, 'tenant_id': True, 'knowledge_base_id': True}
+[UPLOAD] PASS: native multipart upload -> completed; native chunks containing PDF text=1
+[PROXY] PASS: authenticated native identity; real PDF preflight; one actual MinerU job; effective flash/txt
+[ARCHIVE] PASS: native doc_id/tenant/KB match manifest; original middle.json schema2.0 / MinerU4.0.1
+[INDEX] PASS: original native pipeline completed and persisted real PDF chunks
+[SEARCH] PASS: explicit native knowledge-search applied the real local reranker; outcome=ok
+[RAG] HTTP=200; SSE kinds=['agent_query', 'answer', 'complete', 'heartbeat', 'references', 'thinking', 'tool_call', 'tool_result']; successful embedding=4; rerank=1; generation=3
+[RAG] Rerank calls during QA itself=0; explicit search and QA are separate native API checks
+[RAG] Answer from synthetic PDF: Two reviewers are required before publication.<kb doc="native-fixture.pdf" chunk_id="414f8e6e-01ee-4ece-8180-a82c436f1e67" kb_id="8eb23a84-b761-4c93-882d-0423fc75a4df" />
+[RAG] PASS: uploaded PDF retrieved with real local embeddings; DeepSeek generated a terminal cited answer requiring two reviewers; local reranker separately proved by explicit native search
+[CLEANUP] Owned Linux processes stopped; fresh isolated DB only, no original DB touched
+[CLEANUP] Owned processes stopped
+[RESOURCES] PASS: zero audited Python external attempts; zero private ONNX weights
+[RESULT] PASS

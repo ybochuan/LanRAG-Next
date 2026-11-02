@@ -1,0 +1,21 @@
+[MODELS] Live embeddings ready; dimension=2560; generation=DeepSeek/deepseek-flash; credentials redacted
+[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes
+[PORTS] Owned core=8080 Host=8090; unknown existing owners are never stopped by this script
+[AUTH] Native registration/login succeeded; credentials redacted
+[VERIFY] chunks=2 raw_marker_chunks=1 normalized_marker_chunks=2 jobs=1 policy=['flash', 'txt'] pages=1
+[VERIFY] public identity fields={'id': True, 'tenant_id': True, 'knowledge_base_id': True} manifest scope matches={'doc_id': True, 'tenant_id': True, 'knowledge_base_id': True}
+[UPLOAD] PASS: native multipart upload -> completed; native chunks containing PDF text=1
+[PROXY] PASS: authenticated native identity; real PDF preflight; one actual MinerU job; effective flash/txt
+[ARCHIVE] PASS: native doc_id/tenant/KB match manifest; original middle.json schema2.0 / MinerU4.0.1
+[INDEX] PASS: original native pipeline completed and persisted real PDF chunks
+[RAG] HTTP=200; SSE kinds=['agent_query', 'answer', 'complete', 'references', 'thinking', 'tool_call', 'tool_result']; successful embedding=3; rerank=0; generation=3
+[RAG] Answer from synthetic PDF: Two reviewers are required before publication.<kb doc="native-fixture.pdf" chunk_id="4e5821c7-33b4-4935-ba0b-285cbb04e656" kb_id="f8cbb1ea-4587-4138-84b3-8fca6acaf389" />
+[ERROR] RuntimeError: live RAG did not prove cited DeepSeek answer and actual model calls
+[DIAG] mineru: calls={'/v1/uploads': 1, '/v1/uploads/upload_2fa923d2592dd9bd3758bf4a/content': 1, '/v1/uploads/upload_2fa923d2592dd9bd3758bf4a/complete': 1, '/v1/parse/jobs': 1, '/v1/parse/jobs/job_3ba193b8846a05a34a6056b6': 3, '/v1/files/file-3956951bb54b43957beff9a1/content': 1}; successful={'/v1/uploads': 1, '/v1/uploads/upload_2fa923d2592dd9bd3758bf4a/content': 1, '/v1/uploads/upload_2fa923d2592dd9bd3758bf4a/complete': 1, '/v1/parse/jobs': 1, '/v1/parse/jobs/job_3ba193b8846a05a34a6056b6': 3, '/v1/files/file-3956951bb54b43957beff9a1/content': 1}; errors=[]
+[DIAG] model0: calls={'/v1/embeddings': 3}; successful={'/v1/embeddings': 3}; errors=[]
+[DIAG] model1: calls={}; successful={}; errors=[]
+[DIAG] model2: calls={'/v1/chat/completions': 3}; successful={'/v1/chat/completions': 3}; errors=[]
+[CORE-DIAG] 2026-10-31 11:40:54.373 INFO 459a537f-1955-4e01-a2a2-6c314071f689 [PIPELINE] stage=SearchParallel action=chunk_search_done has_error=false result_count=7
+[CLEANUP] Owned Linux processes stopped; fresh isolated DB only, no original DB touched
+[CLEANUP] Owned processes stopped
+[RESULT] FAIL

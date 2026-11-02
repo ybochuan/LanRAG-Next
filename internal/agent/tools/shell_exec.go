@@ -448,6 +448,10 @@ func (t *ShellExecTool) OutputLimitChars(args json.RawMessage) int {
 
 // Execute runs the requested command inside the current session's sandbox.
 func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
+
 	logger.Infof(ctx, "[Tool][ShellExec] Execute started")
 
 	var input ShellExecInput

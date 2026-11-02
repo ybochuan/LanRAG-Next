@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -84,9 +86,13 @@ func (*protocolKBService) ResolveEmbeddingModelKeys(context.Context, []*types.Kn
 	return nil // Keyword-only fixture does not call an embedding model.
 }
 
-type protocolWikiService struct{ interfaces.WikiPageService }
+type protocolWikiService struct {
+	interfaces.WikiPageService
+	reads atomic.Int32
+}
 
-func (*protocolWikiService) GetPageBySlug(ctx context.Context, id, slug string) (*types.WikiPage, error) {
+func (s *protocolWikiService) GetPageBySlug(ctx context.Context, id, slug string) (*types.WikiPage, error) {
+	s.reads.Add(1)
 	if types.MustTenantIDFromContext(ctx) != 1 || id != "kb-own" || slug != "concept/fixture" {
 		return nil, fmt.Errorf("unexpected wiki scope or slug")
 	}
@@ -99,7 +105,17 @@ func (*protocolWikiService) GetPageBySlug(ctx context.Context, id, slug string) 
 func TestPublishedMCPRouteProtocolAndAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
-	srv := mcpserver.NewServer(&protocolKBService{}, nil, nil, &protocolWikiService{}, nil, nil, nil, nil,
+	type publishedSourceFixtureKey struct{}
+	previousPolicy := extensionbridge.EvaluateDocuments
+	extensionbridge.EvaluateDocuments = func(ctx context.Context, tenant uint64, kbs, ids []string) (map[string]bool, error) {
+		if ctx.Value(publishedSourceFixtureKey{}) == true && tenant == 1 && len(kbs) == 1 && kbs[0] == "kb-own" && len(ids) == 1 && ids[0] == "doc-1" {
+			return map[string]bool{"doc-1": true}, nil
+		}
+		return previousPolicy(ctx, tenant, kbs, ids)
+	}
+	t.Cleanup(func() { extensionbridge.EvaluateDocuments = previousPolicy })
+	wiki := &protocolWikiService{}
+	srv := mcpserver.NewServer(&protocolKBService{}, nil, nil, wiki, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil)
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
@@ -120,6 +136,7 @@ func TestPublishedMCPRouteProtocolAndAuthorization(t *testing.T) {
 				body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
 				require.NoError(t, err)
 				req := httptest.NewRequest(http.MethodPost, "/mcp/ep-1", bytes.NewReader(body))
+				req = req.WithContext(context.WithValue(req.Context(), publishedSourceFixtureKey{}, true))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Accept", "application/json, text/event-stream")
 				req.Header.Set("MCP-Protocol-Version", headerVersion)
@@ -204,10 +221,19 @@ func TestPublishedMCPRouteProtocolAndAuthorization(t *testing.T) {
 					map[string]any{"name": tc.tool, "arguments": tc.args}))
 				require.Nil(t, response["error"])
 				result := response["result"].(map[string]any)
-				require.NotEqual(t, true, result["isError"])
 				encoded, err := json.Marshal(result)
 				require.NoError(t, err)
-				require.Contains(t, string(encoded), tc.body)
+				if tc.tool == types.MCPEndpointToolWikiReadPage {
+					require.Equal(t, true, result["isError"])
+					require.Contains(t, string(encoded), extensionbridge.ErrUnattributed.Error())
+					require.Equal(t, []any{map[string]any{"type": "text", "text": extensionbridge.ErrUnattributed.Error()}}, result["content"])
+					require.Nil(t, result["structuredContent"])
+					require.NotContains(t, string(encoded), tc.body)
+					require.Zero(t, wiki.reads.Load())
+				} else {
+					require.NotEqual(t, true, result["isError"])
+					require.Contains(t, string(encoded), tc.body)
+				}
 				if version == "2026-07-28" {
 					require.Equal(t, "complete", result["resultType"])
 				}

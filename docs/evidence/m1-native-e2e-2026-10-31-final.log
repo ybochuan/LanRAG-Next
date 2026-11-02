@@ -1,0 +1,14 @@
+[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes
+[PORTS] Owned core=54357 Host=8090; unknown existing owners are never stopped by this script
+[AUTH] Native registration/login succeeded; credentials redacted
+[VERIFY] chunks=2 raw_marker_chunks=0 normalized_marker_chunks=1 jobs=1 policy=['flash', 'txt'] pages=1
+[VERIFY] public identity fields={'id': True, 'tenant_id': True, 'knowledge_base_id': True} manifest scope matches={'doc_id': True, 'tenant_id': True, 'knowledge_base_id': True}
+[UPLOAD] PASS: native multipart upload -> completed; native chunks containing PDF text=1
+[PROXY] PASS: authenticated native identity; real PDF preflight; one actual MinerU job; effective flash/txt
+[ARCHIVE] PASS: native doc_id/tenant/KB match manifest; original middle.json schema2.0 / MinerU4.0.1
+[INDEX] PASS: original native pipeline completed and persisted real PDF chunks
+[RAG] Not exercised in default fixture upload mode
+[CLEANUP] Owned Linux processes stopped; fresh isolated DB only, no original DB touched
+[CLEANUP] Owned processes stopped
+[RESOURCES] PASS: zero audited Python external attempts; zero private ONNX weights
+[RESULT] PASS

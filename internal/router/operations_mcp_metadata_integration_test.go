@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/middleware"
@@ -64,6 +65,7 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	svc := service.NewMCPServiceService(repo, manager, nil)
 
 	var requests, executions atomic.Int32
+	var dispatched atomic.Int32
 	var fail atomic.Bool
 	upstream := sdkserver.NewMCPServer(
 		"Directory fixture",
@@ -111,6 +113,7 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	guards := &rbacGuards{cfg: &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enforce}}}
 	router := gin.New()
 	router.Use(middleware.ErrorHandler(), func(c *gin.Context) {
+		dispatched.Add(1)
 		identity, ok := types.InternalDispatchFromContext(c.Request.Context())
 		if !ok {
 			c.AbortWithStatus(http.StatusUnauthorized)
@@ -151,6 +154,34 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 			Mode:       types.RunModeAttended,
 		},
 	)
+	// Production M2 rejects opaque operation results before approval/dispatch.
+	for _, id := range []string{"mcp_service.get_metadata", "mcp_service.refresh_metadata", "mcp_service.list_tools"} {
+		args, e := json.Marshal(map[string]any{"operation": id, "params": map[string]any{"mcp_service_id": "svc"}})
+		require.NoError(t, e)
+		result, e := tools.NewRunOperationTool(runtime).Execute(interactive, args)
+		require.ErrorIs(t, e, extensionbridge.ErrUnattributed)
+		require.False(t, result.Success)
+		require.Equal(t, extensionbridge.ErrUnattributed.Error(), result.Error)
+		require.Empty(t, result.Output)
+		require.Empty(t, result.Data)
+	}
+	require.Zero(t, dispatched.Load())
+	require.Zero(t, requests.Load())
+	require.Zero(t, executions.Load())
+	require.Empty(t, gate.requests)
+	// The remaining assertions exercise native directory/approval/identity
+	// behavior using an explicit test-only source fixture. Unmarked contexts
+	// retain the production refusal; no process-wide TestMain allow is installed.
+	type directorySourceFixtureKey struct{}
+	previousPolicy := extensionbridge.EvaluateUnattributed
+	extensionbridge.EvaluateUnattributed = func(ctx context.Context) error {
+		if ctx.Value(directorySourceFixtureKey{}) == true {
+			return nil
+		}
+		return previousPolicy(ctx)
+	}
+	t.Cleanup(func() { extensionbridge.EvaluateUnattributed = previousPolicy })
+	interactive = context.WithValue(interactive, directorySourceFixtureKey{}, true)
 	run := func(id string) *types.ToolResult {
 		t.Helper()
 		runtime.Access.Role = role

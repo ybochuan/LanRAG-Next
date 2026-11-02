@@ -246,6 +246,10 @@ func (t *WebFetchTool) storePage(ctx context.Context, rawURL string) (webPageSna
 
 // Execute runs web_fetch and preserves successful items when a batch partially fails.
 func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
+
 	logger.Infof(ctx, "[Tool][WebFetch] Execute started")
 	// Bound the whole batch, including continuations, independently of slow pages.
 	ctx, cancel := context.WithTimeout(ctx, webfetch.PageFetchTimeout())

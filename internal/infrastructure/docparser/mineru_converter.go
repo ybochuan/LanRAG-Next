@@ -36,6 +36,7 @@ var (
 // legacy /file_parse endpoint. The protocol is detected per request, so an
 // in-place MinerU upgrade needs no configuration change.
 type MinerUReader struct {
+	v1Client *minerUV1Client // Optional request-local transport; result processing is unchanged.
 	endpoint string
 	timeout  time.Duration
 	apiKey   string // V1 only: the server's --api-key
@@ -142,7 +143,10 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 }
 
 func (c *MinerUReader) readV1(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
-	client := newMinerUV1Client(c.endpoint, c.apiKey, c.timeout)
+	client := c.v1Client
+	if client == nil {
+		client = newMinerUV1Client(c.endpoint, c.apiKey, c.timeout)
+	}
 	mdContent, imageRefs, contentList, err := client.ParseWithLayout(ctx, req.FileContent,
 		minerUUploadFileName(req.FileName, req.FileType),
 		minerUV1ParseOptions{Tier: c.tier, OCRMode: c.parseMethod})

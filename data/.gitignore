@@ -1,0 +1,13 @@
+# AgentRAG private local state. Keep this file tracked, never its payloads.
+agentrag-launcher.json
+agentrag-launcher.json.*.tmp
+launcher-backups/
+launcher-run-*/
+bin/
+models/
+model-supervisor.json
+model-supervisor-state.json
+supervisor.log
+parser_artifacts/
+agentrag_ext*.db*
+/governance-runtime-*/

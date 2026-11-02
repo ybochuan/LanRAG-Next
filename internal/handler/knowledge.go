@@ -26,10 +26,12 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
+	"gorm.io/gorm"
 )
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
 type KnowledgeHandler struct {
+	sourceDB          *gorm.DB
 	cfg               *config.Config
 	kgService         interfaces.KnowledgeService
 	kbService         interfaces.KnowledgeBaseService
@@ -97,12 +99,14 @@ func NewKnowledgeHandler(
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 	housekeeping *service.HousekeepingService,
+	sourceDB *gorm.DB,
 ) *KnowledgeHandler {
 	var backlog backlogProbe
 	if housekeeping != nil {
 		backlog = housekeeping
 	}
 	return &KnowledgeHandler{
+		sourceDB:          sourceDB,
 		backlog:           backlog,
 		cfg:               cfg,
 		kgService:         kgService,

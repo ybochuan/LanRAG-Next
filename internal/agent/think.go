@@ -13,6 +13,7 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -62,6 +63,21 @@ func (e *AgentEngine) streamLLMToEventBus(
 	reportModelContextLeaks(ctx, "Agent", e.modelContext, messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
+	inputs, complete := e.modelSourceInputs(messages)
+	llmCtx, sourceCall, sourceErr := extensionbridge.BeginSourceCall(llmCtx, "model", struct{ Messages, Options any }{messages, opts}, inputs, complete)
+	if sourceErr != nil {
+		return nil, sourceErr
+	}
+	sourceSucceeded := false
+	defer func() {
+		outcome := "error"
+		if sourceSucceeded {
+			outcome = "success"
+		}
+		if sourceCall.Finish(outcome) != nil {
+			logger.Warn(ctx, "[Bridge] model provenance unacknowledged; run cannot seal")
+		}
+	}()
 	// ChatStream may wait for connection setup and response headers before
 	// returning a channel. Count that silence toward the same idle budget.
 	stallTimeout := e.getLLMStallTimeout()
@@ -86,6 +102,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 	thinkingDecoder := e.modelContext.StreamDecoder()
 
 	for chunk := range stream {
+		sourceCall.Record(chunk)
 		lastChunkAt.Store(time.Now().UnixNano())
 		chunkCount++
 		if chunkCount == 1 {
@@ -239,6 +256,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 		return result, fmt.Errorf("LLM stream error: %s", result.StreamError)
 	}
 
+	sourceSucceeded = result.FinishReason != "" && ctx.Err() == nil
 	return result, nil
 }
 

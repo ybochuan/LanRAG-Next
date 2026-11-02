@@ -500,6 +500,9 @@ func seenLinkKey(kbID, slug string) string {
 }
 
 func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var params struct {
 		Slug  any `json:"slug"`
 		Slugs any `json:"slugs"`
@@ -814,6 +817,9 @@ func NewWikiSearchTool(
 }
 
 func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var params struct {
 		Query            any      `json:"query"`
 		Queries          any      `json:"queries"` // legacy alias

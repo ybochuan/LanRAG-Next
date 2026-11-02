@@ -8,6 +8,36 @@ import (
 	"time"
 )
 
+func TestParentCancellationDoesNotReportProjectionFailure(t *testing.T) {
+	_, s := fixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reports := 0
+	w := Worker{Store: s, Lease: time.Minute, RetryDelay: time.Second, MaxAttempts: 3, PollInterval: time.Millisecond, Report: func(error) { reports++ }, Handler: func(context.Context, Item) error { t.Fatal("handler called after parent cancellation"); return nil }}
+	if _, err := w.ProcessOne(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if reports != 0 {
+		t.Fatalf("graceful cancellation reported as %d projection errors", reports)
+	}
+}
+
+func TestParentCancellationRetainsJoinedBusinessFailure(t *testing.T) {
+	db, s := fixture(t)
+	enqueue(t, db, "failure")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	failure := errors.New("actual projection failure")
+	var reports []error
+	w := Worker{Store: s, Lease: time.Minute, RetryDelay: time.Second, MaxAttempts: 3, PollInterval: time.Millisecond, Report: func(err error) { reports = append(reports, err) }, Handler: func(context.Context, Item) error { cancel(); return failure }}
+	if _, err := w.ProcessOne(ctx); !errors.Is(err, failure) {
+		t.Fatal(err)
+	}
+	if len(reports) != 1 || !errors.Is(reports[0], failure) {
+		t.Fatalf("business error lost: %v", reports)
+	}
+}
+
 func TestWorkerPersistsFailureThenDrainsHealthyBacklog(t *testing.T) {
 	db, s := fixture(t)
 	enqueue(t, db, "one")

@@ -1,5 +1,12 @@
 # AgentRAG Task Backlog
 
+## 本机启动闭环（2026-10-31）
+
+| 任务 / 状态 | 期望结果 | 依据 | 验证及何时重新审视 |
+|---|---|---|---|
+| M2-OPS／本地闭环已验证 | 独立扩展库默认路径、严格手工DDL认领、可诊断初始化错误；一键Host本地Ready→Core、官方机器凭证初始化、Ctrl+C清理；完整启动指引。 | 用户本轮启动崩溃修复、一键脚本、真实M2上传E2E和运维文档请求。文件：`extensions/store/manual_schema*`、`host/{config,runtime,database_error}.go`、`bridge/server.go`、`extensions/scripts/{launcher_config,startup_e2e}.py`、`start-all.sh`、`data/.gitignore`、`docs/operations/AgentRAG-启动与运维指南.md`。 | 真实WSL原生TXT上传、2个chunk、Observer active、正常RAG、有效期输入后生产扫描stale、实际LLM上下文和引用无过期文档；Ctrl+C端口释放、源DB校验不变。完整日志`docs/evidence/m2-startup-e2e-2026-10-31.log`。更换启动配置/迁移/权限/网络拓扑时重审；本轮未重跑真实MinerU与云端模型。 |
+| M2-UI提前／已交付（2026-11-01，生命周期范围） | 原生 `/platform/lifecycle`：库切换、状态分布与分页、日期、事件时间线、待复核、库级规则；沿用登录及KB权限。 | 明确授权原生导航/薄管理接口；真实Core/Host/SQLite上传、过期排除、8并发单赢家、401/403/404及浏览器只读验收，见 `docs/evidence/m2-lifecycle-ui-validation-2026-11-01.md`。 | 新增归档审批、谱系/修订UI或权限变化时；不随此项宣称其他M2/M6完成。 |
+
 本文件只管理任务生命周期。强制规则见 `AGENTS.md`；稳定事实与基线源码映射见 `PROJECT_CONTEXT.md`。2026-10-29 用户已授权按方案开展项目；遇到扩大核心补丁或改变实现边界的冲突，先报告和决策，不擅自硬改原生代码。
 
 架构依据统一指向 `docs/design/AgentRAG 技术方案 v1.0 — Frozen Architecture.md`。已有明确的冻结里程碑，因此以下不是空占位 backlog，也不重新估算架构文档中的周期。
@@ -10,7 +17,35 @@
 
 用户明确接受既有Linux race断言失败，作为已知待办保留，不阻塞单机场景的本次M0验收。**这是用户批准的阶段验收，不声称Frozen原版所有治理/Hook/MCP/负载门禁均已实现。** 下表原M0编号中尚未交付或验证的项目保留真实状态，转后续增强；不得把它们伪记为已完成。
 
-**当前里程碑：M1／进行中（2026-10-30启动）。** 从M0提交`d1c62cd`继续；已核实用户已有MinerU4.0.1，首批实施页级信号纯路由。源映射及全部文件/验收清单见`docs/design/M1-Source-Mapping-2026-10-30.md`；本批计划见`docs/superpowers/plans/2026-10-30-m1-routing-policy.md`。M0接受结论保留，M1尚未验收。
+**当前推进：M2／进行中（2026-11-02）。** 生命周期、Observer、24h扫描、RAG策略、本地复核、登录管理界面与T3补充依赖已交付。用户已批准T4整批薄接线；来源底座、组件视图、有限原生文本输入/模型步骤与终态已接入，真实Core/Host已验证运行封存、停用/离线拦截及无开放运行遗留。实际写入producer与已封存文件正向链路继续实施，T5另列。M2尚未整体验收；M1真实语料标定等缺口保留。
+
+## M4/M5 业务冲刺（2026-11-02）
+
+| 任务／状态 | 期望结果 | 依据 | 验证及何时重新审视 |
+|---|---|---|---|
+| BIZ-01／后台主链已接线 | 原生JWT管理→同库关联；反馈→指导→提案→真实manual ingest/index→supersedes和旧文档停用。路径`extensions/business/*`、`management/business.go`、`host/runtime.go`、schema11；原生仅handler/management DTO/router薄转发。 | 用户本轮业务优先授权；`docs/operations/M4-M5-业务验收.md`及`docs/evidence/m4-m5-business-2026-11-02.md`。 | 并发8单赢家、审计失败回滚、远端丢ACK不重复创建、失效/撤销复查、PDF模式拒绝与真实Core/Host联合验证。对业务状态、权限或发布协议改动时重审；不代表完整M4/M5完成。 |
+| BIZ-UI／待接线 | 关联候选确认、反馈待审/风险/冷静期、指导、提案内容与发布状态页面。现有后台列表已提供完整可审阅字段、ID读取和分页。 | 用户希望便于验收；冻结方案第13节，复用原生登录管理API。 | 前端实施时只调用已鉴权API；完成类型/构建/权限与真实浏览器验收后交付。 |
+| M4-MCP／待接线，存在既有拒绝冲突 | 经原生按需发现调用可信Host的query_related_docs，保留scope/active/版本门禁；不放开不透明外部MCP。候选`extensions/mcp/related_docs.go`及既有原生MCP薄点，实施前核实具体调用位置。 | 冻结9.4；现有M2/T4未知MCP摘要/schema/结果拒绝会阻挡此路径。当前管理查询成功不能算Agent已可用。 | 可信描述/参数/结果来源方案确认并做真实discover→call与停用/Host离线测试时；不重构ToolRegistry。 |
+| M4-CAL／待真实标注 | 20–50组每库关联对标定权重，真实precision≥0.70/recall≥0.60；Agentic问题集与GraphRAG预算门禁。 | 冻结9/14；本批默认0.60/0.25/0.15及合成用例不构成指标。 | 人工关联标签到位时；跨库/Graph申请需显式确认，默认Graph关闭。 |
+| M5-QA／待接线 | 原生本轮retrieved_chunk_ids与身份绑定的反馈采集；指导fail-open末尾注入、每轮≤3、每guidance每session≤2、session≤800 tokens；来源组成随真实输入登记。 | 冻结10/12；当前管理录入不冒充问答采集，未把指导注入模型。 | 核实原生薄点及实际输入组成后；测试本轮不反哺、预算/去重/取消/审计与停用、所有模型请求捕获。 |
+| M5-PROJECTION／待接线 | 消费已持久family_tag意向，使用既有单写者/KB原生tag ID投影gov:family，不影响truth；提供失败修复/重试。 | 当前worker仅有state/alert处理，family_tag可能重试/dead；C-10未知tags拒绝继续有效。 | 家族标签读/写适配完成时；未知tags不误删、并发投影、源事实不变及不重复ingest验收。 |
+| M5-BINARY／待接线 | binary_source建议→用户上传正式修订文件→scope/版本绑定提案→原子finalize。路径复用M1原生上传与`extensions/business/revision.go`，不自动把PDF/DOCX换成Markdown并声称正式发布。 | 冻结12.8；当前自动发布仅manual_content，其余记录binary_source_upload_required。 | 正式文件上传/批准语义落地后；同库身份、未知ACK、哈希/版本不符、回滚与源原件保留测试。 |
+| M5-ACCEPT／待完整验收 | 自动激活扫描、快速通道10–20%抽检/主题恢复、完整SQL/进程崩溃/负载矩阵与每库生成质量回归。 | 冻结B/C/D及12/14；当前显式激活、临时库时间推进测试不能冒充真实等待或全阶段验收。 | 前述业务/模型/UI接线完成及真实样本可用时；保留M2/T4与M1既有缺口。 |
+
+## T4 实施与验收门禁（2026-11-02）
+
+用户2026-11-02要求业务冲刺，当前优先推进M4/M5后台接线；T4未完成项保留，不回退已生效治理。
+
+| 任务／状态 | 期望结果 | 依据 | 验证及何时重新审视 |
+|---|---|---|---|
+| T4-00／依赖许可修复已验证 | 副本读/登记展开最新T3父依赖，最终事务重查；权限依赖不混入实际模型来源。文件：`extensions/provenance/{permission,policy,manifest}.go`、`lineage/dependency_ledger_test.go`。 | 已批准T3语义及T4方案，5个错误放行先RED再修复；只读复核无Critical/Important。 | active/review、父stale/过期/编辑/离线/损坏、并发新增依赖、再派生已测；扩闭包或改依赖语义时重审。 |
+| T4-01/02／底座已实现，矩阵待补全 | 完整root绑定的组件视图、schema10运行/步骤/核验意向/producer与回执审计；未知/未完成/空源不能封存。路径：`internal/handler/extension_source_*`、`extensions/{lineage/components,provenance/*}.go`、迁移010。 | v1 golden、字段/root错配拒绝、16并发单赢家、幂等/错误绑定、核验/结束竞争、审计回滚与提交前后进程退出恢复。 | 见本轮证据；seal/producer完整SQL故障、多进程/容量矩阵及真实原生E2E尚未全部覆盖，不标整项完成。 |
+| T4-03／原生文本主链接入，完整组成待补 | QA以原授权scope/owner/native消息身份建run；completion/stream、think/act登记实际指纹及独立步骤，read_document与无重排search文本核验；终态收束，取消/证明失败不封存。路径为批准表中的QA/pipeline/engine/think/act及search/read/list。 | `docs/evidence/m3-t4-native-inputs-2026-11-02.md`：真实Core/worker Host合成模型运行已封存；旧二进制缺事实、MCP元数据提前加载、终态遗留open先RED再修复。 | 查询改写/重排、FAQ/图像/合并、自定义元数据及listing updated_at仍unattributed；全部组成/并发及真实文件联合验收前不标整项完成。 |
+| T4-04／未知读取已拒绝，正向producer待接线 | 实际写入、原run/step/path/hash、旧源继承、收集与资源别名闭环，已封存active副本可读，撤销后拒绝。 | 收集由`internal/handler/session/agent_stream_handler.go`在QA调用外触发；用已批准collector/读取薄点与原生消息身份适配，不改handler/调度，不让新run认领旧文件。 | 当前未知文件/缓存、追加与编辑拒绝；补真实写→归档→跨轮读、覆盖不缩源、读后替换/同mtime、ACK未知不重放及重启撤销。 |
+| T4-05／拒绝代码已接入，联合捕获待验 | shell启动前拒绝；未知memory/skill/目录/网页/后台正文不进模型；未知外部MCP服务摘要/schema/pin在模型读取前省略；保留任务控制、用户附件，图片先于VLM拒绝。 | 定向RED→GREEN与原生包回归；MCP描述spy验证加载次数0。不改ToolRegistry、存储或调度算法。 | 全部LLM/VLM/重排输入捕获及通知ACK/取消真实联合E2E前不标完成。 |
+| T4-06/M2／待整体验收 | 真上传→Observer→文本来源→模型→producer→文件→撤销/重启，内置模型正向冒烟、故障捕获、全检查与最终整批复核。 | 用户M2/M3目标；本批无生产替换、真实库迁移、提交/推送。 | 组件验证与真实E2E分开报告；T4全部门禁完成后再评估，T5不在本批授权。 |
+| TEST-MODEL-PORT／已知测试隔离问题 | 并行端口观测不误报临时端口，不弱化断言。文件：`extensions/modelsupervisor/probe_test.go`及观测实现。 | 普通全量退出1，仅`TestObservePortsReportsOnlyListening`失败；隔离串行全量/race退出0。本批未改该模块。 | 独立处理模型管理器/网络观测时重审；保留两种运行结果，不抹去原失败。 |
+| TEST-NATIVE-RACE／既有工作区失败待核实 | 消除认证、沙箱和技能测试共享fake数据的竞态。文件：`internal/application/service/tenant_{api_key,sandbox_config,skill_install,skill_served}_test.go`及对应实现。 | 2026-11-02六包完整race退出1，service中5个测试报告数据竞态，其余5包通过；普通五包全量退出0。本批未修改这些失败路径，未在干净基线独立复现，不能直接称上游已知缺陷。 | 独立处理这些测试/服务并完成基线对照时；不以来源定向race替代失败的完整race。证据见`docs/evidence/m3-t4-native-inputs-2026-11-02.md`。 |
 
 ## 待办
 
@@ -24,12 +59,12 @@
 | M0-04／进行中，C-10接受为Baseline Limitation | 标签队列/API Store/KB映射/Outbox Handler已接入Host，多KB共用唯一Writer已测；null标签安全拒绝获用户接受，无标签首写留后续只读API，真实服务仍待验。只声明扩展内部串行，不保证原生UI并发安全。 | 架构6、用户C-02及2026-10-30 C-10决定；本批不改原生API。 | 首次真实投影、标签只读API接入及并发来源变化后。 |
 | M0-05／待开始 | 使用原生 MCP 按需发现注册本机 Extension MCP Server，采用 Streamable HTTP `/mcp` 与本机认证；不改 ToolRegistry。 | 架构 3.5、16；`query_related_docs`／`discover_peers` 目标能力。 | 首次开发 MCP 工具前；上游注册／发现实现变化时。 |
 | M0-06／进行中 | 独立门禁、专用CI定义、SQLite/FK/事务/Outbox及Host本地联合测试已通过；真实QA全链路、真实来源对账和上游混合并发待验。并发2有上游竞态则记录后降至1重跑。 | 架构4.4/15–16；M0范围按用户四项决定限定；远端Actions尚未运行。 | 首个实现PR前；module/workflow/DB变化后。 |
-| M1／进行中 | PDF/Image Cheap Preflight后选四档且只正式parse一次；Office native/builtin；版本化产物及每库阈值标定。当前完成源映射/4.0.1核实，纯路由定向测试已通过；代理/预检/产物/真实标定仍待做。 | 架构7/15；准确率≥85%、高估≤10%、低估≤15%；M1 Source Map的C-11/C-12/C-13。 | 首次实连、scope/部署OS/后端版本和真实语料变化时。 |
+| M1／进行中 | PDF预检、原生身份薄接线/Host、真实4.0.1单job与文件归档→原生分块闭环已验证；SQL产物/恢复、真实标定和完整M1验收仍待做。 | 架构7/15及用户M1-03/原生接线授权；每库指标不以合成文件替代；C-11–C-17。 | 真实语料、容量/恢复、规则及后端版本变化时。 |
 | M1.5／待开始 | 完成库级检索基线、RRF 参数实验、重排降级与查询扩展门控；量化只通过 feature flag 验证，保留原生 RRF 实现。 | 架构 14–15；Recall@5 ≥ 0.85、MRR ≥ 0.80（或基线 95%）；量化 Recall@10 退化 ≤ 2%。 | 开始检索优化前；模型、语料或 sqlite-vec 基线变化时。 |
-| M2／待开始 | 实现含 scheduled 的生命周期状态机、库级规则与 stale 区分，event/current/outbox 同事务；通过崩溃注入与事实重建验证。 | 架构不变量 A、4、15。 | M0 持久化门禁通过且开始生命周期业务前；状态迁移规则变化时。 |
-| M3／待开始 | 建立版本族、版本节点和分级 lineage DAG；provenance 与 version-ancestry 分离；Critical Edge 同事务，递归具备 cycle guard。 | 架构不变量 D、5、8、15。 | 开始血缘实现前；新增边类型或修改版本事实模型时。 |
-| M4／待开始 | 实现规范性关联和受治理的语义关联，按库校准权重；通过原生 MCP 暴露 query_related_docs；完成 Agentic 评估及 GraphRAG 预算门禁。 | 架构 9–10、14–15；关联精确率 ≥ 0.70、召回率 ≥ 0.60；GraphRAG 默认关闭。 | M3 事实模型稳定并开始关联实现前；用户申请跨库关联或开启 GraphRAG 时。 |
-| M5／待开始 | 完成反馈 → guidance → revision proposal → 幂等发布 → supersedes 闭环；治理与 audit 原子提交；重试前先做远端 reconciliation；落实审批、冷静期、指导预算。 | 架构不变量 B/C/D、10、12、15。 | 开始反馈治理或任何 ingest 发布副作用前；远端身份能力、审批策略变化时。 |
+| M2／进行中（内核/Observer/扫描/普通RAG策略已接线） | 已实现默认矩阵、DB规则/标注、原子决策回执和两类stale；Observer/每日扫描、普通RAG策略及本地复核告警已接线；外部通知及生产配置入口待做。 | 架构不变量A/4/15及用户2026-10-31业务规则；五处故障回滚、真实崩溃恢复和24并发CAS验证。 | 自动接线前、业务矩阵/有效期规则变化时；不以组件测试代替全阶段验收。 |
+| M3／进行中：T1/T2已交付 | 已完成原生只读快照、schema8观察版本/family、真实源权威、分边查询及环防护；Critical Edge业务/完整来源封存继续实施。 | 用户批准与`docs/evidence/m3-trusted-sources-2026-11-01.md`；不将观察顺序称原生generation。 | 新边类型、真实来源适配、关键事务和原生接线变化时。 |
+| M4／进行中：后台关联已接线 | 同库amends/interprets声明、related_to候选/确认/撤销、双向active/当前版本过滤并联合T3 supplements；原生JWT管理API可调用。MCP消费、按库标定、跨库、UI与Agentic/Graph预算待做。 | 用户2026-11-02业务冲刺授权；`extensions/business/related.go`、管理薄转发；见业务验收记录。精确率/召回率不以合成用例冒充，GraphRAG保持关闭。 | 接原生MCP、标注数据可用、跨库或GraphRAG申请时重审。 |
+| M5／进行中：后台反馈与manual发布已接线 | 管理反馈→审批/冷静期→指导→修订提案→原生Markdown创建/索引→supersedes/旧文档停用；Saga先对账、治理+audit同事务。真实问答事件、guidance预算注入、抽样复核、binary正式文件、family投影和UI待做。 | 架构B/C/D；真实Core/Host业务E2E与SQLite并发/审计故障/未知ACK测试；`extensions/business/{feedback,revision,native}.go`，schema11。 | 详见新增细分条目；不据本批声明M5或M2整体验收完成。 |
 | M6／待开始 | 实现 opaque mDNS、认证能力查询、静态节点回退与架构列出的治理／运维／评估 UI；广播不含知识库元数据。 | 架构 11、13、15。 | 开始局域网发现或扩展 UI 前；暴露的网络范围和权限模型变化时。 |
 
 ## 细分实施任务：文件、验证与依赖
@@ -40,7 +75,7 @@
 |---|---|---|---|
 | M0-01A／已完成（审计交付） | 源码审计与冲突报告：`docs/design/M0-Change-Map-2026-10-29.md`；完整路线见本表。 | 逐条对照真实函数和行号；原生diff为空；不是M0验收通过。 | 架构16/17.3；核心接入前、基线改变及用户决策后重审。 |
 | M0-02A／已完成（协议基础） | 协议版本、存活／就绪、无服务拒绝：`extensions/bridge/protocol.go`、`server.go`、`server_test.go`。 | FC-0；37个HTTP子用例通过；不是原生全链路证明。 | 架构3.2/3.6/3.7；业务handler接入时重审。 |
-| M0-02B／进行中（扩展检索前契约完成） | `extensions/contract/retrieval.go`及测试、`contracts/bridge/v1/`样例、`extensions/bridge/retrieve.go`及测试和可配置server已实现；原生候选`extensionbridge/contract.go`未创建，其他Hook契约待做。 | FC-2/CT-1：严格JSON/scope、显式空deny_all、子集/关联、坏策略/取消503、停滞请求体拒绝；仅扩展消费样例，两module接线待验。 | 用户C-03决定、Frozen3.4与C-09；原生消费者及持久策略接线前重审。 |
+| M0-02B／已接线（本批普通RAG消费范围） | `extensions/retrieval/policy.go`查生命周期DB；原生`extensionbridge/{client,response}.go`校验策略并由`search_parallel.go`过滤结果。 | DB真实Host＋原生PluginSearchParallel跨进程通过；允许/排除分割、deny_all、scope、坏响应fail-closed；全库枚举及其他入口仍待做。 | 用户2026-10-31批准原生消费；部署新版核心/Host、候选枚举和Agent接入变化时。 |
 | M0-02C／已完成（门卫+Pass-Through E2E） | `extensions/bridge/retrieve.go`新增默认Pass-Through构造器，`extensions/host/runtime.go`接线；更新bridge/host测试与脚本验收范围说明。原生核心保持原补丁，不改检索/过滤。 | WSL真实核心/Host同凭据同请求：断网关联日志+error+答案生成0；通网Host receipt+answer/references/complete+答案生成1；脚本退出0，M0=PASS。格式错误/版本错误仍拒绝，原固定tenant/KB handler继续保留。 | 用户批准M0默认放行；2026-10-30完成。真实治理策略/范围收窄另行实施，不能将透传称为active过滤。 |
 | M0-02D／待开始，M0仅搜索排除 | 受控候选 `internal/agent/tools/search_knowledge.go` 和公共薄适配；直接读/图谱/完整治理移至POST-M0-GOV，不在M0硬改。 | FC-1/FC-2：搜索排除和Host不可用拒绝；FC-3明确后移。 | 用户C-03务实范围；搜索接入前复核C-09。 |
 | M0-02E／待开始，依赖02B | 检索后元数据增强：`extensions/retrieval/contextualize.go`；受控候选 `internal/application/service/chat_pipeline/filter_top_k.go`、`internal/agent/tools/search_knowledge.go`。 | FO-1：Host失败保留原结果；增强在ToolResult格式化前生效。 | 架构3.2/3.3/10.3；契约和源调用点稳定后。 |
@@ -55,13 +90,13 @@
 | M0-05／待开始 | 本机MCP与认证：`extensions/mcp/server.go`、`auth.go`、`server_test.go`；使用原生MCP设置注册。 | MC-1：按需schema、token、stdio拒绝、回环allowlist及容器拓扑。 | 架构3.5；C-08配置核实后。 |
 | M0-06A／已完成（本地门禁与CI定义） | `extensions/scripts/check_module_boundary.py`、`check_module_boundary_test.py`、`.github/workflows/extensions.yml`。 | CI-1：7个真实临时module案例和实际module通过；workflow本地解析通过；远端Actions/race未运行。 | 架构15；module/import/workflow变化时重审。 |
 | M0-06B／待开始，依赖上述M0接线 | `extensions/integration/bridge_test.go`、`ingest_recovery_test.go`、`concurrency_test.go`。 | 2文档真实ingest+1000feedback+lifecycle+投影，终态后核对；并发失败按流程降至1重跑。 | 架构4.4/15；可用Lite环境/持久层/适配就绪后；验收范围按用户M0决定限定。 |
-| M0-06C／待处理（用户接受M0非阻塞） | 既有Outbox TestRunRetriesReportsAndDrainsHealthyBacklog报告次数偶发失败保留，候选worker.go/worker_test.go；本轮Windows普通完整测试也触发calls=3 reports=2，已不限于Linux race命令。 | 先前Linux race及定向失败；本轮普通完整suite一次退出1，补齐图像用例后最后十三包退出0；没有修复、放宽断言或把复跑绿色当作问题消失。 | 后续Worker语义、部署扩大和M1最终稳定性验收时；M0豁免不能代替M1稳定性证据。 |
-| M1-A／进行中 | 独立解析代理/预检；首批`extensions/parser/router.go`及测试已实现，预检和HTTP接线尚未完成。详单M1-00至07；核心只读。 | PA-1：预检不parse、正常正式job=1、Office不进四档、按库标定；纯路由不等于已完成预检。 | 用户本轮正式进入M1；接线前先过C-12作用域POC。 |
+| M0-06C／已修复（M2内核批次，2026-10-31） | `outbox/worker.go`仅抑制纯父上下文取消的额外报告，保留业务错误join取消；`worker_test.go`新增两例，原严格drain断言不改。 | RED复现report1而期望0；修复后扩展全suite/build/vet及Linux全race退出0。历史M0豁免记录保留。 | Worker取消/错误分类、租约或部署来源变化时。 |
+| M1-A／进行中 | PDF Cheap Preflight、原生薄客户端/Host及真实上传归档→分块已交付；持久恢复/SQL产物、全来源/权限重查及每库标定未完成。 | PA-1；合成PDF上传不等于生产语料验收；C-12–C-17。 | 生产启用前、原生多来源/身份、容量/恢复、真实语料及OCR资源就绪时。 |
 | M1-B／待开始，依赖M1-A | 版本化原始产物：`extensions/parser/artifacts.go`、计划`extensions/store/migrations/003_parser_artifacts.sql`（002已用于M0，实施时核实下一版本）。 | PA-1：真实服务产物、schema/MinerU版本、无二次解析，失败与重试可追踪。 | 架构7.4；真实MinerU服务及产物契约验证后。 |
 | M1.5／待开始 | 评估/调参/量化实验：`extensions/eval/retrieval.go`、`rrf_grid.go`、`quantization.go`、`testdata/retrieval/`；原生租户retrieval-config API。 | RE-1：每库30–50查询，Recall/MRR基线、flag隔离、Recall@10退化≤2%。 | 架构14/15；M0通过，模型/语料/sqlite-vec变化时重审。 |
-| M2／待开始 | 生命周期业务、规则和stale：`extensions/lifecycle/machine.go`、`rules.go`、`stale.go`、`machine_test.go`；按库配置。 | LC-1/TX-1/OB-1；正式状态矩阵含scheduled，时钟、非法迁移、重放、两种stale分测。 | 架构M2；M0持久化门禁通过及状态设计明确后。 |
-| M3／待开始 | 血缘/版本族/查询：`extensions/lineage/store.go`、`edges.go`、`provenance.go`、`ancestry.go`、`query_test.go`，相应ext迁移。 | LN-1/TX-1：混合边白名单、反向溯源、环、tenant/KB和Critical Edge原子性。 | 架构5/8；C-07按API语义澄清，新增边类型时重审。 |
-| M4／待开始 | 关联与Agentic评估：`extensions/relations/service.go`、`calibrate.go`、`graph_budget.go`、`extensions/mcp/related_docs.go`、`extensions/eval/agentic.go`。 | AS-1：precision/recall、轮次、跨库确认、GraphRAG批准/预算/回退。 | 架构9/10/14；M3稳定后，跨库或GraphRAG申请时重审。 |
+| M2／进行中 | 已完成内核/schema4、Observer/每日扫描/普通RAG DB策略；剩余接线见下方M2细分任务。 | LC-1/TX-1/OB-1；用户正式默认矩阵、注入时钟、事务/并发/崩溃回归通过。 | 自动运行前，规则及标注接口变化时。 |
+| M3／进行中 | 已交付`extensions/lineage/`观察版本/family/来源权威/分边查询，schema8；完整Critical Edge业务与答案输入来源封存后续。 | T1/T2真实原生上传/编辑/旧证据拒绝E2E与SQL/进程恢复、完整8原生包及扩展/race通过；见本轮M3证据。 | 架构5/8；来源权限/原生薄接线/新边类型变化时。 |
+| M4／后台关联进行中，评估待做 | 已实现`extensions/business/related.go`并复用lineage/dependencies；MCP、每库calibrate、graph_budget与Agentic评估继续待做，不预建空组件。 | AS-1真实指标/跨库/预算门禁未验收；本批关联声明/当前版本/撤销已通过组件和原生API验证。 | 原生MCP恢复、真实标注或Graph申请时重审。 |
 | M5-A／待开始 | 反馈指导治理：`extensions/feedback/events.go`、`governance.go`、`cooldown.go`、`governance_test.go`；扩展预算组件。 | GD-1/RV-1/TX-1：冷静期/二次确认/抽检/熔断/audit同事务/质量回归。 | 架构10/12；M0–M4基础稳定、审批策略明确后。 |
 | M5-B／待开始（C-06 POC） | 发布Saga与对账：`extensions/revision/saga.go`、`remote_identity.go`、`reconcile.go`、`publish_recovery_test.go`。 | RV-1：提交后响应丢失先对账，create保持1；未知状态不重放；binary源需用户正式上传。 | 不变量B/C/D、架构12；远端身份POC通过后。 |
 | M6-A／待开始 | mDNS/认证能力：`extensions/discovery/mdns.go`、`capabilities.go`、`static.go`、`discovery_test.go`。 | DS-1：广播字段抓包、无KB元数据、认证拒绝、静态回退。 | 架构11；公开网络范围与认证模型确定后。 |
@@ -76,13 +111,16 @@
 | ID／状态 | 期望结果 | 依据 | 何时重新审视 |
 |---|---|---|---|
 | M1-00／已完成 | 源码映射与首批计划落盘，M0提交及本机4.0.1/可用PDF库核实。 | 本轮Git/包元数据/固定源码读取；Source Map。 | HEAD、MinerU或运行OS变化。 |
-| M1-01／进行中 | 4.0.1协议和显式scope端到端POC；当前仅静态协议及版本已核实，不冒充HTTP实连。 | C-04/C-11/C-12；计划parser/scope.go、mineru_proxy_test.go。 | 正式代理接线前及来源/身份传输变化。 |
+| M1-01／已完成（协议/显式scope POC） | scope及V1构件通过冷/热源字节证明、跨scope拒绝、同进程回执/未知结果门卫；真实4.0.1 Flash/txt两job/ZIP/版本/缓存计数退出0。一次复核及一轮修复完成；不启用Host，不代替原生上传API、KB权限或Doc归属。 | 2026-10-31计划、scope POC报告与本批执行记录；C-12自动绑定/C-13持久恢复/C-14 OCR资源仍保留。 | 预检与生产接线、原生多来源/身份、后端版本及M1最终验收时。 |
 | M1-02／已完成（纯决策函数） | parser/router.go及router_test.go覆盖四档/跨页/native/空预检/稀疏比例；定向与最后完整十三包测试退出0，Linux parser race退出0，一次实际独立复核无实质问题。不代表文件预检或M1已验收。 | Frozen7.1/7.2；本批RED→GREEN及最新执行记录。 | 规则变化、真实预检接线及每库标定时。 |
-| M1-03／未开始 | 真实文件Cheap Preflight及资源/取消约束；preflight.go、pdf_probe.py和测试，不创建正式job。 | Frozen7.2/7.3；可复用Windows4.0.1环境的pypdf；WSL部署需验证。 | 探测器选型、跨系统取消及真实样本齐备时。 |
-| M1-04／未开始 | 独立V1代理/Host接线，正常job计数1，未知结果先恢复不盲目重复；mineru_proxy.go、host配置/生命周期及测试。 | C-04/C-12/C-13；依赖01/03。 | 生产启用、重试/身份/端点变化前。 |
-| M1-05／未开始 | 带格式/schema/MinerU版本的原始产物与归属、并发/崩溃/取消验证；parser/artifacts.go、候选ext迁移003及migrate.go。 | Frozen7.4；依赖明确产物与scope契约。 | 实际产物核实、数据库或存储路径变化。 |
-| M1-06／未开始 | 每库独立标注/验证集及准确率≥85%、高估≤10%、低估≤15%；calibrate.go、testdata/parser/manifest.json。 | Frozen7.3；不以合成信号表替代真实语料指标。 | 文档分布、模型、提取器或阈值变化。 |
-| M1-07／未开始 | 隔离原生上传→预检→单job→产物→索引E2E，并回归M0门卫；m1-e2e-test.sh、m1_e2e_test.py及报告。 | PA-1；依赖01–06、真实模型/语料。 | M1最终验收前；不得因单个纯函数通过完成M1。 |
+| M1-03／已交付（PDF支持子集） | preflight.go使用pdfcpu v0.16.4；真实PDF统计总页/结构文本层/纯图页，冷/热源均预检；强制有效flash/txt且去重前覆盖auto/ocr/advanced；ActualText、Form/压缩/隐藏层/低字符码、坏文件/取消/解码超限回归。真实4.0.1合成文本文件无OCR下载证据；不代表全语料/Unicode/乱码或图片文件检测完毕。 | 用户2026-10-31明确纯Go依赖/路由要求，覆盖Frozen7.2 PDF升档；计划/证据见本批执行记录。 | Tagged结构归属、inline/加密/复杂真实文件、预算及每库标定变化时。 |
+| M1-04／已交付原生PDF接线（恢复待续） | 三处原生生产文件仅注入转发；parser/native.go、host/config.go/runtime.go、bridge/server.go挂载可选鉴权路由；身份/版本拒绝、配置关闭、失败不回退、Linux构建与真实上传已验证。非PDF/URL保持原生；持久恢复另列。 | 用户明确批准薄补丁和Host闭环；C-12 PDF缺身份已解决，C-13不等于跨重启exactly-once。 | 正式启用前，原生升级、多来源、重试/身份/端点变化时。 |
+| M1-04D／已交付（可信核心身份） | Knowledge的tenant/KB/doc通过Header逐请求传递；NativeHandler每doc独立scope自动绑定，同字节两个doc独立job/归档、跨doc拒绝；原生并发身份与后台cancel测试通过。涉及parser_proxy.go/native.go/scope.go/mineru_upload.go及测试。 | 用户本批授权；不从hash/file/job猜doc_id；Host信任核心，不独立回查原生权限。 | 多核心共享key、所有权变化、文档修订/重解析或身份契约变化时。 |
+| M1-05／已交付SQL与进程恢复，断电待验 | 003_parser.sql及recovery.go完成ext_parser_artifacts原始JSON、格式/schema/MinerU版本、正式任务及身份FK；FULL同步DB，落盘后登记再返回ZIP；登记失败503，重启可核验文件并补登记。v1/v2升级保留原数据、进程直接退出/并发/跨身份及真实SQL原字节检查通过；不宣称文件系统与SQLite跨资源原子或物理断电已验收。 | 用户M1剩余任务授权、Frozen7.4；本轮证据m1-recovery-calibration-2026-10-31.md。 | 生产启用、存储设备/挂载方式、schema、版本或身份变化时；断电专测另列05P。 |
+| M1-06／工具已交付，真实标定待语料 | calibrate.go、cmd/parser-calibrate、空manifest.json；真实文件哈希核对、按tenant/KB计算验证集85%/10%/15%、拒绝重复内容/文档族及空集、不使用验证集调参。用户确认暂缺真实PDF/扫描件与人工标签，故未报告真实指标或完成阈值拟合。 | Frozen7.3；用户本轮回复“暂时没有”；合成测试只验证工具。 | 取得每库独立人工标签、train与validation语料后；分布/规则/模型变化时。 |
+| M1-07／已交付联合回归，整体验收待语料/档位 | 既有真实模型证据保留；新增--joint-m0实测上传→预检→唯一job→FS/SQL原始产物→原生分块，重启生产Host复用同job；同一凭证/问答断网关联拒绝且答案生成0、通网收到门卫且答案生成1。此联合模式用本地确定性模型，不宣称再次调用DeepSeek。生产语料/其他档位及03/06完整验收仍待续。 | 两批证据文档，当前真实核心/Host/MinerU4.0.1联合脚本退出0。 | M1最终验收前，真实语料、OCR资源与其他档位就绪时。 |
+| M1-04R／已交付（已知恢复与受控容量） | 以已验证内容hash+tenant/KB/doc+有效策略+后端去重，SQLite先提交intent；已知job/权限可跨重启恢复，未知结果不重发。空闲且持久状态成功的scope可驱逐恢复；130完整文档、12并发、活跃job不驱逐、子进程直接退出与真实Host重启复用单job验证通过。128仍是同时驻留上限，满活跃或写失败时503；同doc自身128次上传上限未移除。 | C-13/C-16；recovery.go/native.go、003迁移及恢复测试。本地唯一Host串行文档入口，原生调度未改。 | 多Host、多核心并发或扩展配置/后端更换时；未知远端结果需人工/唯一关联对账，不能宣称exactly-once。 |
+| M1-05P／目录屏障及崩溃窗口已交付，断电待验 | artifacts.go、artifact_sync.go/windows.go及同步/崩溃测试：非Windows尝试文件Sync→暂存目录Sync→Rename→根目录Sync，再允许SQL/ZIP；失败503且不登记，已发布文件重试补屏障。四个真实退出窗口及9个行为场景验证单job/原件/SQL/FK/跨身份/遗留pending；Windows与WSL通过，WSL另在仓库v9fs磁盘路径验证。Windows保持原先文件Sync/rename，无目录刷新承诺。 | Frozen7.4及本轮M1继续授权；docs/evidence/m1-artifact-publication-2026-10-31.md。物理断电、祖先目录创建、目标设备/挂载语义仍未验，不自动清理pending。 | 确认生产OS/卷/备份方式后，进行受控断电或可丢弃VM测试；生产验收前。 |
 
 ## 执行记录：Bridge基础（2026-10-29）
 
@@ -211,6 +249,86 @@
 - Ruling: 同页OCR+DenseGraphics选Advanced，其他布局Standard，文档取页级最大需求 — Frozen允许的高密度布局选择具体化，避免跨页错误升级 — 代价是密度信号与真实档位仍需每库标定，不能宣称85%准确率。
 - Ruling: 既有Outbox偶发断言只补证、不顺手修或减弱断言 — 本轮路由无共享状态且Outbox源码未改，M0接受决定保留 — 代价是完整suite仍有已知不稳定性，最终复跑0不能代表已解决。
 
+## 执行记录：M1-01 显式scope/V1兼容POC（2026-10-31）
+
+- 基点fa6353e，用户已提交首批M1，开工clean。仅新增独立parser协议/作用域构件、HTTP测试和POC脚本，更新说明；不改core、Host、schema或依赖，不提交/推送。
+- RED→GREEN：先写HTTP测试，因ScopeBinding/NewScopeProxy未定义退出1后实现通过；身份解析测试先缺ResolveScope/ScopeIdentity再通过；结果file不能当input的回归以临时恢复旧逻辑实测失败，再还原修复通过。并发回执快照在锁内读取，网络写不持scope锁。
+- 能力：固定回环origin、不跟随重定向/环境代理、上下游凭据分离；每scope静态tenant/KB与key，跨scope句柄拒绝；后端缓存源也要求实际字节/SHA256；结果只授予读取能力。只支持单file_id+ZIP原生子集；同进程已知回执复用、未知结果拒绝盲目重发，状态/容量均有限，不提供重启恢复。
+- 真实实测：m1_scope_poc.py复用D:/mineru-venv的4.0.1，私有home/uploads与随机回环端口。最终使用Flash/txt和local/offline，两个scope两个正式job，直接确认后端热缓存命中、跨scope拒绝、版本4.0.1及ZIP；退出0。成功报告docs/evidence/m1-scope-poc-2026-10-31.md；后端配置和用户模型目录未修改。
+- C-14实际发现：第一次auto实测45.15秒超时，私有home已获取1780590字节ONNX OCR资源，不能称为零下载。切txt仅针对已有文本层fixture验证协议；未测试OCR或其他三档，不以静默改档满足M1。首次失败摘要单列，普通模型资源位置/就绪在后续正式解析前核实。
+- 清理：新脚本路径校验与限时重试由Windows真实文件锁回归覆盖；本轮成功试跑自己的新临时目录清理完成。首次失败目录agentrag-m1-scope-5uoknq6h清理请求被自动审批拒绝（仅给出blocked by policy），未换工具绕过，残留C:/Users/ybochuan/AppData/Local/Temp/agentrag-m1-scope-5uoknq6h。后续未查到Python进程；先前孤儿进程判断证据不足，已更正，不猜测具体占用方。
+- 原生SDK验证：Windows定向命令因internal/utils/inject.go引用pg_query.Parse/Deparse且CGO不可用而退出1，未执行断言；WSL CGO=1运行同一docparser目标测试退出0。不改原生代码/依赖修环境，也不将这些原生fixture测试冒充原生API→代理→真实服务联合E2E。
+- 完整检查：本轮完整十三包先重现旧Outbox TestRunRetriesReportsAndDrainsHealthyBacklog(calls=3 reports=2)退出1；修复后的最后同一完整命令退出0，旧问题未修复。build/vet、245 imports模块门禁及最新Linux parser race均退出0；Python二十例退出0（Windows SIGTERM一例skip）。最终真实4.0.1 POC于01:13:03启动，退出0，明确热缓存命中、两scope两job与ZIP；资源快照无ONNX权重。原生SDK定向WSL退出0，Windows构建失败已单列。
+- 一次独立复核：Critical0、Important1、Minor2。确认async失败HTTP200也会带后端str(exc)，新增create/poll/cancel/cache回归先失败再掩码，保留失败状态与固定parse_failed，不回传异常参数；其代价是减少公开错误细节。endpoint文档误带/v1会实际阻断原生调用，主任务按功能影响上调Important并修正为不带/v1；prose不写文本镜像测试。清理失败仍声称stopped涉及证据准确性，同样上调Important，OS拒绝模拟回归先失败再增加确认逻辑后通过。只做这一轮修复，没有第二次独立复核；修复后完整Go/脚本/真实后端检查由主任务执行。
+- 验证边界：未重跑上游全量/前端/生产LLM、原生API→本代理→真实服务联合E2E、真实权限/Doc关联、预检、持久产物/重启恢复、OCR/其他档位或每库标定。独立复核未重跑真实服务、Linux race、完整suite或原生SDK，也未重审M0或清理被拒绝目录。
+- Ruling: 本批完成协议及显式scope POC，不启用生产Host — 原生身份仍只来自配置断言，预检/产物/持久恢复未接线 — 代价是C-12自动KB/Doc证明与C-13重启恢复仍需后续，M1不能标完成。
+- Ruling: 后端缓存也要求本地上传字节与hash证明，不用hash猜测KB权限 — 保住未来预检与每scope源能力边界 — 代价是热缓存仍有回环源字节传输，POC还不提供性能/持久缓存保证。
+- Ruling: 真实PoC固定文本层PDF+Flash/txt+local/offline，auto失败及私有ONNX获取另记 — 不把资源未齐的OCR流程伪装成功 — 代价是其他三档/auto/OCR能力尚未验证；首次失败目录清理被审批拒绝后保留，不绕过。
+- Ruling: 对异步失败也掩码，纠正endpoint和退出证据；旧Outbox不顺手修 — 本轮限定解析协议边界且旧失败与新代码无依赖 — 代价是后端公开诊断更少、完整suite仍有已知不稳定性，不以最终绿色抹去。
+
+## 执行记录：M1-03 真实PDF预检与显式文件归档（2026-10-31）
+
+- 依据：用户明确引入pdfcpu纯Go库，文本PDF禁auto/OCR、只纯扫描可OCR，接代理并保存middle.json。基点仍fa6353e；保留M1-01未提交工作；只改扩展及说明，未提交/推送，不挂载生产Host或改核心。
+- 计划：docs/superpowers/plans/2026-10-31-m1-pdf-preflight.md；依赖固定pdfcpu v0.16.4，Go1.26兼容；只有extensions/go.mod/go.sum变化，根依赖不变。pdf_probe.py计划被本轮用户明确的纯Go方案取代。
+- RED→GREEN：新预检API缺失先编译失败；真实PDF字符/TJ/hex/隐藏层、混合/纯图/空白/字体资源/坏文件/取消/压缩Form/解码超限验证；代理unsafe偏好先造成3job而非1、损坏PDF先204，接线后均通过。低编号编码真实字符与未确认文本字节的扫描误判、提前ZIP绕过归档门卫也实测失败后修复。
+- 产物：启用WithArtifactRoot后须可信BindDocument；缺ID为409且0job。完成ZIP的正式middle_json.json保留字节落为{root}/{doc_id}/middle.json，manifest记录真实格式/schema/MinerU版本及scope/source/hash；8并发临时真实文件系统写入幂等、内容/归属冲突拒绝，路径与多份middle拒绝。不是SQL/断电/崩溃恢复验收。
+- 首次真实验证01:49:14退出0，报告docs/evidence/m1-preflight-2026-10-31.md。日志当时“zero external DNS/TCP”仅表示Python socket审计，不代表系统级网络隔离；最终日志已明确限定。
+- 独立复核一次：Critical0、Important1、Minor0。ActualText直接/命名属性被当纯图的Important确认；新增实际PDF/代理回归先失败，再支持可解码ActualText，结构树MCID未解析时不授予纯图许可；未知操作符误授OCR回归亦先失败后拒绝。修复后parser全包退出0；只有此一轮修复，没有第二次复核。
+- 最终真实验证02:05:03：`python scripts/m1_scope_poc.py --mineru-python D:/mineru-venv/Scripts/python.exe --report ../docs/evidence/m1-preflight-2026-10-31-final.md`（extensions目录）退出0。1页/1文本页；上游收到flash/txt而非调用方auto/ocr+advanced；2scope共2正式job、真实热缓存命中；明确测试doc_id下middle.json、schema2.0/MinerU4.0.1；退出后Python受审计外部DNS/TCP尝试0、私有目录ONNX0，清理确认成功。
+- Go完整命令`go test -mod=readonly ./... -count=1`：首轮退出1，仅既存Outbox TestRunRetriesReportsAndDrainsHealthyBacklog（calls=3 reports=2）；修复预检后最终相同命令十三包全部通过、退出0。旧不稳定性未修，不以绿色抹去首轮失败或扩展M0豁免为M1全量验收。
+- 最终`go build -mod=readonly ./...`、`go vet -mod=readonly ./...`、`gofmt -l .`均退出0（格式无输出）。`python scripts/check_module_boundary.py`退出0，306 imports；`python -m unittest discover -s scripts -p '*_test.py' -v`退出0，21例、Windows SIGTERM一例skip。WSL/Linux CGO=1 `go test -mod=readonly -race ./parser -count=1`退出0；未声称全模块race通过。
+- 范围：git diff --check退出0；internal/及根go.mod/go.sum无diff，BASELINE/Frozen与根依赖SHA256保持原值。未跑上游全量/前端/真实LLM、实际OCR/模型下载、原生上传→代理→索引联合E2E、权限/Doc自动绑定、产物SQL/崩溃/断电恢复或每库语料标定；M1总体不标完成。
+- Ruling: 用户最新PDF规则优先于Frozen7.2升档 — 任何已确认文本页固定flash/txt，混合页复核，只有全纯图basic/ocr — 代价是复杂文本布局不升Standard/Advanced、混合扫描页不自动恢复。
+- Ruling: 文本层按结构证据检查，不冒充完整Unicode/乱码或每库准确率；unsupported/不确定拒绝 — 代价是inline/部分Tagged等真实PDF需后续支持/复核，不能称全PDF兼容。
+- Ruling: 原生未传doc_id，仅可信进程内绑定启用归档，缺ID拒绝 — 代价是生产原生身份及SQL恢复仍未接线，POC不证明原生权限。
+- Final: Ruling: 复核暂不判定的同scope同file_id多doc_id，本阶段保留安全拒绝 — 防止错误复用或覆盖，不能未经用户允许扩展原生契约 — 代价是该重复内容多文档场景暂不支持，交M1-04D解决。可选归档/未挂载Host、完整Unicode/每库标定及M1验收也未由复核认定完成，按上述边界保留。
+
+## 执行记录：M1 原生PDF薄接线（2026-10-31）
+
+- 范围：用户明确批准三处原生生产文件及Host接收端。修改knowledge_process.go分派、mineru_converter.go可选请求级V1 client，新增parser_proxy.go与测试；原生解析结果消费、Markdown转换、分块/索引和调度算法未改。原有M1未提交改动保留；未提交/推送。BASELINE、Frozen及根go.mod/go.sum哈希保持原值。
+- 传输：环境origin可指定宿主IP，客户端固定origin/path、禁redirect/环境proxy，所有上传/complete/job/poll/ZIP与后台取消都携带不可变tenant/KB/doc/version及Bearer；配置后任何错误不回退。Host单独配置后端凭据及显式scope，重复/缺失/伪造Header、错major/key/scope拒绝。每doc子scope自动绑定；同字节不同doc独立归档，原件冲突安全拒绝。
+- RED→GREEN：原生薄客户端、Host接收端和配置先缺API编译失败，后通过；非PDF绕预检、源下载误报归档、尾随scope JSON先实测失败后修复；Markdown下划线转义核验先失败再增加完整句子规范化验证，未改原生文本。补401/503/不可达/跨origin、并发身份和脱离context取消测试。
+- 一次独立复核：Critical0、Important1、Minor0。挂载parser继承Bridge5秒body与上游30秒bulk导致慢上传误拒绝，主任务确认。唯一修复轮次：真实分段5.2秒上传先HTTP400再204；独立metadata/bulk超时与取消回归先缺实现失败再通过；默认bulk/body1000秒，可用AGENTRAG_PARSER_BULK_TIMEOUT与核心WEKNORA_MINERU_TIMEOUT配套，M0仍5秒。修复后扩展十三包全绿；未派第二次复核。用户随后追加的真实模型脚本由主任务验证，未再独立评审。
+- 原生Linux验证：Ubuntu Go1.26/GCC，CGO_ENABLED=1、GOWORK=off、sqlite_fts5、lite edition及protobuf兼容ldflags构建新二进制成功退出0，位置tmp/m1-native-build-83iqcjjt/WeKnora-lite（不覆盖用户原件）；最新完整docparser包测试退出0。Windows无CGO的旧原生问题未冒称解决；扩展Windows及Ubuntu均CGO_ENABLED=0 build退出0。
+- 原生service完整包：两次退出1，当前DNS将example.com与api.e2b.app解析至受限198.18地址，引发URL/MCP/sandbox测试SSRF拒绝；错误摘要与命令见证据文档。未修改SSRF或上游测试，未将定向测试/构建的成功说成上游完整测试通过；未跑根全量/前端构建、生产负载或远端CI。
+- 扩展：go test -mod=readonly ./... -count=1十三包退出0；build/vet退出0；gofmt -l无输出。Linux CGO=1 go test -mod=readonly -race ./parser ./host ./bridge -count=1退出0，未声称完整race。边界脚本306 imports退出0，GOMOD指向extensions、GOWORK空；Python25例Windows退出0/skip1，Ubuntu退出0/skip2（原M0生命周期因端口占用及Windows文件锁案例）。既存Outbox不稳定性未修，本批最后完整suite未复现。
+- 原生上传实测：最终默认夹具模式退出0，实际核心/Host/Windows MinerU4.0.1；2原生分块中1条包含完整PDF正文，页数1、flash/txt、正式job1、三重身份一致、middle schema2.0，脚本私有DB清理确认。采用自有回环互操作中继，不修改WSL/防火墙/全局转发。最初端口占用、临时二进制缺失及Markdown核验失败均保留，不能反推前几次已通过。
+- 真实模型：用户明确授权使用DeepSeek生成式问答和两个本地模型，并批准仅为8081/8082补--embeddings/--reranking重启。原服务能力接口先501；重启后实际向量2560维，重排返回正确排序。key仅进程环境/私有stdin和隔离DB、日志脱敏，不写仓库。--live-models通过原生API注册到新空间；最终上传单job，显式knowledge-search diagnostics.applied=true/outcome=ok；successful embedding4、rerank1、DeepSeek generation3，返回“两名审阅者”并引用该PDF。问答本身重排0次，独立检索API补验，不声称默认问答已自动重排。模型服务测试后保留运行。
+- 失败证据：真实模式初次base_url缺/v1，测试中继拒绝/embeddings，导致整个原生任务重试及4次parse POST，随后归档冲突503；修正测试地址后正常流程单job。后两轮因默认问答未调用reranker被脚本判FAIL，最后用原生显式检索API分开验证后PASS。C-13记录该真实重试边界，不擅改原生调度/覆盖middle或宣称所有失败只解析一次。
+- 完整脱敏终端输出、全部主要命令及退出状态汇总：docs/evidence/m1-native-integration-2026-10-31.md。Python受审计的MinerU外网尝试0、私有ONNX0，仅表示该文本夹具/进程审计；真实DeepSeek云端调用由测试授权并单独中继，不将此日志解读为全系统零外网。
+- Ruling: WSL/Windows分离使用拥有的测试回环中继，核心生产只读配置origin、Host仍127.0.0.1 — 避免改全局网络或放宽监听 — 代价是本轮不证明用户的生产隧道可达。
+- Final: Ruling: SQL/崩溃重启/128 scope释放属于04R/05后续 — 当前安全容量拒绝及未知结果拒绝保持 — 代价是有限试用批次及原生重试仍可能重复解析，不宣称可靠恢复。
+- Final: Ruling: OCR/其他档位、Unicode质量和每库标定仍未交付 — 本批只验证真实文本PDF — 代价是不能宣布Frozen M1整体完成。
+- Final: Ruling: Host信任已鉴权核心的身份Header，限定配置tenant/KB，不独立回查所有权 — 与授权薄补丁一致 — 代价是共享key持有者及所有权后续变更需单独治理。
+- Final: Ruling: 已归档doc不同内容仍拒绝覆盖 — 不擅加修订状态机 — 代价是原doc重解析/修订需后续受控版本发布。
+- Final: Ruling: 真实检索和生成通过只证明该合成语料的可用性 — 未以此宣称向量/FTS质量标定或全语料验收 — 代价是仍需独立生产语料与负载验证。
+- Final: Ruling: 本轮不重审全部M0/预检器，也不重跑M0问答断网通网 — 保留既有验收与本轮有限回归区分 — 代价是完整M1联合门禁仍待完成。Deferred minors: none。
+
+## 执行记录：M1持久恢复／SQL产物／标定工具（2026-10-31后续）
+
+- 用户要求处理M1未完成项目，另确认“暂时没有”真实PDF/扫描件及人工期望标签。新增计划docs/superpowers/plans/2026-10-31-m1-recovery-calibration.md；所有原有工作保留，本轮未新增原生补丁、未提交/推送。
+- 04R：物理验证hash+可信文档身份/有效策略/后端的正式任务去重；先FULL同步intent再POST，已知回执/权限持久恢复，未知结果不重发。130完整文档、12并发原生创建、两个独立SQLite写连接的12次claim唯一性、活跃job不驱逐，以及真实Host重启单job均通过。
+- 05：003_parser.sql、ext_parser_artifacts原始BLOB及格式/schema/MinerU版本/正式任务与身份FK；v1/v2升级保留数据。文件发布后SQL登记，失败503，恢复核验原文件再补登记。子进程os.Exit绕过defer分别在intent、receipt和archive后退出，恢复测试通过；闭库拒绝发送、取消轮询后独立取消、旧归档无日志拒绝通过。
+- 06：纯Go标定测量库/CLI及空manifest；实际读取PDF核hash，按库验证85/10/15与拒绝数，训练/验证文档族与重复内容泄漏拒绝。不是自动阈值拟合，不报告真实指标；空清单正确失败。
+- RED→GREEN：恢复API/迁移v3与标定API先缺失失败后通过。一次独立复核Critical0/Important3/Minor0，单轮修复分别覆盖NORMAL路径改写、取消轮询毒化已知job/拒绝取消、旧归档缺快照被当新文档；各先复现失败后通过，随后完整suite。未二次复核。
+- 最终命令：扩展build/test/vet均0，gofmt无输出，边界308 imports退出0；Python26例退出0/skip1；Ubuntu CGO=1完整go test -race ./... -count=1最后退出0。此前race两次失败均保留：新fixture初始化竞争已修；既有Outbox calls=3/reports=2未改，最后通过不等于解决其不稳定性。
+- 07：真实WSL核心/生产Host/Windows MinerU4.0.1、全新隔离DB，--joint-m0最后退出0。原生上传→单job flash/txt→FS/SQL原字节/schema2.0/MinerU4.0.1/FK→分块通过；停Host核心关联拒绝/答案生成0，重启Host恢复同job且远端POST仍1；同凭证会话问答通网生成1且收到门卫。此轮模型是本地夹具，未冒称再次DeepSeek实测。
+- 证据：docs/evidence/m1-recovery-calibration-2026-10-31.md，含完整最终E2E输出、命令及历次故障。根全量测试/前端/物理断电/真实标定未执行。只复用此前真实CGO核心二进制；本轮扩展Windows及Linux构建不需CGO。
+- Ruling: 未知远端结果及旧归档无日志时拒绝，不推断job归属或自动补发 — 防止重复正式解析/覆盖原件 — 代价是需人工恢复，暂不承诺exactly-once。
+- Ruling: 真实标定、图片/复杂预检及物理断电继续保持未验收，不以合成夹具替代 — 缺语料/资源及部署存储依据 — 代价是M1不能整体结项。Deferred minors: none。
+
+## 执行记录：M1归档发布屏障与故障窗口（2026-10-31继续）
+
+- 范围：用户要求继续M1；先推进05P无需真实语料的可实施部分。新增计划2026-10-31-m1-artifact-publication.md；仅修改extensions/parser/artifacts.go、新增两平台同步helper与两测试文件，更新文档。没有新增原生补丁、依赖或SQL迁移，既有改动保留，未提交/推送。
+- 顺序：原有两个文件Sync后，非Windows额外Sync暂存目录，Rename整个目录，再Sync产物根。任一步错误均先于SQL登记/ZIP ACK返回；已有相同归档先核验字节，再Sync文档目录及根，补上上次失败屏障。Windows保留原行为，不能冒称等同Linux目录同步。
+- RED→GREEN：新增屏障顺序/失败/重试测试先因缺少syncDirectory字段编译失败，补最小实现后通过。原生接口的stage/root注入失败返回503且SQL为0，修复后返回200且正式job始终1；测试未改变业务路由。
+- 崩溃：直接退出子进程分别落在stage已同步、Rename后根未同步、根同步后SQL前、SQL提交后ACK前；检查前三窗口SQL0、最后窗口SQL1，恢复后同job/SQL1/文件原字节/FK，跨doc403，旧.pending数据保留。既有未知结果/旧归档无日志拒绝规则保持。
+- 验证：Windows扩展build/test/vet退出0，gofmt无输出，边界308imports与独立go list检查0；Python26例0/skip1。Linux完整race命令本次退出1，仅既有Outbox calls=3 reports=2断言；parser等其他包通过，无新data-race报告，未改Outbox或重跑到绿掩盖失败。
+- 存储实测：WSL /tmp实测为tmpfs，不能作为磁盘证据；额外将TMPDIR定在仓库tmp下自有隔离目录（/mnt/d实测v9fs），同样同步与退出窗口测试退出0，清理仅限该自有目录。v9fs调用成功不是底层设备断电证明。
+- 真实联合E2E退出0：复用此前未变的WSL CGO核心，新构建Host及Windows MinerU4.0.1，单job flash/txt、SQL原字节/版本/FK、分块、Host重启恢复、M0断网生成0/通网生成1均通过。使用本地模型夹具，本轮没有再调用DeepSeek。
+- 一次独立审查Critical0/Important0/Minor0，复核者定向测试及diff-check退出0；无修复轮次、无二次审查。完整命令和E2E终端输出见docs/evidence/m1-artifact-publication-2026-10-31.md。根全量/前端/物理断电未跑，M1整体未结项。
+- Ruling: Windows保持原有文件Sync/rename，物理断电和上层目录创建继续待验 — 不以不可移植目录句柄刷新破坏现有行为或伪造保证 — 代价是Windows目录元数据/设备掉电持久性未承诺，M1-05P不能标成全部完成。Deferred minors: none。
+
 ## 新任务占位（待填充）
 
 - ID／状态：待填充
@@ -218,3 +336,43 @@
 - 依据：待填充（用户请求、架构章节或具体源码／问题证据）
 - 何时重新审视：待填充（时间、前置里程碑或可观察触发条件）
 - 验收证据／完成日期：实施后填写
+
+## M2 内核任务（2026-10-31）
+
+2026-11-01当前增量（不覆盖下方历史批次结论）：
+
+| 任务／状态 | 期望结果与涉及路径 | 依据与验证 | 何时重新审视 |
+|---|---|---|---|
+| M2-SOURCE-GATE／已实现并验收指定链路 | RAG摘要、最终上下文、Agent search/read/list/schema/analysis及MCP文档读取服从active；`internal/extensionbridge/documents.go`和对应薄Hook。 | 用户漏洞修复授权；六包定向/race、真实上传→Observer active→日期扫描stale→同会话/已知ID→断Host E2E退出0；模型所有输入和重排输入均检查。 | 新工具、DTO、模型上下文或上游版本变化时。 |
+| M2-UNKNOWN-SOURCE／M2安全拒绝已实施 | 历史/压缩/恢复、Wiki/图谱、页面快照、旧答案亲和标题、SQL/会话检索、通用操作和不透明外部MCP结果暂拒绝；保留存储。 | 用户明确批准；最早读取入口的负向测试、RAG/Agent同会话旧答案标记及独立复审。 | 有完整逐文档来源链、许可重新验证和撤销测试后；禁止仅移除拒绝恢复功能。 |
+| M2-COPY-LINEAGE／扩展账本已完成，原生未接线 | 用户批准的同步来源账本及离线事务/许可决策位于`extensions/provenance/`、schema6；Host契约、可信来源适配及文件/记忆/下载门卫另行确认。 | C-27同步事实适配已批准，COPY-01/02A验证通过；并发、故障、进程退出及完整扩展/race见`docs/evidence/copy-provenance-ledger-2026-11-01.md`。尚不能声明真实副本撤销，C-28～32仍限制运行边界。 | 原生接线审批、M3版本权威性、来源封存或下载范围变化时。 |
+| M2-STREAM-REVOKE／设计已形成，未实现 | 生成期间停用的取消/租约或许可版本策略；见`docs/design/M2-Stream-Revoke-2026-11-01.md`，待明确SLA/策略及完整来源集。 | 当前仅入口/最终RAG拼接许可；原生取消可能flush缓冲，不能直接声称持续撤销；Frozen guidance fail-open保持独立。 | 定义即时撤销SLA或生产发布前。 |
+| M2-BASELINE-CHECKS／本轮相关8包已通过 | 原49项环境/夹具失败已清除；追加4项换行/DNS/MCP治理期望兼容，保留业务/协议/RBAC断言。 | 最终完整8包命令退出0；WSL补齐venv，精确测试fixture不关闭生产保护；见`docs/evidence/m3-trusted-sources-2026-11-01.md`。 | OS/Python/DNS/原生协议变化或上游全仓发布验收前；不等于全仓Go测试通过。 |
+| M2-FRONTEND-GATES／已完成（2026-11-01） | 清除8项前端测试环境基线失败；六个原测试与 `frontend/src/test-utils/posixShell{,.test}.ts`，业务断言保留。 | 完整2369项中2368通过/0失败/1既有skip；type-check/build退出0；三种损坏行为仍被原测试拒绝；独立34项复核通过，见 `docs/evidence/m2-frontend-gates-2026-11-01.md`。 | 操作系统、Git安装、换行策略、构建工具或对应业务行为变化时；原生后端全量门禁仍独立待排查。 |
+| M2-LOCAL-DEPLOY／本机验收完成 | 已备份并安装候选Core，启动Core/worker Host；Windows访问端口18880，Bridge仍为WSL回环8090。 | C-26：Windows保留7991–8090，获准重启WSL后仍保留；调整Core端口与Host Core URL后，Windows UI/健康/原账号登录/知识库API均200。 | Windows保留范围、WSL网络、部署配置或重新编译时；不要硬删系统端口保留。 |
+
+证据、冲突点及准确命令：`docs/design/M2-Governance-Leak-Closure-2026-11-01.md`。本增量不将M2整体、UI、生产云模型或MinerU联合验收标记完成。
+
+| ID／状态 | 期望结果＋文件 | 依据／验证方法 | 何时重新审视 |
+|---|---|---|---|
+| M2-CORE／已交付（组件范围） | `extensions/lifecycle/{machine,rules,stale}.go`及测试、`store.go`同事务guard、`store/migrations/004_lifecycle_policy.sql`；标注日期驱动、每库规则、并发fence、不可变决策回执。 | 用户默认矩阵；五处SQL故障全回滚、真实子进程中途/提交后退出、24迁移及24标注并发各单赢家、ABA/跨scope/FK/幂等；详见M2设计及证据。 | 自动接线、有效期或分类体系变化时。 |
+| M2-INGEST／已接线（公共API对账观察） | `extensions/ingest/lifecycle.go`适配持久Observer，Host worker启用；completed后pending→active/scheduled/stale，重复观察恢复未完成决策。 | 事务内重查最新完成观察；旧completed不能盖过failed，重复不增事件，业务决策故障后同观察可恢复；真实Host/SQLite跨进程通过，未伪造原生中间历史。 | 原生公开列表字段、事件身份或解析重试行为变化时；直接原生事件Hook仍后续。 |
+| M2-TIMER／已接线（24h扫描） | `extensions/lifecycle/automation.go`及Host启动补扫/24h循环；pending/scheduled/active过期直接stale，scheduled到期可active。 | CAS/幂等事实保证重扫，scope限制；scheduled激活同事务要求最新completed，failed/processing/缺失拒绝；到期边界、启动catch-up和正常取消已测。 | 需要精确到秒/指定时区日历cron、扫描容量或解析来源变化时；默认最多24h迁移延迟。 |
+| M2-REVIEW／已完成（本地告警范围，2026-10-31） | `extensions/review/`、schema5、Host显式分流/24h扫描、`cmd/review-alerts`只读CLI；review_due只告警不改状态。 | 重复/257页扫描、24并发检查与投递、日期往返、故障回滚、dead/人工重试、三类真实退出恢复、Host无标签调用；全扩展checks/Linux race通过，独立复核无问题。 | 外部渠道、UI/鉴权、扫描频率或通知负载变化时；本地日志至少一次，不承诺外部exactly-once。 |
+| M2-CONFIG／已交付（2026-11-01） | `extensions/management/`、Host管理认证、原生JWT薄转发及配置UI；日期快照保留标签，规则正文/本库版本同事务读取。 | 真实8并发写单赢家；scope/凭证/只读/跨库拒绝；不支持的生效日期改动同CAS事务拒绝；默认规则不追溯。 | 状态矩阵、来源权限、批量编辑或管理API面向机器调用时。 |
+| M2-UI-DATE／Baseline Limitation | 保留冻结矩阵：拒绝active未来effective_from，拒绝scheduled清空effective_from；不改变revision、状态，不复活失效态。 | 审查发现Timer缺少active→scheduled；新增扩展同写事务守卫及回归，防止保存成功却仍放行。 | 需要重新排期或重新生效时，先明确迁移矩阵和来源完整性规则。 |
+| M2-SUPPLEMENT／T3已交付并验收（2026-11-01） | 同库显式父关系、schema9、版本绑定、Critical Edge/声明/audit原子提交、父失效/复核联动、原生JWT管理薄接口和详情UI已接入；见`docs/evidence/m2-supplements-2026-11-01.md`。 | 16并发1赢家、6 SQL故障点与进程崩溃/幂等、scope/CAS/环/共享祖先深度/并发改边拒绝；真实上传/RAG/Agent正反E2E、全扩展/race/8原生包/前端验证通过。真实组件的合成接口浏览器点击通过，完整原生App/真实用户库浏览器验收及生产替换未执行；M2仍待T4/T5。 | 完整run封存/副本门卫/持续撤销接入，或跨库、来源和业务矩阵变化时。 |
+
+M2边界：本批没有新增原生补丁，没有接入active检索过滤，也没有完成Observer/定时/告警全链路。M1未验收项目保留；物理断电、生产负载、上游/前端全量检查和远端CI本批未验证。
+
+## M2原生消费与策略接管（2026-10-31）
+
+本轮用户明确授权原生薄补丁，补全过期规则并要求DB真实策略。M0默认透传记录保留为历史；当前Host probe对业务返回503，worker以FULL持久DB和显式tenant/KB配置接管。无生命周期事实也排除，部署需先对账；不回退透传或whole-KB。
+
+新增extensions/lifecycle/automation.go、ingest/lifecycle.go、retrieval/policy.go及Host接线；原生新增internal/extensionbridge/response.go，client返回Decision，search_parallel在原合并结果处执行允许集/排除集过滤。RRF、检索算法、Agent、分块及原生DB未重构。
+
+验收细分：Observer/每日扫描/DB策略/普通RAG消费已通过组件及真实Host/SQLite→原生PluginSearchParallel跨进程验证，底层源列表和检索结果为夹具。Lite新二进制CGO编译成功。未运行生产数据库迁移、真实上传/LLM问答、前端或全部Agent入口验收；M1缺口及M2配置UI/复核告警/补充通知权威血缘仍保留。
+
+独立复核发现Important1：scheduled在failed/processing/缺失最新观察时会被Timer激活。三例先RED再修复，事务内要求completed；修复后全suite/race补证，不派二次复核。普通文档命中还必须位于返回允许集，避免原生目标范围较宽时混入未判定文档；WebSearch类型保留，排除优先。
+
+后续待办：适配历史M0/M1完整上传/问答E2E的worker凭证与DB配置；当前新增extensions/scripts/m2-policy-e2e.sh专门验证本批跨模块策略链路。Agent直接读/旧handle/独立图谱/生成中停用、C-10标签null拒绝限制、whole-KB授权文档枚举不因本批接线消失。

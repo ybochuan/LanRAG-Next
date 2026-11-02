@@ -753,6 +753,9 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 	if knowledge == nil {
 		return nil, fmt.Errorf("knowledge cannot be nil")
 	}
+	if err := requireGovernedDocument(ctx, knowledge); err != nil {
+		return nil, err
+	}
 	tableName := t.TableName(knowledge)
 
 	// Normalize file type to lowercase for comparison

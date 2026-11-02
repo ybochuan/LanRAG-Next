@@ -1,0 +1,7 @@
+[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes
+[PORTS] Owned ephemeral core/Host loopback ports; existing 8080/8090 services preserved
+[AUTH] Native registration/login succeeded; credentials redacted
+[ERROR] RuntimeError: identity/archive/chunk/job acceptance failed
+[CLEANUP] Owned Linux processes stopped; fresh isolated DB only, no original DB touched
+[CLEANUP] Owned processes stopped
+[RESULT] FAIL

@@ -1,0 +1,8 @@
+[MODELS] Live embeddings ready; dimension=2560; generation=DeepSeek/deepseek-flash; credentials redacted
+[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes
+[PORTS] Owned core=8080 Host=8090; unknown existing owners are never stopped by this script
+[AUTH] Native registration/login succeeded; credentials redacted
+[ERROR] RuntimeError: native upload did not complete: Document parsing failed. Check the file format and the DocReader logs for this attempt.
+[CLEANUP] Owned Linux processes stopped; fresh isolated DB only, no original DB touched
+[CLEANUP] Owned processes stopped
+[RESULT] FAIL

@@ -39,6 +39,9 @@ func (p *PluginIntoChatMessage) ActivationEvents() []types.EventType {
 func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	if err := guardPromptResults(ctx, chatManage); err != nil {
+		return &PluginError{Err: err, Description: "Extension Bridge prompt policy failed", ErrorType: "bridge_prompt_policy_failed"}
+	}
 	pipelineInfo(ctx, "IntoChatMessage", "input", map[string]interface{}{
 		"session_id":       chatManage.SessionID,
 		"merge_result_cnt": len(chatManage.MergeResult),

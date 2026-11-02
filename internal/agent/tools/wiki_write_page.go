@@ -90,6 +90,9 @@ func (t *wikiWritePageTool) WithSearchTargets(searchTargets types.SearchTargets)
 }
 
 func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	// Attribute every page write performed by this tool to the agent so
 	// revision history distinguishes agent edits from pipeline/user ones.
 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)

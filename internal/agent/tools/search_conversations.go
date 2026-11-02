@@ -104,6 +104,9 @@ func NewSearchConversationsTool(
 func (t *SearchConversationsTool) Execute(
 	ctx context.Context, args json.RawMessage,
 ) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var input SearchConversationsInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		return &types.ToolResult{

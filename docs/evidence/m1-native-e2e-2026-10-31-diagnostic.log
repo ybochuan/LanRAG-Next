@@ -1,0 +1,6 @@
+[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes
+[PORTS] Owned core=8080 Host=8090; unknown existing owners are never stopped by this script
+[ERROR] FileNotFoundError: [Errno 2] No such file or directory: '/tmp/agentrag-m1-native-build-6q6lj2vd/WeKnora-lite'
+[CLEANUP] Owned Linux processes stopped; fresh isolated DB only, no original DB touched
+[CLEANUP] Owned processes stopped
+[RESULT] FAIL

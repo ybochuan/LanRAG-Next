@@ -1,0 +1,17 @@
+[AUTH] Native register/login PASS; private credentials omitted
+[OFFLINE] Management facade returns 503 with Host stopped PASS
+[UPLOAD] Real upload -> native chunks -> Observer active -> titled UI overview PASS
+[SUPPLEMENT] Real uploads -> scoped current versions -> native JWT declaration/replay/CAS PASS
+[POSITIVE] Child body/description reached real RAG + Agent search/read/list model requests PASS
+[VERSION] Active parent native edit -> fresh-root mismatch -> child absent from ALL RAG/Agent model requests PASS
+=== RUN   TestSupplementOwnedSweep
+    supplement_integration_test.go:44: [DEPENDENCY-SWEEP] real persisted parent invalidation -> child stale via Machine PASS
+--- PASS: TestSupplementOwnedSweep (0.13s)
+PASS
+ok  	github.com/ybochuan/LanRAG-Next/extensions/lineage	0.131s
+[EXPIRY] Parent expiry -> immediate model exclusion -> actual Machine child stale/event/outbox; labels retained PASS
+[DATES] Past expiry -> stale, labels retained, event timeline, stale CAS rejected PASS
+[POLICY] Same document excluded by real DB policy immediately after date edit PASS
+[CONCURRENCY] Eight real HTTP writers: one 200 + seven 409, no lost update PASS
+[AUTHORIZATION] Missing login 401, machine key 403, foreign document 404, viewer read-only/write403 PASS
+[RESULT] M2 lifecycle management E2E PASS; real Core/Host/SQLite; deterministic local model fixture

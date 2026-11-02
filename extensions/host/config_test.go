@@ -33,7 +33,6 @@ func TestConfigDefaultsAndCompleteWorker(t *testing.T) {
 
 func TestConfigRejectsInvalidInputsWithoutEchoingValues(t *testing.T) {
 	for _, change := range []func(map[string]string){
-		func(e map[string]string) { delete(e, "AGENTRAG_EXT_DB") },
 		func(e map[string]string) { delete(e, "AGENTRAG_WEKNORA_API_KEY") },
 		func(e map[string]string) { e["AGENTRAG_WEKNORA_URL"] = "http://user:test-secret@localhost" },
 		func(e map[string]string) { e["AGENTRAG_TENANT_ID"] = "test-secret" },

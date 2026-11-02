@@ -152,6 +152,9 @@ const hostEditSandboxFileDescription = "Apply exact text replacements to an exis
 
 // Execute reads the file, applies the replacement, and writes it back.
 func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	logger.Infof(ctx, "[Tool][EditSandboxFile] Execute started")
 
 	var input EditSandboxFileInput

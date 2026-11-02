@@ -74,13 +74,14 @@ def phase_log(path, offset):
 
 
 class HTTP:
-    def __init__(self):
+    def __init__(self, base_url="http://127.0.0.1:8080"):
+        self.base_url = base_url.rstrip("/")
         self.token = ""
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def call(self, method, url, payload=None, request_id=None, timeout=45):
         headers = {"Content-Type": "application/json"}
-        if self.token and url.startswith("http://127.0.0.1:8080/api/v1/"):
+        if self.token and url.startswith(self.base_url + "/api/v1/"):
             headers["Authorization"] = "Bearer " + self.token
         if request_id:
             headers["X-Request-ID"] = request_id
@@ -93,7 +94,7 @@ class HTTP:
             return response.status, response.read(4 << 20).decode("utf-8", errors="replace")
 
     def api(self, method, route, payload=None):
-        status, body = self.call(method, "http://127.0.0.1:8080/api/v1" + route, payload)
+        status, body = self.call(method, self.base_url + "/api/v1" + route, payload)
         try:
             data = json.loads(body)
         except ValueError:

@@ -94,6 +94,9 @@ func (s *agentArtifactFiles) Read(ctx context.Context, ref string) ([]byte, erro
 				"use the exact resource:// reference from the child result")
 		}
 	}
+	if err := rejectUnattributed(ctx); err != nil {
+		return nil, err
+	}
 	if artifact.FileSize > maxArtifactReadBytes {
 		return nil, fmt.Errorf("generated file exceeds the 8 MiB read limit")
 	}

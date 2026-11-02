@@ -1,0 +1,19 @@
+[BASELINE] HEAD fa6353e; v0.9.0-2-gfa6353e; existing work preserved
+[RED] Original six-file run: exit1, same8 failures reproduced
+[ROOT-CAUSE] Five CRLF source assertions; one Windows path assertion; two shell launchers
+[NEWLINES] Three affected files: tests21, pass21, fail0, exit0
+[PPTX] Actual ESM bundle/runtime-deduplication test: pass1, exit0
+[SHELL-RED] New fixture-path test initially ERR_MODULE_NOT_FOUND, exit1
+[SHELL-GREEN] Fixture path/PTY aliases/host quoting: tests12, pass12, fail0, exit0
+[FULL] npm test: tests2369, pass2368, fail0, skipped1, exit0
+[TYPECHECK] npm run type-check: exit0
+[BUILD] npm run build: exit0; existing large-chunk warning retained
+[MUTATION] Wrong stored-secret identity: intended original assertion fails, verified
+[MUTATION] Missing PDF error notification: intended original assertion fails, verified
+[MUTATION] Wrong running-version display: intended original assertion fails, verified
+[INDEPENDENT-REVIEW] Critical0 Important0 Minor0; independent34/34 passed
+[FINAL-TARGETED] tests34 pass34 fail0 skipped0 exit0
+[DIFF-CHECK] Literal repository-wide git diff --check: exit0
+[BOUNDARY] Fourteen product/dependency/runtime file fingerprints unchanged
+[SCOPE] No native/product code change, no dependency change, no runtime restart or data write
+[REMAINING] Native backend baseline and authoritative M3 lineage remain open

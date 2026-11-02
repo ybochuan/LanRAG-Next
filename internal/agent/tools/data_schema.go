@@ -80,6 +80,10 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, err
 	}
 
+	if err := requireGovernedDocument(ctx, knowledge); err != nil {
+		return blockedKnowledgeResult(err)
+	}
+
 	// Get chunks for the knowledge ID using ChunkRepository
 	// We only need table summary and column chunks
 	chunkTypes := t.targetChunkTypes

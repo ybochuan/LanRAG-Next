@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -193,6 +194,13 @@ func (s *sessionService) KnowledgeQA(
 	// this decision or the request is incorrectly downgraded to pure chat.
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
 	needsRAG := hasKB || webSearchEnabled
+	// M2: historical answers have no complete source provenance. Do not replay
+	// them to query-understanding or generation models. Persisted history stays intact.
+	if rejectUnattributed(ctx) != nil {
+		chatManage.MaxRounds = 0
+		chatManage.History = nil
+		chatManage.HistoryLoaded = true
+	}
 	hasHistory := chatManage.MaxRounds > 0
 
 	var pipeline []types.EventType
@@ -241,6 +249,11 @@ func (s *sessionService) KnowledgeQA(
 	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
 	// bind script execution to a per-session MicroVM instance.
 	ctx = types.WithSessionID(ctx, req.Session.ID)
+	if sourceCtx, sourceErr := extensionbridge.BeginSourceRunForTargets(ctx, types.SessionOwnerIDFromContext(ctx), req.Session.ID, req.AssistantMessageID, searchTargets); sourceErr == nil {
+		ctx = sourceCtx
+	} else if len(searchTargets) != 0 {
+		logger.Warn(ctx, "[Bridge] source run unavailable; derived copies remain unreadable")
+	}
 	logger.Info(ctx, "Triggering question answering event")
 	setupSpan.Finish(map[string]interface{}{
 		"stages":             len(pipeline),
@@ -249,6 +262,9 @@ func (s *sessionService) KnowledgeQA(
 	}, nil, nil)
 	err = s.KnowledgeQAByEvent(ctx, chatManage, pipeline)
 	if err != nil {
+		if _, tracked := extensionbridge.SourceRunFromContext(ctx); tracked {
+			_ = extensionbridge.FinishSourceRun(context.WithoutCancel(ctx), true)
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": req.Session.ID,
 		})
@@ -775,6 +791,11 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		}
 
 		if err == chatpipeline.ErrSearchNothing {
+			if chatManage.FallbackStrategy != types.FallbackStrategyModel {
+				if _, tracked := extensionbridge.SourceRunFromContext(ctx); tracked {
+					_ = extensionbridge.FinishSourceRun(context.WithoutCancel(ctx), true)
+				}
+			}
 			common.PipelineWarn(ctx, "Pipeline", "stage_fallback", map[string]interface{}{
 				"event":       string(eventType),
 				"duration_ms": stageDuration.Milliseconds(),
@@ -1074,6 +1095,13 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 
 	// Start streaming response
 	fallbackMessages, modelContext := prepareFallbackMessages(chatManage, promptContent)
+	// Fallback document listings are not yet a complete component adapter. Make
+	// that fact durable before generation; do not sign a copy from partial proof.
+	if _, _, sourceErr := extensionbridge.BeginSourceCall(ctx, "model", struct{ Messages, Options any }{fallbackMessages, opt}, nil, false); sourceErr != nil {
+		logger.Warn(ctx, "[Bridge] fallback provenance unavailable; blocking model call")
+		s.handleFixedFallback(ctx, chatManage)
+		return
+	}
 	if leaks := modelContext.LeakedIdentifiers(fallbackMessages); len(leaks) > 0 {
 		logger.Warnf(ctx, "[Fallback][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
 			len(leaks), modelcontext.SummarizeLeaks(leaks))
@@ -1152,7 +1180,10 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
 		query = rq
 	}
 
-	kbDocuments := s.buildKBDocumentListing(ctx, chatManage)
+	kbDocuments, err := s.buildKBDocumentListing(ctx, chatManage)
+	if err != nil {
+		return "", err
+	}
 
 	result := types.RenderPromptPlaceholders(chatManage.FallbackPrompt, types.PlaceholderValues{
 		"query":        query,
@@ -1172,7 +1203,7 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
 // buildKBDocumentListing returns a concise listing of documents in the knowledge bases
 // associated with the current pipeline. This gives the LLM visibility into KB contents
 // when vector/keyword search returns empty (e.g., broad browse queries).
-func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage *types.ChatManage) string {
+func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage *types.ChatManage) (string, error) {
 	// Collect unique KB IDs from search targets
 	kbIDs := make(map[string]struct{})
 	for _, t := range chatManage.SearchTargets {
@@ -1182,9 +1213,16 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage 
 		kbIDs[id] = struct{}{}
 	}
 	if len(kbIDs) == 0 {
-		return ""
+		return "", nil
 	}
 
+	authorized := make(map[string]bool, len(chatManage.KnowledgeIDs))
+	for _, id := range chatManage.KnowledgeIDs {
+		authorized[id] = true
+	}
+	if len(authorized) == 0 {
+		return "", nil
+	}
 	const maxDocuments = 50
 	var b strings.Builder
 	total := 0
@@ -1197,6 +1235,16 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage 
 		if err != nil {
 			logger.Warnf(ctx, "buildKBDocumentListing: failed to list knowledge for KB %s: %v", kbID, err)
 			continue
+		}
+		candidates := make([]*types.Knowledge, 0, len(knowledges))
+		for _, k := range knowledges {
+			if k != nil && k.KnowledgeBaseID == kbID && authorized[k.ID] {
+				candidates = append(candidates, k)
+			}
+		}
+		knowledges, err = filterGovernedKnowledge(ctx, candidates)
+		if err != nil {
+			return "", err
 		}
 		for _, k := range knowledges {
 			if total >= maxDocuments {
@@ -1229,14 +1277,14 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage 
 	}
 
 	if b.Len() == 0 {
-		return ""
+		return "", nil
 	}
 
 	if total >= maxDocuments {
 		fmt.Fprintf(&b, "... (showing first %d documents)\n", maxDocuments)
 	}
 
-	return b.String()
+	return b.String(), nil
 }
 
 // consumeFallbackStream consumes the streaming response and emits events

@@ -538,6 +538,8 @@ export default {
     }
   },
   menu: {
+    lifecycle: 'ライフサイクル',
+    modelSupervisor: 'モデルプロセス管理',
     sessionInProgress: '会話中',
     sessionUnread: '新しい回答',
     knowledgeBase: 'ナレッジベース',

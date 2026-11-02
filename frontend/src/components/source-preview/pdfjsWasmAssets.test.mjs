@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const viewer = readFileSync(new URL('./PdfSourceViewer.vue', import.meta.url), 'utf8')
+const viewer = readFileSync(new URL('./PdfSourceViewer.vue', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const viteConfig = readFileSync(new URL('../../../vite.config.ts', import.meta.url), 'utf8')
 const renderCode = viewer.match(/async function paintPage\([\s\S]*?\n}\n\nfunction touchRendered/)?.[0] ?? ''
 

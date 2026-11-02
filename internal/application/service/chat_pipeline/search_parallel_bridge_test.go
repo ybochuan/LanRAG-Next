@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,9 @@ func TestSearchParallelBridgeGate(t *testing.T) {
 					}
 				}
 				w.WriteHeader(tc.status)
+				if tc.status == 200 {
+					json.NewEncoder(w).Encode(map[string]any{"request_id": "r", "tenant_id": 7, "knowledge_base_ids": []string{"kb"}, "knowledge_ids": []string{"doc"}, "excluded_document_ids": []string{}, "deny_all": false})
+				}
 			}))
 			s.Listener.Close()
 			s.Listener = listener
@@ -48,13 +52,13 @@ func TestSearchParallelBridgeGate(t *testing.T) {
 				s.Close()
 			}
 			cm := &types.ChatManage{
-				PipelineRequest: types.PipelineRequest{SessionID: "session-bridge", TenantID: 7},
+				PipelineRequest: types.PipelineRequest{SessionID: "session-bridge", TenantID: 7, KnowledgeBaseIDs: []string{"kb"}, KnowledgeIDs: []string{"doc"}},
 				PipelineState:   types.PipelineState{Intent: types.IntentKBSearch, Entity: []string{"entity"}, SearchResult: []*types.SearchResult{{ID: "untouched"}}},
 			}
 			plugin := &PluginSearchParallel{searchPlugin: &PluginSearch{}, searchEntityPlugin: &PluginSearchEntity{}}
 			nextCalls := 0
 			start := time.Now()
-			result := plugin.OnEvent(context.Background(), types.CHUNK_SEARCH_PARALLEL, cm, func() *PluginError { nextCalls++; return nil })
+			result := plugin.OnEvent(context.WithValue(context.Background(), types.RequestIDContextKey, "r"), types.CHUNK_SEARCH_PARALLEL, cm, func() *PluginError { nextCalls++; return nil })
 			if tc.status == 200 && !tc.slow {
 				// Original empty-search behavior proves HTTP 200 reached the native
 				// pipeline; the gate itself does not invent search results.

@@ -41,6 +41,9 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
 }
 
 func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	var params struct {
 		IssueID string `json:"issue_id"`
 		Slug    string `json:"slug"`

@@ -1,0 +1,22 @@
+[MODELS] Live embeddings ready; dimension=2560; generation=DeepSeek/deepseek-flash; credentials redacted
+[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes
+[PORTS] Owned core=43821 Host=8090; unknown existing owners are never stopped by this script
+[AUTH] Native registration/login succeeded; credentials redacted
+[ERROR] RuntimeError: native upload did not complete: Document parsing failed. Check the file format and the DocReader logs for this attempt.
+[DIAG] mineru: calls={'/v1/uploads': 4, '/v1/uploads/upload_ac70cb0a551152e58d9b5c0e/content': 1, '/v1/uploads/upload_ac70cb0a551152e58d9b5c0e/complete': 1, '/v1/parse/jobs': 4, '/v1/parse/jobs/job_ff6bb6090d8dc9776a2d9748': 2, '/v1/files/file-5d479687d4b73bdba0825f72/content': 1, '/v1/parse/jobs/job_06c230a65f67b38c33d086ca': 1, '/v1/files/file-fc57a83254186ffa9c604f39/content': 1, '/v1/parse/jobs/job_078f69ac8af45f462b373cd8': 1, '/v1/files/file-81506a505e56621d1cac38cd/content': 1, '/v1/parse/jobs/job_ff2e514409572be7abe1c12a': 1, '/v1/files/file-7087163192ca931a0b93b578/content': 1}; successful={'/v1/uploads': 4, '/v1/uploads/upload_ac70cb0a551152e58d9b5c0e/content': 1, '/v1/uploads/upload_ac70cb0a551152e58d9b5c0e/complete': 1, '/v1/parse/jobs': 4, '/v1/parse/jobs/job_ff6bb6090d8dc9776a2d9748': 2, '/v1/files/file-5d479687d4b73bdba0825f72/content': 1, '/v1/parse/jobs/job_06c230a65f67b38c33d086ca': 1, '/v1/files/file-fc57a83254186ffa9c604f39/content': 1, '/v1/parse/jobs/job_078f69ac8af45f462b373cd8': 1, '/v1/files/file-81506a505e56621d1cac38cd/content': 1, '/v1/parse/jobs/job_ff2e514409572be7abe1c12a': 1, '/v1/files/file-7087163192ca931a0b93b578/content': 1}; errors=[]
+[DIAG] model0: calls={}; successful={}; errors=['ValueError /embeddings', 'ValueError /embeddings', 'ValueError /embeddings', 'ValueError /embeddings', 'ValueError /embeddings']
+[DIAG] model1: calls={}; successful={}; errors=[]
+[DIAG] model2: calls={}; successful={}; errors=[]
+[CORE-DIAG] 2026-10-31 11:36:47.328 ERROR  BatchEmbedWithPool attempt 1/5 failed: API request failed with status 502:  document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:36:47.531 ERROR  BatchEmbedWithPool attempt 2/5 failed: API request failed with status 502:  document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:36:47.934 ERROR  BatchEmbedWithPool attempt 3/5 failed: API request failed with status 502:  document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:36:48.737 ERROR  BatchEmbedWithPool attempt 4/5 failed: API request failed with status 502:  document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:36:50.340 ERROR  BatchEmbedWithPool attempt 5/5 failed: API request failed with status 502:  document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:36:50.342 ERROR  Repository sqlite failed to batch save: API request failed with status 502:  document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:36:56.176 ERROR  [convert] DocReader failed knowledge=07072942-221d-4c09-a801-668bbb6b1fc2 code=DOCREADER_PARSE_FAILED: MinerU V1: download zip artifact: MinerU API status 503: artifact_commit_failed: parser proxy request rejected document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:37:07.170 ERROR  [convert] DocReader failed knowledge=07072942-221d-4c09-a801-668bbb6b1fc2 code=DOCREADER_PARSE_FAILED: MinerU V1: download zip artifact: MinerU API status 503: artifact_commit_failed: parser proxy request rejected document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:37:22.958 ERROR  [convert] DocReader failed knowledge=07072942-221d-4c09-a801-668bbb6b1fc2 code=DOCREADER_PARSE_FAILED: MinerU V1: download zip artifact: MinerU API status 503: artifact_commit_failed: parser proxy request rejected document_process=07072942-221d-4c09-a801-668bbb6b1fc2
+[CORE-DIAG] 2026-10-31 11:37:22.997 ERROR  [SyncTask] Task failed (exhausted retries) type=document:process id=5b7a7372-0d58-48ed-9e26-cd55054222d6 elapsed=39.263939938s err=Document parsing failed. Check the file format and the DocReader logs for this attempt.
+[CLEANUP] Owned Linux processes stopped; fresh isolated DB only, no original DB touched
+[CLEANUP] Owned processes stopped
+[RESULT] FAIL

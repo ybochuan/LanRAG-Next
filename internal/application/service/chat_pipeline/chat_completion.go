@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -54,12 +55,21 @@ func (p *PluginChatCompletion) OnEvent(
 	chatMessages = modelContext.EncodeMessages(chatMessages)
 	reportModelContextLeaks(ctx, "Completion", modelContext, chatMessages)
 	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
+	inputs, complete := sourceInputsForModel(chatManage)
+	ctx, sourceCall, err := extensionbridge.BeginSourceCall(ctx, "model", struct{ Messages, Options any }{chatMessages, opt}, inputs, complete)
+	if err != nil {
+		finishSourceModelRun(ctx, nil, false)
+		return ErrModelCall.WithError(err)
+	}
+	sourceSucceeded := false
+	defer func() { finishSourceModelRun(ctx, sourceCall, sourceSucceeded) }()
 
 	// Call the chat model to generate response
 	pipelineInfo(ctx, "Completion", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
 	chatResponse, err := chatModel.Chat(ctx, chatMessages, opt)
+	sourceCall.Record(chatResponse)
 	if err != nil {
 		pipelineError(ctx, "Completion", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
@@ -82,5 +92,6 @@ func (p *PluginChatCompletion) OnEvent(
 		"prompt_tokens":     chatResponse.Usage.PromptTokens,
 	})
 	chatManage.ChatResponse = chatResponse
+	sourceSucceeded = true
 	return next()
 }

@@ -758,7 +758,7 @@ func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request)
 			return fmt.Errorf("%w: invalid scheme %s", ErrSSRFRedirectBlocked, redirectScheme)
 		}
 		redirectHost := req.URL.Hostname()
-		if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
+		if ssrfDisabled() || (redirectHost != "" && IsSSRFWhitelisted(redirectHost)) {
 			return nil
 		}
 		if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
@@ -870,7 +870,7 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 	// ValidateURLForSSRF which skips isSSRFSafeURL for whitelisted hosts.
 	// NOTE: This intentionally relaxes DNS-rebinding protection for whitelisted
 	// hosts. Admins must ensure whitelisted domains are under their control.
-	if IsSystemProxy(addr) || IsSSRFWhitelisted(host) {
+	if ssrfDisabled() || IsSystemProxy(addr) || IsSSRFWhitelisted(host) {
 		dialer := &net.Dialer{
 			Timeout:   OutboundDialTimeout(),
 			KeepAlive: 30 * time.Second,
@@ -1230,7 +1230,7 @@ var ErrSSRFHostNotWhitelisted = errors.New("host is not in the SSRF whitelist")
 // admits everything and the usual checks apply. An IP literal is judged here
 // too: the URL layer is where "no direct IP" belongs.
 func CheckSSRFWhitelistOnly(host string) error {
-	if !SSRFWhitelistOnlyEnabled() || isSSRFWhitelistedByName(host) {
+	if ssrfDisabled() || !SSRFWhitelistOnlyEnabled() || isSSRFWhitelistedByName(host) {
 		return nil
 	}
 	return fmt.Errorf("%w: %s (SSRF_DNS_WHITELIST_ONLY is on; add it to SSRF_WHITELIST to allow it)",
@@ -1320,6 +1320,11 @@ func parseHostForHint(rawURL string) (string, error) {
 	return u.Hostname(), nil
 }
 
+// ssrfDisabled is an explicit local-development override; unset or invalid is off.
+func ssrfDisabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("SSRF_DISABLE")), "true")
+}
+
 // ValidateURLForSSRF is the centralised entry-point that all handlers should
 // call to validate a user-supplied URL. It first checks the SSRF_WHITELIST;
 // whitelisted hosts skip the full isSSRFSafeURL check.
@@ -1330,6 +1335,9 @@ func parseHostForHint(rawURL string) (string, error) {
 //
 // Returns nil when the URL is safe, or an error describing the problem.
 func ValidateURLForSSRF(rawURL string) error {
+	if ssrfDisabled() {
+		return nil
+	}
 	if rawURL == "" {
 		return nil // callers that require non-empty should validate separately
 	}

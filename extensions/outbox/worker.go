@@ -56,7 +56,7 @@ func (w *Worker) now() time.Time {
 // is reported and persisted for retry; cancellation leaves a recoverable lease.
 func (w *Worker) ProcessOne(ctx context.Context) (worked bool, err error) {
 	defer func() {
-		if err != nil && w.Report != nil {
+		if err != nil && w.Report != nil && !onlyParentCancellation(err, ctx.Err()) {
 			w.Report(err)
 		}
 	}()
@@ -83,6 +83,29 @@ func (w *Worker) ProcessOne(ctx context.Context) (worked bool, err error) {
 		return true, errors.Join(failure, persistErr)
 	}
 	return true, w.Store.Complete(ctx, item.ID, item.LeaseToken, w.now())
+}
+
+// A joined business failure must remain visible even during parent shutdown.
+func onlyParentCancellation(err, parent error) bool {
+	if parent == nil {
+		return false
+	}
+	if many, ok := err.(interface{ Unwrap() []error }); ok {
+		children := many.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyParentCancellation(child, parent) {
+				return false
+			}
+		}
+		return true
+	}
+	if one, ok := err.(interface{ Unwrap() error }); ok {
+		return onlyParentCancellation(one.Unwrap(), parent)
+	}
+	return err == parent
 }
 
 // Run drains healthy work immediately and polls after idle/error outcomes.

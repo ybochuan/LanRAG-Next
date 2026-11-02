@@ -2,14 +2,27 @@ package host
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
+	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/bridge"
+	"github.com/ybochuan/LanRAG-Next/extensions/business"
 	"github.com/ybochuan/LanRAG-Next/extensions/ingest"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
+	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
+	"github.com/ybochuan/LanRAG-Next/extensions/management"
 	"github.com/ybochuan/LanRAG-Next/extensions/outbox"
+	"github.com/ybochuan/LanRAG-Next/extensions/parser"
+	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/retrieval"
+	"github.com/ybochuan/LanRAG-Next/extensions/review"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 	"github.com/ybochuan/LanRAG-Next/extensions/taggov"
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
@@ -75,19 +88,36 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	defer cancel()
 	var reconcile *ingest.Reconciler
 	var worker *outbox.Worker
+	var machine *lifecycle.Machine
+	var reviewService *review.Service
+	var sourceRegistry *lineage.Registry
+	var sourceRuns *provenance.Runs
+	var sourceLedger *provenance.Ledger
+	var businessService *business.Service
 	var scopes []ingest.Scope
 	if cfg.Mode == "worker" {
 		client, err := weknora.NewClient(cfg.UpstreamURL, cfg.APIKey, cfg.TenantID)
 		if err != nil {
 			return errors.New("worker client initialization failed")
 		}
-		db, err = store.Open(runCtx, cfg.DBPath)
+		db, err = store.OpenDurable(runCtx, cfg.DBPath)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return errors.New("extension database initialization failed")
+			return databaseInitializationError(err)
 		}
+		reader, err := lineage.NewHTTPReader(client, cfg.KnowledgeBaseIDs)
+		if err != nil {
+			return errors.New("source reader initialization failed")
+		}
+		sourceRegistry = lineage.NewRegistry(db, reader)
+		businessService = business.New(db, sourceRegistry, time.Now).WithRemote(business.NewNativePublisher(client))
+		// Production proofs use real native components. A nil sealed provider is
+		// used only for source freshness; run facts provide the copy authority.
+		sourceAuthority := lineage.NewAuthority(sourceRegistry, nil)
+		sourceRuns = provenance.NewRuns(db, lineage.NewComponentVerifier(reader, sourceRegistry), sourceAuthority, []byte(cfg.ManagementKey))
+		sourceLedger = provenance.New(db, lineage.NewAuthority(sourceRegistry, sourceRuns))
 		apiStore := taggov.NewHTTPStore(client)
 		writer, err = taggov.NewWriter(apiStore, 64)
 		if err != nil {
@@ -97,22 +127,93 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		if err != nil {
 			return errors.New("reconciliation source initialization failed")
 		}
-		reconcile = &ingest.Reconciler{Source: source, Sink: ingest.NewObserver(db), Interval: cfg.ReconcileInterval, Report: func(error) { report("reconciliation_failed") }}
+		machine = lifecycle.NewMachine(db, time.Now)
+		reconcile = &ingest.Reconciler{Source: source, Sink: ingest.NewLifecycleObserver(db, time.Now), Interval: cfg.ReconcileInterval, Report: func(error) { report("reconciliation_failed") }}
 		projector := taggov.NewProjector(db, lifecycle.NewStore(db), taggov.NewMapping(db, apiStore), writer)
+		reviewService = review.NewService(db, time.Now)
+		alertHandler := reviewService.Handler(func(_ context.Context, _ review.Alert) error { report(review.SignalCode); return nil })
 		allowed := make([]outbox.Scope, 0, len(cfg.KnowledgeBaseIDs))
 		for _, kb := range cfg.KnowledgeBaseIDs {
 			scopes = append(scopes, ingest.Scope{TenantID: cfg.TenantID, KnowledgeBaseID: kb})
 			allowed = append(allowed, outbox.Scope{TenantID: cfg.TenantID, KnowledgeBaseID: kb})
 		}
-		worker = &outbox.Worker{Store: outbox.NewStore(db), Handler: projector.Handle, Lease: cfg.Lease, RetryDelay: cfg.RetryDelay, MaxAttempts: cfg.MaxAttempts, PollInterval: cfg.PollInterval, Scopes: allowed, Report: func(error) { report("projection_failed") }}
+		worker = &outbox.Worker{Store: outbox.NewStore(db), Handler: projectionDispatcher(projector.Handle, alertHandler), Lease: cfg.Lease, RetryDelay: cfg.RetryDelay, MaxAttempts: cfg.MaxAttempts, PollInterval: cfg.PollInterval, Scopes: allowed, Report: func(error) { report("projection_failed") }}
 	}
-	server := bridge.NewServerWithServices(bridge.Services{
-		BeforeRetrieve: bridge.NewPassThroughRetrieveHandler(),
-	})
+	var native *parser.NativeHandler
+	var err error
+	if cfg.Parser != nil {
+		parserCfg := *cfg.Parser
+		parserCfg.Report = report
+		if db == nil {
+			db, err = store.OpenDurable(runCtx, filepath.Join(parserCfg.ArtifactRoot, ".parser-state.sqlite"))
+			if err != nil {
+				return errors.New("parser database initialization failed")
+			}
+		}
+		native, err = parser.NewPersistentNativeHandler(parserCfg, db)
+		if err != nil {
+			return errors.New("native parser initialization failed")
+		}
+		defer native.Close()
+	}
+	services := bridge.Services{}
+	var localReady atomic.Bool
+	defer localReady.Store(false)
+	services.Ready = func(ctx context.Context) bool {
+		if !localReady.Load() || db == nil {
+			return false
+		}
+		return db.View(ctx, func(tx *sql.Tx) error { var one int; return tx.QueryRowContext(ctx, "SELECT 1").Scan(&one) }) == nil
+	}
+	if cfg.Mode == "worker" {
+		policy, err := retrieval.NewPolicy(db, cfg.TenantID, cfg.KnowledgeBaseIDs)
+		if err != nil {
+			return errors.New("retrieval policy initialization failed")
+		}
+		policy.WithSources(sourceRegistry)
+		services.BeforeRetrieve, err = bridge.NewRetrieveHandler(cfg.TenantID, cfg.KnowledgeBaseIDs, policy)
+		if err != nil {
+			return errors.New("retrieval handler initialization failed")
+		}
+	}
+	if native != nil {
+		services.Parser = native
+		services.ParserReadTimeout = cfg.Parser.BulkTimeout
+	}
+	lifecycleScopes := make([]lifecycle.PolicyScope, 0, len(scopes))
+	for _, scope := range scopes {
+		lifecycleScopes = append(lifecycleScopes, lifecycle.PolicyScope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID})
+	}
+	if machine != nil {
+		if err := machine.Sweep(runCtx, lifecycleScopes); err != nil {
+			return errors.New("initial lifecycle scan failed; Host not ready")
+		}
+	}
+	server := bridge.NewServerWithServices(services)
+	{
+		original := server.Handler
+		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService)
+		proofScopes := make([]provenance.Scope, 0, len(scopes))
+		for _, scope := range scopes {
+			proofScopes = append(proofScopes, provenance.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID})
+		}
+		proofs := provenance.NewHTTPServer(sourceRuns, sourceLedger, cfg.ManagementKey, proofScopes)
+		server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/provenance/") {
+				proofs.ServeHTTP(w, r)
+				return
+			}
+			if r.URL.Path == "/management/lifecycle" {
+				manager.ServeHTTP(w, r)
+				return
+			}
+			original.ServeHTTP(w, r)
+		})
+	}
 	serveResult := make(chan error, 1)
 	go func() { serveResult <- server.Serve(l) }()
 	var tasks sync.WaitGroup
-	backgroundResult := make(chan error, 2)
+	backgroundResult := make(chan error, 4)
 	launch := func(fn func(context.Context) error) {
 		tasks.Add(1)
 		go func() { defer tasks.Done(); backgroundResult <- fn(runCtx) }()
@@ -120,8 +221,15 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	if reconcile != nil {
 		launch(func(ctx context.Context) error { return reconcile.Run(ctx, scopes) })
 		launch(worker.Run)
+		launch(func(ctx context.Context) error {
+			return runDependencyDaily(ctx, db, sourceRegistry, machine, lifecycleScopes, report)
+		})
+		launch(func(ctx context.Context) error {
+			return reviewService.RunDaily(ctx, lifecycleScopes, func(error) { report("review_scan_failed") })
+		})
 	}
 	started = true
+	localReady.Store(cfg.Mode == "worker")
 	if cfg.Mode == "worker" {
 		report("host_workers_started")
 	} else {
@@ -140,6 +248,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			result = errors.New("extension background service stopped unexpectedly")
 		}
 	}
+	localReady.Store(false)
 	cancel()
 	drainCtx, stopDrain := context.WithTimeout(context.WithoutCancel(ctx), cfg.ShutdownTimeout)
 	defer stopDrain()

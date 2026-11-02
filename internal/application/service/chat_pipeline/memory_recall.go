@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -52,6 +53,11 @@ func (p *PluginMemoryRecall) ActivationEvents() []types.EventType {
 func (p *PluginMemoryRecall) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	if extensionbridge.RejectUnattributed(ctx) != nil {
+		chatManage.MemoryPrompt = ""
+		chatManage.UsedMemories = nil
+		return next()
+	}
 	if p.memoryService == nil {
 		pipelineInfo(ctx, "MemoryRecall", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,

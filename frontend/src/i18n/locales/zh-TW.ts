@@ -9121,6 +9121,8 @@ export default {
     }
   },
   menu: {
+    lifecycle: '生命週期',
+    modelSupervisor: '模型進程管理',
     sessionInProgress: '會話進行中',
     sessionUnread: '有新回覆',
     knowledgeBase: '知識庫',

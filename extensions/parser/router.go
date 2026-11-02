@@ -42,9 +42,27 @@ type PageSignals struct {
 
 // Decision is a routing result, not a parser response or a calibrated score.
 type Decision struct {
-	Path           Path // Native routing or MinerU quality selection.
-	Tier           Tier // Empty for native routing.
-	ReviewRequired bool // More than half of inspected pages were sparse.
+	Path           Path   // Native routing or MinerU quality selection.
+	Tier           Tier   // Empty for native routing.
+	OCRMode        string // Explicit txt/ocr for PDF; independent of quality tier.
+	ReviewRequired bool   // Sparse pages or mixed text/nontext require review.
+}
+
+// DecidePDF enforces the user's M1-03 no-download policy before formal parsing.
+// Any real text layer disables OCR, including minority-text mixed PDFs. Only
+// exclusively image-painted pages may enter an OCR route. This supersedes the
+// Frozen PDF layout escalation; raster-image policy remains separately below.
+func DecidePDF(report PDFPreflight) (Decision, error) {
+	if report.TotalPages <= 0 || report.TextLayerPages < 0 || report.ImageOnlyPages < 0 || report.TextLayerPages+report.ImageOnlyPages > report.TotalPages {
+		return Decision{}, errors.New("invalid PDF preflight measurements")
+	}
+	if report.TextLayerPages > 0 {
+		return Decision{Path: PathMinerU, Tier: TierFlash, OCRMode: "txt", ReviewRequired: report.TextLayerPages != report.TotalPages}, nil
+	}
+	if report.ImageOnlyPages == report.TotalPages {
+		return Decision{Path: PathMinerU, Tier: TierBasic, OCRMode: "ocr"}, nil
+	}
+	return Decision{}, errors.New("PDF has no confirmed text or exclusively image pages")
 }
 
 // Decide applies the Frozen page rules without I/O, parsing or mutable state.
@@ -63,6 +81,23 @@ func Decide(fileType string, pages []PageSignals) (Decision, error) {
 		}
 	default:
 		return Decision{}, errors.New("unsupported parser file type")
+	}
+	if fileType == "pdf" {
+		report := PDFPreflight{TotalPages: len(pages)}
+		sparse := 0
+		for _, page := range pages {
+			if page.Scanned {
+				report.ImageOnlyPages++
+			} else if !page.NoText && !page.Garbled && !page.VectorText {
+				report.TextLayerPages++
+			}
+			if page.SparseText {
+				sparse++
+			}
+		}
+		decision, err := DecidePDF(report)
+		decision.ReviewRequired = decision.ReviewRequired || sparse > len(pages)/2
+		return decision, err
 	}
 
 	maxRank, sparsePages := 0, 0

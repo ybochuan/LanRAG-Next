@@ -114,6 +114,9 @@ func NewDatabaseQueryTool(db *gorm.DB, searchTargets types.SearchTargets) *Datab
 
 // Execute executes the database query tool
 func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return blockedKnowledgeResult(err)
+	}
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Execute started")
 
 	tenantID := uint64(0)

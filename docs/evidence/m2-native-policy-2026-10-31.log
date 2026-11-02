@@ -1,0 +1,25 @@
+=== RUN   TestSearchParallelBridgeLiveDatabasePolicy
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=SearchParallel action=start has_entities=false rewrite_query="M2 LIVE DATABASE POLICY" session_id="m2-live"
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=input rewrite_query="M2 LIVE DATABASE POLICY" search_targets=1 session_id="m2-live" tenant_id=7 web_enabled=false
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=SearchParallel action=entity_search_skip reason="no_entities"
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=plan embedding_top_k=10 keyword_threshold=0 search_targets=1 vector_threshold=0
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=embedding_groups total_targets=1 unique_models=1
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=group_plan combined_kb_count=0 individual_targets=1 model_key="model-kb-good" vector_len=1
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=kb_result hit_count=4 kb_id="kb-good" target_type=knowledge
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=kb_result_summary total_hits=4
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=result_score_before_normalize chunk_id="blocked-1" index=0 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=result_score_before_normalize chunk_id="allowed" index=1 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=result_score_before_normalize chunk_id="blocked-2" index=2 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.139] []                      | [PIPELINE] stage=Search action=result_score_before_normalize chunk_id="unjudged" index=3 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.140] []                      | [PIPELINE] stage=Search action=final_score chunk_id="blocked-1" index=0 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.140] []                      | [PIPELINE] stage=Search action=final_score chunk_id="allowed" index=1 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.140] []                      | [PIPELINE] stage=Search action=final_score chunk_id="blocked-2" index=2 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.140] []                      | [PIPELINE] stage=Search action=final_score chunk_id="unjudged" index=3 match_type=0 score="0.0000"
+INFO [2026-10-31 17:36:09.140] []                      | [PIPELINE] stage=Search action=output result_count=4 session_id="m2-live"
+INFO [2026-10-31 17:36:09.140] []                      | [PIPELINE] stage=SearchParallel action=chunk_search_done has_error=false result_count=4
+INFO [2026-10-31 17:36:09.140] []                      | [PIPELINE] stage=SearchParallel action=complete chunk_results=4 entity_results=0 error_count=0 session_id="m2-live" total_results=1
+    search_parallel_live_policy_test.go:22: PASS: completed Observer -> SQLite active/stale -> real Host decision -> native parallel search 4 hits -> only 1 active hit forwarded
+--- PASS: TestSearchParallelBridgeLiveDatabasePolicy (0.00s)
+PASS
+ok  	github.com/Tencent/WeKnora/internal/application/service/chat_pipeline	0.554s
+M2 POLICY CROSS-PROCESS E2E: PASS

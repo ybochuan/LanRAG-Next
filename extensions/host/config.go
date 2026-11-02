@@ -2,18 +2,25 @@
 package host
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/parser"
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
 // Config enables background side effects only in explicit worker mode. APIKey
 // must never be logged; formatting and JSON serialization redact the credential.
 type Config struct {
+	ManagementKey     string               `json:"-"`
+	Parser            *parser.NativeConfig `json:"-"` // Optional authenticated native PDF route.
 	Mode              string
 	DBPath            string
 	UpstreamURL       string
@@ -41,8 +48,33 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	if getenv == nil {
 		return c, errors.New("environment reader required")
 	}
+	c.ManagementKey = getenv("AGENTRAG_MANAGEMENT_KEY")
+	if c.ManagementKey != "" && len(c.ManagementKey) < 32 {
+		return c, errors.New("management credential must contain at least 32 bytes")
+	}
 	if mode := getenv("AGENTRAG_MODE"); mode != "" {
 		c.Mode = strings.TrimSpace(mode)
+	}
+	parserKeys := []string{"AGENTRAG_PARSER_UPSTREAM_URL", "AGENTRAG_PARSER_UPSTREAM_KEY", "AGENTRAG_PARSER_PROXY_KEY", "AGENTRAG_PARSER_ARTIFACT_ROOT", "AGENTRAG_PARSER_SCOPES", "AGENTRAG_PARSER_BULK_TIMEOUT"}
+	parserEnabled := false
+	for _, key := range parserKeys {
+		parserEnabled = parserEnabled || getenv(key) != ""
+	}
+	if parserEnabled {
+		p := &parser.NativeConfig{UpstreamURL: getenv(parserKeys[0]), UpstreamKey: getenv(parserKeys[1]), APIKey: getenv(parserKeys[2]), ArtifactRoot: getenv(parserKeys[3])}
+		if raw := getenv(parserKeys[5]); raw != "" {
+			var err error
+			p.BulkTimeout, err = time.ParseDuration(raw)
+			if err != nil || p.BulkTimeout <= 0 {
+				return c, errors.New("invalid AGENTRAG_PARSER_BULK_TIMEOUT")
+			}
+		}
+		decoder := json.NewDecoder(strings.NewReader(getenv(parserKeys[4])))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&p.Scopes); err != nil || decoder.Decode(new(any)) != io.EOF {
+			return c, errors.New("invalid AGENTRAG_PARSER_SCOPES")
+		}
+		c.Parser = p
 	}
 	workerKeys := []string{"AGENTRAG_EXT_DB", "AGENTRAG_WEKNORA_URL", "AGENTRAG_WEKNORA_API_KEY", "AGENTRAG_TENANT_ID", "AGENTRAG_KB_IDS", "AGENTRAG_RECONCILE_INTERVAL", "AGENTRAG_OUTBOX_POLL_INTERVAL", "AGENTRAG_OUTBOX_LEASE", "AGENTRAG_OUTBOX_RETRY_DELAY", "AGENTRAG_OUTBOX_MAX_ATTEMPTS"}
 	if c.Mode == "probe" {
@@ -53,6 +85,25 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		}
 	}
 	c.DBPath, c.UpstreamURL, c.APIKey = getenv("AGENTRAG_EXT_DB"), getenv("AGENTRAG_WEKNORA_URL"), getenv("AGENTRAG_WEKNORA_API_KEY")
+	if c.Mode == "worker" {
+		if strings.TrimSpace(c.DBPath) == "" {
+			c.DBPath = defaultDBPath()
+		}
+		if strings.HasPrefix(c.DBPath, "~/") || strings.HasPrefix(c.DBPath, `~\`) {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return c, errors.New("cannot resolve extension database home directory")
+			}
+			c.DBPath = filepath.Join(home, c.DBPath[2:])
+		}
+		if c.DBPath != ":memory:" && !strings.HasPrefix(c.DBPath, "file:") {
+			absolute, err := filepath.Abs(c.DBPath)
+			if err != nil {
+				return c, errors.New("cannot resolve extension database path")
+			}
+			c.DBPath = absolute
+		}
+	}
 	if raw := getenv("AGENTRAG_TENANT_ID"); raw != "" {
 		tenant, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil {
@@ -90,8 +141,28 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	return c, c.Validate()
 }
 
+// defaultDBPath works from the repository root, extension module, or a package
+// directory. An installed binary outside the checkout uses its working directory.
+func defaultDBPath() string {
+	cwd, _ := os.Getwd()
+	for dir := cwd; ; dir = filepath.Dir(dir) {
+		if info, err := os.Stat(filepath.Join(dir, "extensions", "go.mod")); err == nil && info.Mode().IsRegular() {
+			return filepath.Join(dir, "data", "agentrag_ext.db")
+		}
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	return filepath.Join(cwd, "data", "agentrag_ext.db")
+}
+
 // Validate is also required for programmatically constructed configurations.
 func (c Config) Validate() error {
+	if c.Parser != nil {
+		if _, err := parser.NewNativeHandler(*c.Parser); err != nil {
+			return errors.New("invalid native parser configuration")
+		}
+	}
 	if c.Mode != "probe" && c.Mode != "worker" {
 		return errors.New("AGENTRAG_MODE must be probe or worker")
 	}

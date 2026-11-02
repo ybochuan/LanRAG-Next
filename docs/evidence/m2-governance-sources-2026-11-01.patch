@@ -1,0 +1,1521 @@
+diff --git a/internal/agent/resume.go b/internal/agent/resume.go
+index 50d6396..146b713 100644
+--- a/internal/agent/resume.go
++++ b/internal/agent/resume.go
+@@ -6,11 +6,14 @@ import (
+ 	"time"
+ 
+ 	"github.com/Tencent/WeKnora/internal/event"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
+ 	"github.com/Tencent/WeKnora/internal/logger"
+ 	"github.com/Tencent/WeKnora/internal/models/chat"
+ 	"github.com/Tencent/WeKnora/internal/types"
+ )
+ 
++var rejectGovernanceReplay = extensionbridge.RejectUnattributed
++
+ // Resume continues a run that was suspended on a prompt, now answered. It
+ // rebuilds the transcript from the snapshot, finishes the interrupted round
+ // with the answer delivered to the blocked call, then carries on with the
+@@ -22,6 +25,10 @@ func (e *AgentEngine) Resume(
+ 	snapshot []byte,
+ 	answered *types.AgentPrompt,
+ ) (*types.AgentState, error) {
++	if err := rejectGovernanceReplay(ctx); err != nil {
++		return nil, err
++	}
++
+ 	snap, err := DecodeRunSnapshot(snapshot)
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/agent/tools/confirmed_tool.go b/internal/agent/tools/confirmed_tool.go
+index db24784..47f50bc 100644
+--- a/internal/agent/tools/confirmed_tool.go
++++ b/internal/agent/tools/confirmed_tool.go
+@@ -66,6 +66,11 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
+ 
+ // Execute runs the inner tool once the access level allows it.
+ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if strings.HasPrefix(t.Name(), "wiki_") {
++		if err := rejectUnattributed(ctx); err != nil {
++			return blockedKnowledgeResult(err)
++		}
++	}
+ 	meta, _ := ToolExecFromContext(ctx)
+ 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
+ 	action := policy.Action{Risk: t.risk}
+diff --git a/internal/agent/tools/data_analysis.go b/internal/agent/tools/data_analysis.go
+index 852df86..cee8595 100644
+--- a/internal/agent/tools/data_analysis.go
++++ b/internal/agent/tools/data_analysis.go
+@@ -753,6 +753,9 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
+ 	if knowledge == nil {
+ 		return nil, fmt.Errorf("knowledge cannot be nil")
+ 	}
++	if err := requireGovernedDocument(ctx, knowledge); err != nil {
++		return nil, err
++	}
+ 	tableName := t.TableName(knowledge)
+ 
+ 	// Normalize file type to lowercase for comparison
+diff --git a/internal/agent/tools/data_schema.go b/internal/agent/tools/data_schema.go
+index 1fc945b..874793f 100644
+--- a/internal/agent/tools/data_schema.go
++++ b/internal/agent/tools/data_schema.go
+@@ -80,6 +80,10 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
+ 		}, err
+ 	}
+ 
++	if err := requireGovernedDocument(ctx, knowledge); err != nil {
++		return blockedKnowledgeResult(err)
++	}
++
+ 	// Get chunks for the knowledge ID using ChunkRepository
+ 	// We only need table summary and column chunks
+ 	chunkTypes := t.targetChunkTypes
+diff --git a/internal/agent/tools/database_query.go b/internal/agent/tools/database_query.go
+index 2d2de14..249bffa 100644
+--- a/internal/agent/tools/database_query.go
++++ b/internal/agent/tools/database_query.go
+@@ -114,6 +114,9 @@ func NewDatabaseQueryTool(db *gorm.DB, searchTargets types.SearchTargets) *Datab
+ 
+ // Execute executes the database query tool
+ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	logger.Infof(ctx, "[Tool][DatabaseQuery] Execute started")
+ 
+ 	tenantID := uint64(0)
+diff --git a/internal/agent/tools/list_documents.go b/internal/agent/tools/list_documents.go
+index 0f2ab25..b25feb1 100644
+--- a/internal/agent/tools/list_documents.go
++++ b/internal/agent/tools/list_documents.go
+@@ -112,6 +112,15 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
+ 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to list documents: %v", err)}, err
+ 	}
+ 
++	policyTenant := t.searchTargets.GetTenantIDForKB(kbID)
++	if policyTenant == 0 {
++		policyTenant, _ = types.TenantIDFromContext(ctx)
++	}
++	filtered, err = filterGovernedDocuments(ctx, policyTenant, kbID, filtered)
++	if err != nil {
++		return blockedKnowledgeResult(err)
++	}
++
+ 	documents := make([]map[string]interface{}, 0, len(filtered))
+ 	var b strings.Builder
+ 	fmt.Fprintf(&b, "<documents knowledge_base_id=\"%s\" total=\"%d\" page=\"%d\" page_size=\"%d\"",
+diff --git a/internal/agent/tools/mcp_tool.go b/internal/agent/tools/mcp_tool.go
+index 264eac6..8e3bf49 100644
+--- a/internal/agent/tools/mcp_tool.go
++++ b/internal/agent/tools/mcp_tool.go
+@@ -144,6 +144,9 @@ func (t *MCPTool) callToolTimeout(engineTimeout time.Duration) time.Duration {
+ 
+ // Execute executes the MCP tool
+ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	logger.GetLogger(ctx).Infof("Executing MCP tool: %s from service: %s", t.mcpTool.Name, t.service.Name)
+ 
+ 	// Re-check the policy at call time as well as during registration. An agent
+diff --git a/internal/agent/tools/operations.go b/internal/agent/tools/operations.go
+index d64c48e..6282503 100644
+--- a/internal/agent/tools/operations.go
++++ b/internal/agent/tools/operations.go
+@@ -343,6 +343,9 @@ func parseRunOperationInput(args json.RawMessage) (runOperationInput, error) {
+ // Execute runs one catalog operation as the user, asking for confirmation
+ // first when the access level requires it.
+ func (t *RunOperationTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	input, err := parseRunOperationInput(args)
+ 	if err != nil {
+ 		return operationFailure(err.Error()), nil
+@@ -684,6 +687,9 @@ func (t *RunOperationTool) readTarget(
+ 	params map[string]json.RawMessage,
+ 	identity operations.Identity,
+ ) (operations.Projected, *types.ToolResult) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return operations.Projected{}, operationFailure(err.Error())
++	}
+ 	target, ok := t.rt.Catalog.Get(targetID)
+ 	if !ok {
+ 		return operations.Projected{}, operationFailure(fmt.Sprintf("%s is misconfigured", op.ID))
+diff --git a/internal/agent/tools/page_tools.go b/internal/agent/tools/page_tools.go
+index b3ff2c2..b54846c 100644
+--- a/internal/agent/tools/page_tools.go
++++ b/internal/agent/tools/page_tools.go
+@@ -176,6 +176,9 @@ type fillPageInput struct {
+ 
+ // Execute implements types.Tool.
+ func (t *ReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var input struct {
+ 		Ref       string `json:"ref"`
+ 		StartLine int    `json:"start_line"`
+@@ -221,6 +224,9 @@ func (t *ReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*type
+ 
+ // Execute implements types.Tool.
+ func (t *FillPageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var input fillPageInput
+ 	if err := decodeStrict(args, &input); err != nil {
+ 		return operationFailure(fmt.Sprintf("invalid arguments: %v", err)), nil
+@@ -278,6 +284,9 @@ func (t *FillPageTool) Execute(ctx context.Context, args json.RawMessage) (*type
+ 
+ // Execute implements types.Tool.
+ func (t *SelectTabTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var input struct {
+ 		Ref string `json:"ref"`
+ 	}
+diff --git a/internal/agent/tools/query_knowledge_graph.go b/internal/agent/tools/query_knowledge_graph.go
+index 15c1ccd..ed5bc74 100644
+--- a/internal/agent/tools/query_knowledge_graph.go
++++ b/internal/agent/tools/query_knowledge_graph.go
+@@ -225,6 +225,9 @@ func NewQueryKnowledgeGraphTool(
+ 
+ // Execute performs the knowledge graph query with concurrent KB processing
+ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	// Parse args from json.RawMessage
+ 	var input QueryKnowledgeGraphInput
+ 	if err := json.Unmarshal(args, &input); err != nil {
+diff --git a/internal/agent/tools/read_document.go b/internal/agent/tools/read_document.go
+index 43a529e..0ae3332 100644
+--- a/internal/agent/tools/read_document.go
++++ b/internal/agent/tools/read_document.go
+@@ -160,6 +160,10 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
+ 		return &types.ToolResult{Success: false, Error: err.Error()}, err
+ 	}
+ 
++	if err := requireGovernedDocument(ctx, knowledge); err != nil {
++		return blockedKnowledgeResult(err)
++	}
++
+ 	var matchers []*regexp.Regexp
+ 	switch {
+ 	case query == "":
+diff --git a/internal/agent/tools/search_conversations.go b/internal/agent/tools/search_conversations.go
+index a3e57cd..0561553 100644
+--- a/internal/agent/tools/search_conversations.go
++++ b/internal/agent/tools/search_conversations.go
+@@ -104,6 +104,9 @@ func NewSearchConversationsTool(
+ func (t *SearchConversationsTool) Execute(
+ 	ctx context.Context, args json.RawMessage,
+ ) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var input SearchConversationsInput
+ 	if err := json.Unmarshal(args, &input); err != nil {
+ 		return &types.ToolResult{
+diff --git a/internal/agent/tools/search_knowledge.go b/internal/agent/tools/search_knowledge.go
+index 3eb833d..a835baf 100644
+--- a/internal/agent/tools/search_knowledge.go
++++ b/internal/agent/tools/search_knowledge.go
+@@ -268,6 +268,10 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
+ 		return &types.ToolResult{Success: false, Output: msg, Error: msg}, nil
+ 	}
+ 
++	allResults, err = filterGovernedSearchResults(ctx, searchTargets, t.knowledgeService, allResults)
++	if err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	deduplicated := t.deduplicateResultsForRerank(allResults)
+ 
+ 	ranked := deduplicated
+diff --git a/internal/agent/tools/wiki_delete_page.go b/internal/agent/tools/wiki_delete_page.go
+index a975a89..4b91950 100644
+--- a/internal/agent/tools/wiki_delete_page.go
++++ b/internal/agent/tools/wiki_delete_page.go
+@@ -46,6 +46,9 @@ func NewWikiDeletePageTool(
+ }
+ 
+ func (t *wikiDeletePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	// Attribute every page write performed by this tool to the agent so
+ 	// revision history distinguishes agent edits from pipeline/user ones.
+ 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
+diff --git a/internal/agent/tools/wiki_flag_issue.go b/internal/agent/tools/wiki_flag_issue.go
+index 0f23cc7..131a670 100644
+--- a/internal/agent/tools/wiki_flag_issue.go
++++ b/internal/agent/tools/wiki_flag_issue.go
+@@ -74,6 +74,9 @@ func (t *wikiFlagIssueTool) WithKnowledgeScope(
+ }
+ 
+ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var params struct {
+ 		Slug                  string   `json:"slug"`
+ 		IssueType             string   `json:"issue_type"`
+diff --git a/internal/agent/tools/wiki_read_issue.go b/internal/agent/tools/wiki_read_issue.go
+index 31c8298..8be2a3c 100644
+--- a/internal/agent/tools/wiki_read_issue.go
++++ b/internal/agent/tools/wiki_read_issue.go
+@@ -41,6 +41,9 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
+ }
+ 
+ func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var params struct {
+ 		IssueID string `json:"issue_id"`
+ 		Slug    string `json:"slug"`
+diff --git a/internal/agent/tools/wiki_rename_page.go b/internal/agent/tools/wiki_rename_page.go
+index 34e6907..6f2f3e4 100644
+--- a/internal/agent/tools/wiki_rename_page.go
++++ b/internal/agent/tools/wiki_rename_page.go
+@@ -49,6 +49,9 @@ func NewWikiRenamePageTool(
+ }
+ 
+ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	// Attribute every page write performed by this tool to the agent so
+ 	// revision history distinguishes agent edits from pipeline/user ones.
+ 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
+diff --git a/internal/agent/tools/wiki_replace_text.go b/internal/agent/tools/wiki_replace_text.go
+index df4c853..29ba0a9 100644
+--- a/internal/agent/tools/wiki_replace_text.go
++++ b/internal/agent/tools/wiki_replace_text.go
+@@ -73,6 +73,9 @@ func (t *wikiReplaceTextTool) WithSearchTargets(searchTargets types.SearchTarget
+ }
+ 
+ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	// Attribute every page write performed by this tool to the agent so
+ 	// revision history distinguishes agent edits from pipeline/user ones.
+ 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
+diff --git a/internal/agent/tools/wiki_tools.go b/internal/agent/tools/wiki_tools.go
+index e716856..5ec6039 100644
+--- a/internal/agent/tools/wiki_tools.go
++++ b/internal/agent/tools/wiki_tools.go
+@@ -500,6 +500,9 @@ func seenLinkKey(kbID, slug string) string {
+ }
+ 
+ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var params struct {
+ 		Slug  any `json:"slug"`
+ 		Slugs any `json:"slugs"`
+@@ -814,6 +817,9 @@ func NewWikiSearchTool(
+ }
+ 
+ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var params struct {
+ 		Query            any      `json:"query"`
+ 		Queries          any      `json:"queries"` // legacy alias
+diff --git a/internal/agent/tools/wiki_update_issue.go b/internal/agent/tools/wiki_update_issue.go
+index 3e01e10..9c1625d 100644
+--- a/internal/agent/tools/wiki_update_issue.go
++++ b/internal/agent/tools/wiki_update_issue.go
+@@ -42,6 +42,9 @@ func NewWikiUpdateIssueTool(wikiService interfaces.WikiPageService, kbIDs []stri
+ }
+ 
+ func (t *wikiUpdateIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	var params struct {
+ 		IssueID string `json:"issue_id"`
+ 		Status  string `json:"status"`
+diff --git a/internal/agent/tools/wiki_write_page.go b/internal/agent/tools/wiki_write_page.go
+index 362f5b4..5c7a2d8 100644
+--- a/internal/agent/tools/wiki_write_page.go
++++ b/internal/agent/tools/wiki_write_page.go
+@@ -90,6 +90,9 @@ func (t *wikiWritePageTool) WithSearchTargets(searchTargets types.SearchTargets)
+ }
+ 
+ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return blockedKnowledgeResult(err)
++	}
+ 	// Attribute every page write performed by this tool to the agent so
+ 	// revision history distinguishes agent edits from pipeline/user ones.
+ 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
+diff --git a/internal/application/service/agent_service.go b/internal/application/service/agent_service.go
+index 3c0a6e4..d3e0bd1 100644
+--- a/internal/application/service/agent_service.go
++++ b/internal/application/service/agent_service.go
+@@ -276,6 +276,11 @@ func (s *agentService) CreateAgentEngine(
+ 
+ 	// 3. Resolve knowledge base and selected document metadata
+ 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
++	_, owners := knowledgeBaseScopesForPrompt(config)
++	kbInfos, policyErr := governPromptKBInfo(ctx, kbInfos, owners)
++	if policyErr != nil {
++		return nil, policyErr
++	}
+ 
+ 	// 4. Resolve system prompt template
+ 	systemPromptTemplate := ""
+@@ -297,8 +302,10 @@ func (s *agentService) CreateAgentEngine(
+ 		s.resolvePinnedSkillInfos(config),
+ 	)
+ 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
+-	engine.SetPageContext(s.resolvePageContextInfo(
+-		ctx, config.PageContext, config.SearchTargets, kbInfos, config.OperationsAgentID != ""))
++	if rejectUnattributed(ctx) == nil {
++		engine.SetPageContext(s.resolvePageContextInfo(
++			ctx, config.PageContext, config.SearchTargets, kbInfos, config.OperationsAgentID != ""))
++	}
+ 	engine.SetAssistantName(config.AssistantName)
+ 
+ 	// Non-vision chat models use the configured VLM to describe tool images.
+@@ -2070,6 +2077,10 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
+ 		return nil, fmt.Errorf("failed to get knowledge batch: %w", err)
+ 	}
+ 
++	knowledges, err = filterGovernedKnowledge(ctx, knowledges)
++	if err != nil {
++		return nil, err
++	}
+ 	// Build map for quick lookup
+ 	knowledgeMap := make(map[string]*types.Knowledge)
+ 	for _, k := range knowledges {
+diff --git a/internal/application/service/chat_pipeline/data_analysis.go b/internal/application/service/chat_pipeline/data_analysis.go
+index d58b60f..736afef 100644
+--- a/internal/application/service/chat_pipeline/data_analysis.go
++++ b/internal/application/service/chat_pipeline/data_analysis.go
+@@ -65,6 +65,9 @@ func (p *PluginDataAnalysis) OnEvent(
+ 	if !chatManage.NeedsRetrieval() {
+ 		return next()
+ 	}
++	if err := guardPromptResults(ctx, chatManage); err != nil {
++		return &PluginError{Err: err, Description: "Extension Bridge data-analysis policy failed", ErrorType: "bridge_data_policy_failed"}
++	}
+ 	// 1. Check if there are any CSV/Excel files in MergeResult
+ 	var dataFiles []*types.SearchResult
+ 	for _, result := range chatManage.MergeResult {
+diff --git a/internal/application/service/chat_pipeline/into_chat_message.go b/internal/application/service/chat_pipeline/into_chat_message.go
+index 1816664..5fd7ca2 100644
+--- a/internal/application/service/chat_pipeline/into_chat_message.go
++++ b/internal/application/service/chat_pipeline/into_chat_message.go
+@@ -39,6 +39,9 @@ func (p *PluginIntoChatMessage) ActivationEvents() []types.EventType {
+ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
+ 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
+ ) *PluginError {
++	if err := guardPromptResults(ctx, chatManage); err != nil {
++		return &PluginError{Err: err, Description: "Extension Bridge prompt policy failed", ErrorType: "bridge_prompt_policy_failed"}
++	}
+ 	pipelineInfo(ctx, "IntoChatMessage", "input", map[string]interface{}{
+ 		"session_id":       chatManage.SessionID,
+ 		"merge_result_cnt": len(chatManage.MergeResult),
+diff --git a/internal/application/service/chat_pipeline/query_understand.go b/internal/application/service/chat_pipeline/query_understand.go
+index 4574b84..8352b5e 100644
+--- a/internal/application/service/chat_pipeline/query_understand.go
++++ b/internal/application/service/chat_pipeline/query_understand.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
+ 	"regexp"
+ 	"strings"
+ 
+@@ -340,6 +341,9 @@ func (p *PluginQueryUnderstand) buildPrompts(
+ // excludes no knowledge base: a stale note about last quarter's project must
+ // not be able to make this quarter's documents unreachable.
+ func (p *PluginQueryUnderstand) memoryBackground(ctx context.Context, chatManage *types.ChatManage) string {
++	if extensionbridge.RejectUnattributed(ctx) != nil {
++		return ""
++	}
+ 	if p.memoryService == nil {
+ 		return ""
+ 	}
+diff --git a/internal/application/service/session_agent_qa.go b/internal/application/service/session_agent_qa.go
+index 766055b..e6196d3 100644
+--- a/internal/application/service/session_agent_qa.go
++++ b/internal/application/service/session_agent_qa.go
+@@ -48,6 +48,12 @@ func (s *sessionService) AgentQA(
+ 	req *types.QARequest,
+ 	eventBus *event.EventBus,
+ ) error {
++	if req.Resume != nil {
++		if err := rejectUnattributed(ctx); err != nil {
++			return err
++		}
++	}
++
+ 	sessionID := req.Session.ID
+ 	if req.Session.Kind == types.SessionKindAgentDelegated {
+ 		b := collaboration.FromContext(ctx)
+@@ -219,7 +225,7 @@ func (s *sessionService) AgentQA(
+ 	// canonical assistant message. History is sized by the window, not by a
+ 	// turn count: compaction and its persisted checkpoints keep it in bounds.
+ 	var llmContext []chat.Message
+-	if agentConfig.MultiTurnEnabled {
++	if agentConfig.MultiTurnEnabled && rejectUnattributed(ctx) == nil {
+ 		budget := agent.HistoryTokenBudget(agentConfig)
+ 		llmContext, agentConfig.ContextTokenScale, err = LoadAgentHistory(
+ 			ctx, s.messageRepo, sessionID, budget, agentConfig.RetainRetrievalHistory,
+diff --git a/internal/application/service/session_knowledge_qa.go b/internal/application/service/session_knowledge_qa.go
+index 00abea1..1f76df7 100644
+--- a/internal/application/service/session_knowledge_qa.go
++++ b/internal/application/service/session_knowledge_qa.go
+@@ -193,6 +193,13 @@ func (s *sessionService) KnowledgeQA(
+ 	// this decision or the request is incorrectly downgraded to pure chat.
+ 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
+ 	needsRAG := hasKB || webSearchEnabled
++	// M2: historical answers have no complete source provenance. Do not replay
++	// them to query-understanding or generation models. Persisted history stays intact.
++	if rejectUnattributed(ctx) != nil {
++		chatManage.MaxRounds = 0
++		chatManage.History = nil
++		chatManage.HistoryLoaded = true
++	}
+ 	hasHistory := chatManage.MaxRounds > 0
+ 
+ 	var pipeline []types.EventType
+@@ -1152,7 +1159,10 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
+ 		query = rq
+ 	}
+ 
+-	kbDocuments := s.buildKBDocumentListing(ctx, chatManage)
++	kbDocuments, err := s.buildKBDocumentListing(ctx, chatManage)
++	if err != nil {
++		return "", err
++	}
+ 
+ 	result := types.RenderPromptPlaceholders(chatManage.FallbackPrompt, types.PlaceholderValues{
+ 		"query":        query,
+@@ -1172,7 +1182,7 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
+ // buildKBDocumentListing returns a concise listing of documents in the knowledge bases
+ // associated with the current pipeline. This gives the LLM visibility into KB contents
+ // when vector/keyword search returns empty (e.g., broad browse queries).
+-func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage *types.ChatManage) string {
++func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage *types.ChatManage) (string, error) {
+ 	// Collect unique KB IDs from search targets
+ 	kbIDs := make(map[string]struct{})
+ 	for _, t := range chatManage.SearchTargets {
+@@ -1182,9 +1192,16 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage
+ 		kbIDs[id] = struct{}{}
+ 	}
+ 	if len(kbIDs) == 0 {
+-		return ""
++		return "", nil
+ 	}
+ 
++	authorized := make(map[string]bool, len(chatManage.KnowledgeIDs))
++	for _, id := range chatManage.KnowledgeIDs {
++		authorized[id] = true
++	}
++	if len(authorized) == 0 {
++		return "", nil
++	}
+ 	const maxDocuments = 50
+ 	var b strings.Builder
+ 	total := 0
+@@ -1198,6 +1215,16 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage
+ 			logger.Warnf(ctx, "buildKBDocumentListing: failed to list knowledge for KB %s: %v", kbID, err)
+ 			continue
+ 		}
++		candidates := make([]*types.Knowledge, 0, len(knowledges))
++		for _, k := range knowledges {
++			if k != nil && k.KnowledgeBaseID == kbID && authorized[k.ID] {
++				candidates = append(candidates, k)
++			}
++		}
++		knowledges, err = filterGovernedKnowledge(ctx, candidates)
++		if err != nil {
++			return "", err
++		}
+ 		for _, k := range knowledges {
+ 			if total >= maxDocuments {
+ 				break
+@@ -1229,14 +1256,14 @@ func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage
+ 	}
+ 
+ 	if b.Len() == 0 {
+-		return ""
++		return "", nil
+ 	}
+ 
+ 	if total >= maxDocuments {
+ 		fmt.Fprintf(&b, "... (showing first %d documents)\n", maxDocuments)
+ 	}
+ 
+-	return b.String()
++	return b.String(), nil
+ }
+ 
+ // consumeFallbackStream consumes the streaming response and emits events
+diff --git a/internal/mcpserver/tools_retrieve.go b/internal/mcpserver/tools_retrieve.go
+index cea1eb5..4e0e315 100644
+--- a/internal/mcpserver/tools_retrieve.go
++++ b/internal/mcpserver/tools_retrieve.go
+@@ -8,10 +8,13 @@ import (
+ 	"unicode"
+ 
+ 	"github.com/Tencent/WeKnora/internal/agent/tools"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
+ 	"github.com/Tencent/WeKnora/internal/types"
+ 	"github.com/mark3labs/mcp-go/mcp"
+ )
+ 
++var governedDocuments = extensionbridge.AllowedDocuments
++
+ const (
+ 	defaultListPageSize = 20
+ 	maxListPageSize     = 100
+@@ -130,7 +133,7 @@ func summarizeKnowledgeBase(kb *types.KnowledgeBase) knowledgeBaseSummary {
+ 	return knowledgeBaseSummary{
+ 		ID:           kb.ID,
+ 		Name:         kb.Name,
+-		Description:  kb.Description,
++		Description:  "", // Aggregate KB text has no complete per-document provenance.
+ 		Type:         kb.Type,
+ 		Capabilities: caps,
+ 	}
+@@ -344,7 +347,20 @@ func (s *Server) handleListDocuments(ctx context.Context, req mcp.CallToolReques
+ 	}
+ 	docs := []documentSummary{}
+ 	if rows, ok := result.Data.([]*types.Knowledge); ok {
++		ids := make([]string, 0, len(rows))
++		for _, k := range rows {
++			if k != nil {
++				ids = append(ids, k.ID)
++			}
++		}
++		allowed, policyErr := governedDocuments(ctx, kb.TenantID, kb.ID, ids)
++		if policyErr != nil {
++			return mcp.NewToolResultError("document policy unavailable"), nil
++		}
+ 		for _, k := range rows {
++			if k == nil || !allowed[k.ID] {
++				continue
++			}
+ 			docs = append(docs, summarizeKnowledge(k))
+ 		}
+ 	}
+diff --git a/internal/mcpserver/tools_wiki.go b/internal/mcpserver/tools_wiki.go
+index 0ab5173..2230cdb 100644
+--- a/internal/mcpserver/tools_wiki.go
++++ b/internal/mcpserver/tools_wiki.go
+@@ -6,6 +6,7 @@ import (
+ 	"strings"
+ 
+ 	"github.com/Tencent/WeKnora/internal/agent/tools"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
+ 	"github.com/Tencent/WeKnora/internal/types"
+ 	"github.com/mark3labs/mcp-go/mcp"
+ )
+@@ -54,6 +55,8 @@ func wikiIndexTool() mcp.Tool {
+ 	)
+ }
+ 
++var rejectUnattributed = extensionbridge.RejectUnattributed
++
+ func (s *Server) wikiScopeFromRequest(
+ 	ctx context.Context, ep *types.MCPEndpoint, requested []string,
+ ) ([]*types.KnowledgeBase, error) {
+@@ -156,6 +159,10 @@ func (s *Server) handleWikiReadPage(ctx context.Context, req mcp.CallToolRequest
+ }
+ 
+ func (s *Server) handleWikiIndex(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
++	if err := rejectUnattributed(ctx); err != nil {
++		return mcp.NewToolResultError(err.Error()), nil
++	}
++
+ 	ep, err := endpointFromContext(ctx)
+ 	if err != nil {
+ 		return mcp.NewToolResultError("unauthorized"), nil
+diff --git a/internal/agent/governance_fixture_test.go b/internal/agent/governance_fixture_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/agent/governance_fixture_test.go
+@@ -0,0 +1,37 @@
++package agent
++
++import (
++	"context"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"os"
++	"testing"
++)
++
++type governanceFixtureKey struct{}
++
++func TestMain(m *testing.M) {
++	extensionbridge.EvaluateDocuments = func(ctx context.Context, _ uint64, _ []string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			allowed[id] = true
++		}
++		return allowed, nil
++	}
++	extensionbridge.EvaluateUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++
++	rejectGovernanceReplay = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++	os.Exit(m.Run())
++}
+diff --git a/internal/agent/governance_test.go b/internal/agent/governance_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/agent/governance_test.go
+@@ -0,0 +1,16 @@
++package agent
++
++import (
++	"context"
++	"errors"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"testing"
++)
++
++func TestGovernanceResumeRejectsBeforeSnapshotReplay(t *testing.T) {
++	ctx := context.WithValue(context.Background(), governanceFixtureKey{}, true)
++	_, err := (&AgentEngine{}).Resume(ctx, "session", "message", nil, []byte(`{}`), nil)
++	if !errors.Is(err, extensionbridge.ErrUnattributed) {
++		t.Fatal("resume did not reject unknown old provenance before replay")
++	}
++}
+diff --git a/internal/agent/tools/governance.go b/internal/agent/tools/governance.go
+new file mode 100644
+--- /dev/null
++++ b/internal/agent/tools/governance.go
+@@ -0,0 +1,102 @@
++package tools
++
++import (
++	"context"
++	"errors"
++
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"github.com/Tencent/WeKnora/internal/logger"
++	"github.com/Tencent/WeKnora/internal/types"
++	"github.com/Tencent/WeKnora/internal/types/interfaces"
++)
++
++// Private seams allow existing algorithm unit tests to supply explicit policy
++// fixtures. Production always uses the fixed loopback HTTP client.
++var governedDocuments = extensionbridge.AllowedDocuments
++var rejectUnattributed = extensionbridge.RejectUnattributed
++
++func requireGovernedDocument(ctx context.Context, k *types.Knowledge) error {
++	if k == nil {
++		return extensionbridge.ErrDocumentUnavailable
++	}
++	tenant := k.TenantID
++	if tenant == 0 {
++		tenant, _ = types.TenantIDFromContext(ctx)
++	}
++	allowed, err := governedDocuments(ctx, tenant, k.KnowledgeBaseID, []string{k.ID})
++	if err != nil || !allowed[k.ID] {
++		logger.Error(ctx, "[Bridge] document policy failed, blocking knowledge access")
++		return extensionbridge.ErrDocumentUnavailable
++	}
++	return nil
++}
++
++func filterGovernedDocuments(ctx context.Context, tenant uint64, kb string, rows []*types.Knowledge) ([]*types.Knowledge, error) {
++	ids := make([]string, 0, len(rows))
++	for _, k := range rows {
++		if k != nil && k.KnowledgeBaseID == kb {
++			ids = append(ids, k.ID)
++		}
++	}
++	allowed, err := governedDocuments(ctx, tenant, kb, ids)
++	if err != nil {
++		return nil, err
++	}
++	kept := make([]*types.Knowledge, 0, len(rows))
++	for _, k := range rows {
++		if k != nil && k.KnowledgeBaseID == kb && allowed[k.ID] {
++			kept = append(kept, k)
++		}
++	}
++	return kept, nil
++}
++
++func filterGovernedSearchResults(ctx context.Context, targets types.SearchTargets, ks interfaces.KnowledgeService, rows []*searchResultWithMeta) ([]*searchResultWithMeta, error) {
++	kept := make([]*searchResultWithMeta, 0, len(rows))
++	for _, kb := range targets.GetAllKnowledgeBaseIDs() {
++		ids := []string{}
++		for _, r := range rows {
++			if r != nil && r.SearchResult != nil && r.KnowledgeBaseID == kb {
++				ids = append(ids, r.KnowledgeID)
++			}
++		}
++		tenant := targets.GetTenantIDForKB(kb)
++		if tenant == 0 {
++			tenant, _ = types.TenantIDFromContext(ctx)
++		}
++		allowed, err := governedDocuments(ctx, tenant, kb, ids)
++		if err != nil {
++			return nil, err
++		}
++		for _, r := range rows {
++			if r != nil && r.SearchResult != nil && r.KnowledgeBaseID == kb && allowed[r.KnowledgeID] {
++				nativeAllowed, nativeErr := searchTargetsAllowKnowledgeID(ctx, targets, r.KnowledgeID, kb, ks)
++				if nativeErr != nil {
++					return nil, nativeErr
++				}
++				if nativeAllowed {
++					kept = append(kept, r)
++				}
++			}
++		}
++	}
++	// Keep the original ranking order. No retrieval/rerank algorithm is changed.
++	selected := map[*searchResultWithMeta]bool{}
++	for _, r := range kept {
++		selected[r] = true
++	}
++	kept = kept[:0]
++	for _, r := range rows {
++		if selected[r] {
++			kept = append(kept, r)
++		}
++	}
++	return kept, nil
++}
++
++func blockedKnowledgeResult(err error) (*types.ToolResult, error) {
++	if err == nil {
++		err = errors.New("governance read blocked")
++	}
++	return &types.ToolResult{Success: false, Error: err.Error()}, err
++}
+diff --git a/internal/agent/tools/governance_failclosed_test.go b/internal/agent/tools/governance_failclosed_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/agent/tools/governance_failclosed_test.go
+@@ -0,0 +1,68 @@
++package tools
++
++import (
++	"context"
++	"encoding/json"
++	"github.com/Tencent/WeKnora/internal/types"
++	"strings"
++	"testing"
++)
++
++func TestGovernanceReadDocumentRequiresHostPermission(t *testing.T) {
++	tool, repo := newReadDocumentFixture(2)
++	result, err := tool.Execute(context.WithValue(context.Background(), governanceFixtureKey{}, true), json.RawMessage(`{"id":"doc-1"}`))
++	if err == nil || (result != nil && result.Success) || len(repo.requests) != 0 {
++		t.Fatal("read_document consumed document chunks without an active-state Host permission")
++	}
++}
++
++func TestGovernanceOldChunkHandleRequiresFreshPermit(t *testing.T) {
++	tool, repo := newReadDocumentFixture(2)
++	ctx := context.WithValue(context.Background(), governanceFixtureKey{}, true)
++	result, err := tool.Execute(ctx, json.RawMessage(`{"id":"chunk-1","context":2}`))
++	if err == nil || result.Success || len(repo.requests) != 0 {
++		t.Fatal("old chunk handle bypassed current permission")
++	}
++}
++
++func TestGovernanceFiltersBeforeRerankAndListing(t *testing.T) {
++	targets := types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 7}}
++	rows := []*searchResultWithMeta{
++		{SearchResult: &types.SearchResult{ID: "a", KnowledgeID: "active", KnowledgeBaseID: "kb", Content: "ACTIVE_BODY"}, KnowledgeBaseID: "kb"},
++		{SearchResult: &types.SearchResult{ID: "b", KnowledgeID: "governance-revoked", KnowledgeBaseID: "kb", Content: "REVOKED_BODY"}, KnowledgeBaseID: "kb"},
++	}
++	kept, err := filterGovernedSearchResults(context.Background(), targets, nil, rows)
++	if err != nil || len(kept) != 1 || kept[0].KnowledgeID != "active" {
++		t.Fatal("revoked result reached the ranking input")
++	}
++	docs, err := filterGovernedDocuments(context.Background(), 7, "kb", []*types.Knowledge{
++		{ID: "active", TenantID: 7, KnowledgeBaseID: "kb", Description: "ACTIVE_DESCRIPTION"},
++		{ID: "governance-revoked", TenantID: 7, KnowledgeBaseID: "kb", Description: "REVOKED_DESCRIPTION"},
++	})
++	encoded, _ := json.Marshal(docs)
++	if err != nil || len(docs) != 1 || strings.Contains(string(encoded), "REVOKED_DESCRIPTION") {
++		t.Fatal("revoked metadata reached tool listing")
++	}
++}
++
++func TestGovernanceUnattributedReadsRejectBeforeDependencies(t *testing.T) {
++	ctx := context.WithValue(context.Background(), governanceFixtureKey{}, true)
++	calls := []func(context.Context, json.RawMessage) (*types.ToolResult, error){
++		(&ReadPageTool{}).Execute, (&FillPageTool{}).Execute, (&SelectTabTool{}).Execute,
++		(&DatabaseQueryTool{}).Execute, (&SearchConversationsTool{}).Execute,
++		(&QueryKnowledgeGraphTool{}).Execute, (&wikiReadPageTool{}).Execute,
++		(&wikiSearchTool{}).Execute, (&RunOperationTool{}).Execute,
++		(&wikiDeletePageTool{}).Execute,
++		(&wikiFlagIssueTool{}).Execute,
++		(&wikiRenamePageTool{}).Execute,
++		(&wikiReplaceTextTool{}).Execute,
++		(&wikiUpdateIssueTool{}).Execute,
++		(&wikiWritePageTool{}).Execute,
++	}
++	for _, call := range calls {
++		result, err := call(ctx, json.RawMessage(`{}`))
++		if err == nil || result == nil || result.Success {
++			t.Fatal("unattributed read was not refused")
++		}
++	}
++}
+diff --git a/internal/agent/tools/governance_fixture_test.go b/internal/agent/tools/governance_fixture_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/agent/tools/governance_fixture_test.go
+@@ -0,0 +1,54 @@
++package tools
++
++import (
++	"context"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"os"
++	"testing"
++)
++
++// Legacy algorithm tests use an explicit allow fixture. New governance tests
++// select denial with a private test-only context marker. Process E2E and the
++// extensionbridge HTTP tests exercise the real production client separately.
++type governanceFixtureKey struct{}
++
++func TestMain(m *testing.M) {
++	extensionbridge.EvaluateDocuments = func(ctx context.Context, _ uint64, _ []string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				allowed[id] = true
++			}
++		}
++		return allowed, nil
++	}
++	extensionbridge.EvaluateUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++
++	governedDocuments = func(ctx context.Context, _ uint64, _ string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				allowed[id] = true
++			}
++		}
++		return allowed, nil
++	}
++	rejectUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++	os.Exit(m.Run())
++}
+diff --git a/internal/application/service/chat_pipeline/governance.go b/internal/application/service/chat_pipeline/governance.go
+new file mode 100644
+--- /dev/null
++++ b/internal/application/service/chat_pipeline/governance.go
+@@ -0,0 +1,62 @@
++package chatpipeline
++
++import (
++	"context"
++
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"github.com/Tencent/WeKnora/internal/types"
++)
++
++var governedDocuments = extensionbridge.AllowedDocumentsInScope
++
++func guardPromptResults(ctx context.Context, cm *types.ChatManage) error {
++	kbIDs := append([]string(nil), cm.KnowledgeBaseIDs...)
++	if len(kbIDs) == 0 {
++		kbIDs = cm.SearchTargets.GetAllKnowledgeBaseIDs()
++	}
++	ids := []string{}
++	authorized := map[string]bool{}
++	for _, id := range cm.KnowledgeIDs {
++		authorized[id] = true
++	}
++	for _, r := range cm.MergeResult {
++		if r != nil && !isGovernanceWebResult(r) && (cm.KnowledgeIDs == nil || authorized[r.KnowledgeID]) {
++			ids = append(ids, r.KnowledgeID)
++		}
++	}
++	if len(ids) == 0 {
++		kept := []*types.SearchResult{}
++		for _, r := range cm.MergeResult {
++			if r != nil && isGovernanceWebResult(r) {
++				kept = append(kept, r)
++			}
++		}
++		cm.MergeResult = kept
++		return nil
++	}
++	if len(kbIDs) == 0 {
++		seen := map[string]bool{}
++		for _, r := range cm.MergeResult {
++			if r != nil && !seen[r.KnowledgeBaseID] {
++				kbIDs = append(kbIDs, r.KnowledgeBaseID)
++				seen[r.KnowledgeBaseID] = true
++			}
++		}
++	}
++	allowed, err := governedDocuments(ctx, cm.TenantID, kbIDs, ids)
++	if err != nil {
++		return err
++	}
++	kept := make([]*types.SearchResult, 0, len(cm.MergeResult))
++	for _, r := range cm.MergeResult {
++		if r != nil && (isGovernanceWebResult(r) || allowed[r.KnowledgeID]) {
++			kept = append(kept, r)
++		}
++	}
++	cm.MergeResult = kept
++	return nil
++}
++
++func isGovernanceWebResult(r *types.SearchResult) bool {
++	return r.MatchType == types.MatchTypeWebSearch || r.ChunkType == string(types.ChunkTypeWebSearch)
++}
+diff --git a/internal/application/service/chat_pipeline/governance_fixture_test.go b/internal/application/service/chat_pipeline/governance_fixture_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/application/service/chat_pipeline/governance_fixture_test.go
+@@ -0,0 +1,49 @@
++package chatpipeline
++
++import (
++	"context"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"os"
++	"testing"
++)
++
++// Legacy algorithm tests use an explicit allow fixture. New governance tests
++// select denial with a private test-only context marker. Process E2E and the
++// extensionbridge HTTP tests exercise the real production client separately.
++type governanceFixtureKey struct{}
++
++func TestMain(m *testing.M) {
++	extensionbridge.EvaluateDocuments = func(ctx context.Context, _ uint64, _ []string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				allowed[id] = true
++			}
++		}
++		return allowed, nil
++	}
++	extensionbridge.EvaluateUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++
++	governedDocuments = func(ctx context.Context, _ uint64, _ []string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				allowed[id] = true
++			}
++		}
++		return allowed, nil
++	}
++
++	os.Exit(m.Run())
++}
+diff --git a/internal/application/service/chat_pipeline/governance_test.go b/internal/application/service/chat_pipeline/governance_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/application/service/chat_pipeline/governance_test.go
+@@ -0,0 +1,56 @@
++package chatpipeline
++
++import (
++	"context"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"github.com/Tencent/WeKnora/internal/types"
++	"github.com/Tencent/WeKnora/internal/types/interfaces"
++	"strings"
++	"testing"
++)
++
++func TestGovernancePromptDropsRevokedBodyAndMetadata(t *testing.T) {
++	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{TenantID: 7}, PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
++		{KnowledgeID: "active", KnowledgeBaseID: "kb", Content: "ACTIVE_BODY", KnowledgeDescription: "ACTIVE_DESCRIPTION"},
++		{KnowledgeID: "governance-revoked", KnowledgeBaseID: "kb", Content: "REVOKED_BODY", KnowledgeDescription: "REVOKED_DESCRIPTION"},
++	}}}
++	if err := guardPromptResults(context.Background(), cm); err != nil {
++		t.Fatal(err)
++	}
++	if len(cm.MergeResult) != 1 || strings.Contains(buildDocumentHeader(cm.MergeResult), "REVOKED") {
++		t.Fatal("revoked metadata survived final prompt gate")
++	}
++	ctx := context.WithValue(context.Background(), governanceFixtureKey{}, true)
++	if err := guardPromptResults(ctx, cm); err == nil {
++		t.Fatal("prompt policy failed open")
++	}
++}
++
++func TestGovernanceUsesAuthorizedMultiKBScopeAndPreservesNativeWeb(t *testing.T) {
++	original := extensionbridge.EvaluateDocuments
++	t.Cleanup(func() { extensionbridge.EvaluateDocuments = original })
++	extensionbridge.EvaluateDocuments = func(_ context.Context, tenant uint64, kbs, ids []string) (map[string]bool, error) {
++		if tenant != 7 || len(kbs) != 2 || kbs[0] != "kb-a" || kbs[1] != "kb-b" || len(ids) != 1 || ids[0] != "active" {
++			t.Fatalf("incorrect native authority: %v %v", kbs, ids)
++		}
++		return map[string]bool{"active": true}, nil
++	}
++	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{TenantID: 7, KnowledgeBaseIDs: []string{"kb-a", "kb-b"}}, PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
++		{KnowledgeID: "active", Content: "AUTHORIZED_WITHOUT_RESULT_KB"},
++		{MatchType: types.MatchTypeWebSearch, Content: "NATIVE_WEB"},
++	}}}
++	if err := guardPromptResults(context.Background(), cm); err != nil || len(cm.MergeResult) != 2 {
++		t.Fatalf("scope/web regression: %v", err)
++	}
++}
++
++func TestGovernanceRejectsOldAnswerAffinityBeforeQueryRewrite(t *testing.T) {
++	plugin := &PluginQueryUnderstand{memoryService: &stubRetrievalMemory{retrieval: interfaces.RetrievalContext{Documents: []string{"REVOKED_TITLE_CANARY"}}}}
++	if !strings.Contains(plugin.memoryBackground(context.Background(), &types.ChatManage{}), "REVOKED_TITLE_CANARY") {
++		t.Fatal("positive memory fixture missing")
++	}
++	ctx := context.WithValue(context.Background(), governanceFixtureKey{}, true)
++	if got := plugin.memoryBackground(ctx, &types.ChatManage{}); got != "" {
++		t.Fatal("old-answer title reached rewrite background")
++	}
++}
+diff --git a/internal/application/service/governance.go b/internal/application/service/governance.go
+new file mode 100644
+--- /dev/null
++++ b/internal/application/service/governance.go
+@@ -0,0 +1,84 @@
++package service
++
++import (
++	"context"
++
++	"github.com/Tencent/WeKnora/internal/agent"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"github.com/Tencent/WeKnora/internal/types"
++)
++
++var governedDocuments = extensionbridge.AllowedDocuments
++var rejectUnattributed = extensionbridge.RejectUnattributed
++
++func filterGovernedKnowledge(ctx context.Context, rows []*types.Knowledge) ([]*types.Knowledge, error) {
++	type scope struct {
++		tenant uint64
++		kb     string
++	}
++	groups := map[scope][]string{}
++	for _, k := range rows {
++		if k != nil {
++			tenant := k.TenantID
++			if tenant == 0 {
++				tenant, _ = types.TenantIDFromContext(ctx)
++			}
++			s := scope{tenant, k.KnowledgeBaseID}
++			groups[s] = append(groups[s], k.ID)
++		}
++	}
++	allowed := map[scope]map[string]bool{}
++	for s, ids := range groups {
++		idsAllowed, err := governedDocuments(ctx, s.tenant, s.kb, ids)
++		if err != nil {
++			return nil, err
++		}
++		allowed[s] = idsAllowed
++	}
++	kept := make([]*types.Knowledge, 0, len(rows))
++	for _, k := range rows {
++		if k != nil {
++			tenant := k.TenantID
++			if tenant == 0 {
++				tenant, _ = types.TenantIDFromContext(ctx)
++			}
++			if allowed[scope{tenant, k.KnowledgeBaseID}][k.ID] {
++				kept = append(kept, k)
++			}
++		}
++	}
++	return kept, nil
++}
++
++func governPromptKBInfo(ctx context.Context, infos []*agent.KnowledgeBaseInfo, owners map[string]uint64) ([]*agent.KnowledgeBaseInfo, error) {
++	out := make([]*agent.KnowledgeBaseInfo, 0, len(infos))
++	for _, info := range infos {
++		if info == nil {
++			continue
++		}
++		copyInfo := *info
++		// Aggregate text cannot establish complete document provenance. Keep only
++		// static routing capabilities and metadata individually permitted by Host.
++		copyInfo.Description = ""
++		copyInfo.Profile = nil
++		copyInfo.DocCount = 0
++		ids := []string{}
++		for _, doc := range info.RecentDocs {
++			ids = append(ids, doc.KnowledgeID)
++		}
++		tenant := owners[info.ID]
++		if tenant == 0 {
++			tenant, _ = types.TenantIDFromContext(ctx)
++		}
++		allowed, err := governedDocuments(ctx, tenant, info.ID, ids)
++		if err != nil {
++			return nil, err
++		}
++		// Recent-doc enumeration is KB-wide, not necessarily the turn's narrower
++		// document/tag authorization. Do not inject it implicitly into the model.
++		_ = allowed
++		copyInfo.RecentDocs = nil
++		out = append(out, &copyInfo)
++	}
++	return out, nil
++}
+diff --git a/internal/application/service/governance_fallback_test.go b/internal/application/service/governance_fallback_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/application/service/governance_fallback_test.go
+@@ -0,0 +1,26 @@
++package service
++
++import (
++	"context"
++	"strings"
++	"testing"
++
++	"github.com/Tencent/WeKnora/internal/types"
++	"github.com/Tencent/WeKnora/internal/types/interfaces"
++)
++
++type governanceListingKnowledge struct{ interfaces.KnowledgeService }
++
++func (*governanceListingKnowledge) ListKnowledgeByKnowledgeBaseID(context.Context, string) ([]*types.Knowledge, error) {
++	return []*types.Knowledge{{ID: "governance-doc", TenantID: 7, KnowledgeBaseID: "governance-kb", EnableStatus: "enabled", Title: "Document", Description: "DESCRIPTION_ONLY_GOVERNANCE_CANARY"}}, nil
++}
++
++func TestGovernanceFallbackDescriptionRequiresHostPermission(t *testing.T) {
++	service := &sessionService{knowledgeService: &governanceListingKnowledge{}}
++	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{TenantID: 7, KnowledgeBaseIDs: []string{"governance-kb"}, KnowledgeIDs: []string{"governance-doc"}}}
++	cm.FallbackPrompt = "{{kb_documents}}"
++	prompt, err := service.renderFallbackPrompt(context.WithValue(context.Background(), governanceFixtureKey{}, true), cm)
++	if err == nil || strings.Contains(prompt, "DESCRIPTION_ONLY_GOVERNANCE_CANARY") {
++		t.Fatal("fallback model received ungoverned document description")
++	}
++}
+diff --git a/internal/application/service/governance_fixture_test.go b/internal/application/service/governance_fixture_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/application/service/governance_fixture_test.go
+@@ -0,0 +1,54 @@
++package service
++
++import (
++	"context"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"os"
++	"testing"
++)
++
++// Legacy algorithm tests use an explicit allow fixture. New governance tests
++// select denial with a private test-only context marker. Process E2E and the
++// extensionbridge HTTP tests exercise the real production client separately.
++type governanceFixtureKey struct{}
++
++func TestMain(m *testing.M) {
++	extensionbridge.EvaluateDocuments = func(ctx context.Context, _ uint64, _ []string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				allowed[id] = true
++			}
++		}
++		return allowed, nil
++	}
++	extensionbridge.EvaluateUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++
++	governedDocuments = func(ctx context.Context, _ uint64, _ string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				allowed[id] = true
++			}
++		}
++		return allowed, nil
++	}
++	rejectUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++	os.Exit(m.Run())
++}
+diff --git a/internal/extensionbridge/documents.go b/internal/extensionbridge/documents.go
+new file mode 100644
+--- /dev/null
++++ b/internal/extensionbridge/documents.go
+@@ -0,0 +1,73 @@
++package extensionbridge
++
++import (
++	"context"
++	"errors"
++
++	"github.com/Tencent/WeKnora/internal/types"
++	"github.com/google/uuid"
++)
++
++// ErrDocumentUnavailable rejects a document lacking a current Host permit.
++var ErrDocumentUnavailable = errors.New("document unavailable under governance policy")
++
++// ErrUnattributed rejects derived content whose complete source set is unknown.
++var ErrUnattributed = errors.New("M2 governance: complete source provenance unavailable; read blocked")
++
++// AllowedDocuments adapts a native-authorized document set to the existing
++// before_retrieve protocol. It contains no lifecycle rules or local fallback.
++func AllowedDocuments(ctx context.Context, tenantID uint64, kbID string, ids []string) (map[string]bool, error) {
++	return EvaluateDocuments(ctx, tenantID, []string{kbID}, ids)
++}
++
++// AllowedDocumentsInScope preserves the complete native-authorized KB scope
++// when result DTOs do not carry an individual KB ID (ordinary RAG results).
++func AllowedDocumentsInScope(ctx context.Context, tenantID uint64, kbIDs []string, ids []string) (map[string]bool, error) {
++	return EvaluateDocuments(ctx, tenantID, kbIDs, ids)
++}
++
++// EvaluateDocuments is the native composition dependency. Production keeps its
++// fixed HTTP implementation; algorithm unit tests replace it before TestMain
++// starts. No environment variable or request field can replace this dependency.
++var EvaluateDocuments = allowedDocumentsHTTP
++
++func allowedDocumentsHTTP(ctx context.Context, tenantID uint64, kbIDs []string, ids []string) (map[string]bool, error) {
++	requestID, _ := types.RequestIDFromContext(ctx)
++	if requestID == "" {
++		requestID = uuid.NewString()
++	}
++	sessionID, _ := ctx.Value(types.SessionIDContextKey).(string)
++	if sessionID == "" {
++		// Standalone/MCP document reads have no chat session. The existing DTO
++		// still requires a nonempty correlation ID; it grants no authority.
++		sessionID = requestID
++	}
++	unique := make([]string, 0, len(ids))
++	seen := map[string]bool{}
++	for _, id := range ids {
++		if id == "" {
++			return nil, ErrDocumentUnavailable
++		}
++		if !seen[id] {
++			seen[id] = true
++			unique = append(unique, id)
++		}
++	}
++	decision, err := BeforeRetrieve(ctx, map[string]any{"request_id": requestID, "session_id": sessionID, "mode": "agent", "tenant_id": tenantID, "knowledge_base_ids": kbIDs, "knowledge_ids": unique})
++	if err != nil {
++		return nil, ErrDocumentUnavailable
++	}
++	allowed := make(map[string]bool, len(decision.KnowledgeIDs))
++	for _, id := range decision.KnowledgeIDs {
++		allowed[id] = true
++	}
++	return allowed, nil
++}
++
++// RejectUnattributed is the M2 safety boundary approved for historical and
++// multi-source content. No persisted records are changed or deleted.
++func RejectUnattributed(ctx context.Context) error { return EvaluateUnattributed(ctx) }
++
++// EvaluateUnattributed is paired with EvaluateDocuments for native composition;
++// the production default refuses incomplete provenance without reading data.
++var EvaluateUnattributed = func(context.Context) error { return ErrUnattributed }
+diff --git a/internal/extensionbridge/documents_test.go b/internal/extensionbridge/documents_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/extensionbridge/documents_test.go
+@@ -0,0 +1,71 @@
++package extensionbridge
++
++import (
++	"context"
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++func TestAllowedDocumentsUsesCompleteActivePartition(t *testing.T) {
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		var request struct {
++			RequestID string   `json:"request_id"`
++			SessionID string   `json:"session_id"`
++			TenantID  uint64   `json:"tenant_id"`
++			KBs       []string `json:"knowledge_base_ids"`
++			IDs       []string `json:"knowledge_ids"`
++		}
++		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
++			t.Error(err)
++		}
++		if request.SessionID == "" {
++			t.Error("missing mandatory Host correlation session")
++			w.WriteHeader(400)
++			return
++		}
++		if r.Header.Get("X-AgentRAG-Bridge-Version") != "1" {
++			t.Error("missing protocol version")
++		}
++		excluded := []string{}
++		allowed := []string{}
++		for _, id := range request.IDs {
++			if id == "active" {
++				allowed = append(allowed, id)
++			} else {
++				excluded = append(excluded, id)
++			}
++		}
++		_ = json.NewEncoder(w).Encode(Decision{RequestID: request.RequestID, TenantID: request.TenantID, KnowledgeBaseIDs: request.KBs, KnowledgeIDs: allowed, ExcludedDocumentIDs: excluded, DenyAll: len(allowed) == 0})
++	}))
++	defer server.Close()
++	routeTo(t, server.URL)
++	allowed, err := AllowedDocuments(context.Background(), 7, "kb", []string{"active", "stale", "archived", "superseded", "failed", "unknown", "active"})
++	if err != nil || len(allowed) != 1 || !allowed["active"] {
++		t.Fatalf("partition not enforced: %v %v", allowed, err)
++	}
++}
++
++func TestAllowedDocumentsUnavailableAndMalformedFailClosed(t *testing.T) {
++	for _, response := range []string{"503", "malformed", "disconnected"} {
++		t.Run(response, func(t *testing.T) {
++			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if response == "503" {
++					w.WriteHeader(503)
++					return
++				}
++				_, _ = w.Write([]byte(`{"knowledge_ids":["active"]}`))
++			}))
++			routeTo(t, server.URL)
++			if response == "disconnected" {
++				server.Close()
++			} else {
++				defer server.Close()
++			}
++			if allowed, err := AllowedDocuments(context.Background(), 7, "kb", []string{"active"}); err == nil || len(allowed) > 0 {
++				t.Fatal("unavailable/malformed policy permitted content")
++			}
++		})
++	}
++}
+diff --git a/internal/mcpserver/governance_fixture_test.go b/internal/mcpserver/governance_fixture_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/mcpserver/governance_fixture_test.go
+@@ -0,0 +1,51 @@
++package mcpserver
++
++import (
++	"context"
++	"github.com/Tencent/WeKnora/internal/extensionbridge"
++	"os"
++	"testing"
++)
++
++type governanceFixtureKey struct{}
++
++func TestMain(m *testing.M) {
++	extensionbridge.EvaluateDocuments = func(ctx context.Context, _ uint64, _ []string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		allowed := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				allowed[id] = true
++			}
++		}
++		return allowed, nil
++	}
++	extensionbridge.EvaluateUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++
++	governedDocuments = func(ctx context.Context, _ uint64, _ string, ids []string) (map[string]bool, error) {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return nil, extensionbridge.ErrDocumentUnavailable
++		}
++		m := map[string]bool{}
++		for _, id := range ids {
++			if id != "governance-revoked" {
++				m[id] = true
++			}
++		}
++		return m, nil
++	}
++	rejectUnattributed = func(ctx context.Context) error {
++		if ctx.Value(governanceFixtureKey{}) != nil {
++			return extensionbridge.ErrUnattributed
++		}
++		return nil
++	}
++	os.Exit(m.Run())
++}

@@ -28,11 +28,23 @@ type DB struct {
 	closed    chan struct{}
 	closeOnce sync.Once
 	closeErr  error
+	fullSync  bool
 }
 
 // Open creates or opens an ext-only file. It refuses foreign user tables before
 // enabling WAL or running migrations, so an upstream database cannot be adopted.
 func Open(ctx context.Context, path string) (*DB, error) {
+	return open(ctx, path, false)
+}
+
+// OpenDurable uses WAL synchronous=FULL for parser intents preceding remote
+// side effects. Re-reserved writer connections keep this setting in their DSN.
+func OpenDurable(ctx context.Context, path string) (*DB, error) { return open(ctx, path, true) }
+
+// FullSync reports the immutable writer durability chosen when opening the DB.
+func (db *DB) FullSync() bool { return db != nil && db.fullSync }
+
+func open(ctx context.Context, path string, fullSync bool) (*DB, error) {
 	if path == "" || path == ":memory:" || strings.HasPrefix(path, "file:") {
 		return nil, errors.New("a filesystem path for the independent database is required")
 	}
@@ -57,7 +69,8 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0700); err != nil {
 		return nil, err
 	}
-	writers, err := sql.Open("sqlite", dataSource(abs, false))
+	dsn := dataSource(abs, false, fullSync)
+	writers, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +81,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		writers.Close()
 		return nil, err
 	}
-	db := &DB{writerDB: writers, writer: conn, gate: make(chan struct{}, 1), closed: make(chan struct{})}
+	db := &DB{writerDB: writers, writer: conn, gate: make(chan struct{}, 1), closed: make(chan struct{}), fullSync: fullSync}
 	if err := db.migrate(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate extension database: %w", err)
@@ -87,14 +100,18 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	return db, nil
 }
 
-func dataSource(path string, reader bool) string {
+func dataSource(path string, reader bool, fullSync ...bool) string {
 	uriPath := filepath.ToSlash(path)
 	if !strings.HasPrefix(uriPath, "/") {
 		uriPath = "/" + uriPath
 	}
 	u := url.URL{Scheme: "file", Path: uriPath}
 	q := url.Values{}
-	for _, pragma := range []string{"synchronous(NORMAL)", "busy_timeout(5000)", "foreign_keys(ON)", "cache_size(-64000)", "wal_autocheckpoint(1000)"} {
+	synchronous := "synchronous(NORMAL)"
+	if len(fullSync) > 0 && fullSync[0] {
+		synchronous = "synchronous(FULL)"
+	}
+	for _, pragma := range []string{synchronous, "busy_timeout(5000)", "foreign_keys(ON)", "cache_size(-64000)", "wal_autocheckpoint(1000)"} {
 		q.Add("_pragma", pragma)
 	}
 	if reader {

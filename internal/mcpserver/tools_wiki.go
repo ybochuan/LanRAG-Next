@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -53,6 +54,8 @@ func wikiIndexTool() mcp.Tool {
 		readOnlyEndpointAnnotations(),
 	)
 }
+
+var rejectUnattributed = extensionbridge.RejectUnattributed
 
 func (s *Server) wikiScopeFromRequest(
 	ctx context.Context, ep *types.MCPEndpoint, requested []string,
@@ -156,6 +159,10 @@ func (s *Server) handleWikiReadPage(ctx context.Context, req mcp.CallToolRequest
 }
 
 func (s *Server) handleWikiIndex(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := rejectUnattributed(ctx); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
 		return mcp.NewToolResultError("unauthorized"), nil

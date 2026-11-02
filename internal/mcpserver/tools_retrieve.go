@@ -8,9 +8,12 @@ import (
 	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/mark3labs/mcp-go/mcp"
 )
+
+var governedDocuments = extensionbridge.AllowedDocuments
 
 const (
 	defaultListPageSize = 20
@@ -130,7 +133,7 @@ func summarizeKnowledgeBase(kb *types.KnowledgeBase) knowledgeBaseSummary {
 	return knowledgeBaseSummary{
 		ID:           kb.ID,
 		Name:         kb.Name,
-		Description:  kb.Description,
+		Description:  "", // Aggregate KB text has no complete per-document provenance.
 		Type:         kb.Type,
 		Capabilities: caps,
 	}
@@ -344,7 +347,20 @@ func (s *Server) handleListDocuments(ctx context.Context, req mcp.CallToolReques
 	}
 	docs := []documentSummary{}
 	if rows, ok := result.Data.([]*types.Knowledge); ok {
+		ids := make([]string, 0, len(rows))
 		for _, k := range rows {
+			if k != nil {
+				ids = append(ids, k.ID)
+			}
+		}
+		allowed, policyErr := governedDocuments(ctx, kb.TenantID, kb.ID, ids)
+		if policyErr != nil {
+			return mcp.NewToolResultError("document policy unavailable"), nil
+		}
+		for _, k := range rows {
+			if k == nil || !allowed[k.ID] {
+				continue
+			}
 			docs = append(docs, summarizeKnowledge(k))
 		}
 	}

@@ -21,12 +21,17 @@ node_modules/
 /dist/
 /build/
 *.log
+# 验收证据日志需要入库，覆盖上面的 *.log 规则
+!docs/evidence/*.log
 
 # 临时文件
 tmp/
 temp/
 logs/
 *.pid
+
+# 本地备份产物（如 WeKnora-lite.bak），体积大，勿入库
+*.bak
 
 WeKnora
 WeKnora-lite

@@ -1,0 +1,43 @@
+{
+  "scheme": "agentrag-native-snapshot-v1",
+  "tenant_id": 7,
+  "knowledge_base_id": "kb",
+  "document_id": "doc",
+  "header_fields": {
+    "channel": "bde1489624c3f4f8041d716bfb56754a5bbf2c99054424bc25eddc8a9139ad1a",
+    "created_at": "86a825d469ce05424b546d98c5f848798cd08f90889ddbde3d24223d316a4989",
+    "custom_metadata": "451bad1e2ef600281d9fdf9c146a094ed9cfee70e8fbb28af9b8309c95a63614",
+    "description": "f75f37d0ad60134722348f1bd9949d2cd5ff3182b0148a6ba4da92e4ae8e7823",
+    "enable_status": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "file_hash": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "file_name": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "file_size": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+    "file_type": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "folder_path": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "metadata": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+    "parse_status": "7093fda846e50b267da144f7b3683ee1dd8838506939f6052b7370dd01fa2ad0",
+    "profile": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+    "source": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "summary_status": "30a0924a3360be687d1df9fcbbfdff62c01bc0fd14036ab9076cf7f451568666",
+    "title": "b5acad5f83f76be0d0dd301cb53cbee6d24c84b77eaad2b865358651a1d251f0",
+    "type": "bfdde6f5651ac5e4e6711f3c2836d5f8c5c4b381a50eb87c51d990b7eb36501b"
+  },
+  "header_hash": "619097568fb463efef02b86eeb56c9561968418dba88764d41ff9d410ed12649",
+  "chunks": [
+    {
+      "id": "chunk-a",
+      "content_revision": 0,
+      "chunk_index": 0,
+      "content_hash": "35a0ff56a9c8b9bcf954204bf219e6657d2ee0fb588c055c0fb52068f77cedb8",
+      "fields_hash": "8871694d5246139417cce3f8519f70e1f53d017192dd27780d5fa6127370e21b"
+    },
+    {
+      "id": "chunk-b",
+      "content_revision": 0,
+      "chunk_index": 1,
+      "content_hash": "ca020641c126a093c5dc99cd521f5dd6986a7a2f58b8ecd0120da969874b95a2",
+      "fields_hash": "7a5a7b16f83a7ab8f6092d68df4f9645ea883fe9546821d925f5acfb36f24899"
+    }
+  ],
+  "root_hash": "a72a7b4f84f7d2849f26455ad9729de030405122f7e1251e49252d687d5d1451"
+}

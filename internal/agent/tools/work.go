@@ -179,8 +179,13 @@ func (t *WorkWaitTool) Execute(ctx context.Context, raw json.RawMessage) (*types
 			}
 		}
 	}
+	detailsAllowed := rejectUnattributed(ctx) == nil
+	runID := ""
+	if detailsAllowed {
+		runID = t.runID
+	}
 	results, err := t.status(ctx, ids, interfaces.StatusOptions{
-		Detailed: true, RunID: t.runID, OutputBudget: workOutputBudget / len(ids),
+		Detailed: detailsAllowed, RunID: runID, OutputBudget: workOutputBudget / len(ids),
 	})
 	if err != nil {
 		return workReadError(ids, err)
@@ -188,7 +193,10 @@ func (t *WorkWaitTool) Execute(ctx context.Context, raw json.RawMessage) (*types
 	if waitSec > 0 {
 		t.rememberRunning(results)
 	}
-	markTerminal(t.marks, results)
+	results = governWorkResults(ctx, results)
+	if detailsAllowed {
+		markTerminal(t.marks, results)
+	}
 
 	note := ""
 	switch {
@@ -256,7 +264,7 @@ func (t *WorkWaitTool) poll(
 					unknown = append(unknown, r.ID)
 				}
 			}
-			if len(unknown) > 0 {
+			if len(unknown) > 0 && rejectUnattributed(ctx) == nil {
 				// No RunID: a probe must not move the read position the final
 				// detailed read hands to the model.
 				probe, probeErr := t.handler.Status(ctx, t.session, unknown, interfaces.StatusOptions{
@@ -371,7 +379,10 @@ func (t *WorkCancelTool) Execute(ctx context.Context, raw json.RawMessage) (*typ
 	if err != nil {
 		return workReadError(ids, err)
 	}
-	markTerminal(t.marks, results)
+	results = governWorkResults(ctx, results)
+	if rejectUnattributed(ctx) == nil {
+		markTerminal(t.marks, results)
+	}
 	note := ""
 	if anyRunning(results) {
 		note = workNoteCancelling
@@ -492,6 +503,21 @@ func renderWork(results []interfaces.WorkResult, note string, timedOut, interrup
 		return workError("encode work results: " + err.Error())
 	}
 	return &types.ToolResult{Success: true, Output: string(raw), Data: map[string]interface{}{"work": view}}
+}
+
+// governWorkResults preserves authorized status/cancel control while refusing
+// opaque result metadata. Copy rows so no stored job or payload is modified.
+func governWorkResults(ctx context.Context, results []interfaces.WorkResult) []interfaces.WorkResult {
+	if rejectUnattributed(ctx) == nil {
+		return results
+	}
+	safe := append([]interfaces.WorkResult(nil), results...)
+	for i := range safe {
+		safe[i].Title = ""
+		safe[i].Payload = nil
+		safe[i].OutputFiles = nil
+	}
+	return safe
 }
 
 func workError(msg string) *types.ToolResult {
