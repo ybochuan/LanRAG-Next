@@ -18,8 +18,10 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
 	"github.com/ybochuan/LanRAG-Next/extensions/management"
+	extmcp "github.com/ybochuan/LanRAG-Next/extensions/mcp"
 	"github.com/ybochuan/LanRAG-Next/extensions/outbox"
 	"github.com/ybochuan/LanRAG-Next/extensions/parser"
+	"github.com/ybochuan/LanRAG-Next/extensions/parser/attachment"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 	"github.com/ybochuan/LanRAG-Next/extensions/retrieval"
 	"github.com/ybochuan/LanRAG-Next/extensions/review"
@@ -144,6 +146,13 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	if cfg.Parser != nil {
 		parserCfg := *cfg.Parser
 		parserCfg.Report = report
+		if cfg.Mode == "worker" {
+			client, e := weknora.NewClient(cfg.UpstreamURL, cfg.APIKey, cfg.TenantID)
+			if e != nil {
+				return e
+			}
+			parserCfg.Attachments = attachment.NewImporter(client, cfg.KnowledgeBaseIDs)
+		}
 		if db == nil {
 			db, err = store.OpenDurable(runCtx, filepath.Join(parserCfg.ArtifactRoot, ".parser-state.sqlite"))
 			if err != nil {
@@ -171,6 +180,13 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			return errors.New("retrieval policy initialization failed")
 		}
 		policy.WithSources(sourceRegistry)
+		attachmentSource, err := weknora.NewClient(cfg.UpstreamURL, cfg.APIKey, cfg.TenantID)
+		if err != nil {
+			return err
+		}
+		policy.WithAttachments(attachmentSource)
+		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs}
+		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
 		services.BeforeRetrieve, err = bridge.NewRetrieveHandler(cfg.TenantID, cfg.KnowledgeBaseIDs, policy)
 		if err != nil {
 			return errors.New("retrieval handler initialization failed")

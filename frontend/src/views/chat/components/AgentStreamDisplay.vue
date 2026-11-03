@@ -806,6 +806,8 @@ import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDispla
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { mergeDocumentReferences, type KnowledgeReferenceLike, type ReferenceHighlightTarget } from '@/utils/referenceSources';
+import { attachmentAtTarget } from '@/utils/relatedAttachments';
+import { downloadRelatedAttachment } from '@/api/relatedAttachments';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { citationAnchorText } from '@/utils/citationAnchor';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
@@ -2649,6 +2651,12 @@ const getKbIdForWiki = (slug: string): string => {
 const onRootClick = (e: Event) => {
   const target = e.target as HTMLElement;
   if (!target) return;
+  const attachment = attachmentAtTarget(target, props.session);
+  if (attachment) {
+    e.preventDefault(); e.stopPropagation();
+    void downloadRelatedAttachment(attachment).catch(() => MessagePlugin.error('附件当前不可下载，所属制度可能已过期或访问权限已变化'));
+    return;
+  }
 
   // Inline artifact card -> open the drawer straight on that file's preview.
   const artifactIndex = artifactIndexFromEventTarget(target);

@@ -310,6 +310,15 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCP
 		sort.Slice(loaded, func(i, j int) bool { return loaded[i].mcpTool.Name < loaded[j].mcpTool.Name })
 		status = "ready"
 	}
+	if TrustedRelatedMCPService(service) {
+		fresh := make([]*MCPTool, 0, len(loaded))
+		for _, old := range loaded {
+			tool := NewMCPTool(service, old.mcpTool, old.mcpManager, old.gate, old.authWaitTimeoutSeconds)
+			tool.serverInstructions = old.serverInstructions
+			fresh = append(fresh, tool)
+		}
+		loaded = fresh
+	}
 	entry.store(service, loaded, status)
 	return loaded, status, nil
 }
@@ -331,7 +340,7 @@ func (c *MCPCatalog) visibleTools(ctx context.Context, id string, tools []*MCPTo
 	}
 	visible := make([]*MCPTool, 0, len(tools))
 	for _, tool := range tools {
-		if policies[tool.mcpTool.Name] && offered(tool) {
+		if policies[tool.mcpTool.Name] && offered(tool) && (rejectUnattributed(ctx) == nil || trustedRelatedTool(tool)) {
 			visible = append(visible, tool)
 		}
 	}

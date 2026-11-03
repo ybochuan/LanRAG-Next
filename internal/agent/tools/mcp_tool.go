@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/policy"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -144,7 +145,7 @@ func (t *MCPTool) callToolTimeout(engineTimeout time.Duration) time.Duration {
 
 // Execute executes the MCP tool
 func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
-	if err := rejectUnattributed(ctx); err != nil {
+	if err := rejectUnattributed(ctx); err != nil && !trustedRelatedTool(t) {
 		return blockedKnowledgeResult(err)
 	}
 	logger.GetLogger(ctx).Infof("Executing MCP tool: %s from service: %s", t.mcpTool.Name, t.service.Name)
@@ -329,6 +330,13 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	}
 
 	connectAndCall := func(callCtx context.Context) (*mcp.CallToolResult, error) {
+		if trustedRelatedTool(t) {
+			var scope any
+			if json.Unmarshal(t.service.AgentRAGScope, &scope) != nil {
+				return nil, extensionbridge.ErrDocumentUnavailable
+			}
+			input["_native_scope"] = scope
+		}
 		client, err := getOrCreateMCPClientWithOAuthRetry(
 			callCtx, t.mcpManager, t.service, t.gate, oauthSess, t.mcpTool.Name, toolCallID,
 		)

@@ -37,7 +37,7 @@ func TestPromptSectionsUseActualSourcesAndKeepCustomBase(t *testing.T) {
 				ids = append(ids, section.Name)
 			}
 			require.Equal(t, []string{
-				"base", "steering", "runtime_contract", "sources", "tools", "output", "memory", "protocol",
+				"base", "steering", "runtime_contract", "sources", "tools", "output", "memory", "protocol", "related_documents",
 			}, ids)
 			wantBase := "My workflow. Web: Disabled"
 			if web {

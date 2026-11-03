@@ -1,5 +1,26 @@
 # AgentRAG 项目上下文
 
+## 关联文件MCP接线（2026-11-03）
+
+- `extensions/mcp/server.go`在worker的现有回环端口挂载`/mcp` Streamable HTTP，提供只读query_related_docs；使用现有管理凭据。supplements查询当前版本边及当前声明、active许可，附件仍从Metadata读取；schema不支持attachment_of，本批不新增迁移。
+- 原生仅允许固定本机URL、匹配凭据及工具原名的可信例外；按需发现/审批保留。会话授权范围通过不持久化DTO随调用注入，工具目录缓存不授予其他会话的范围；未知外部MCP仍拒绝。
+- Agent系统提示词引导发现/调用；MCP structured_content复用关联文件卡片。注册脚本及实际模型验收步骤见`docs/operations/query-related-docs-MCP.md`；本轮未注册生产连接或运行真实模型自主调用验收。
+
+## 附件检索、下载与父状态联动（2026-11-03，阶段二／三）
+
+- worker通过`weknora/attachment_read.go`的原生batch/list API读取阶段一Metadata；`retrieval/policy.go`在最终DB快照同时要求附件自身和同库父文档生命周期为active。父缺失、非active、读取失败均不能放行；不写附件血缘边或自动修改子状态。
+- 已挂载`POST /bridge/after-retrieve`附件增强，沿用版本1、配置tenant/KB及服务端`AGENTRAG_MANAGEMENT_KEY`鉴权；命中主文档返回其附件，直接命中附件返回自身链接。原生RAG和Agent薄调用把JSON数组放入`SearchResult.metadata.related_attachments`，增强失败清除旧字段并省略卡片，保留回答流程。
+- 下载链接使用现有`/api/v1/knowledge/{id}/download`，沿用原生Editor/Contributor权限与登录凭证。`DownloadKnowledgeFile`仅对附件再调用现有before_retrieve；旧卡片点击时重新校验父状态，Host不可用关闭下载。原生`/files`存储代理、旧签发资源和已下载字节不属于本批撤销范围。
+- `frontend/src/components/RelatedAttachments.vue`以TDesign在RAG/Agent回答下显示去重下载卡片；复用现有登录Blob下载，Markdown中的同一已登记链接也可点击。历史卡片不后台推送状态，点击拒绝时显示制度过期/权限变化提示。启用、验证与截图见`docs/evidence/attachment-downloads-2026-11-03.md`。
+
+## 文档附件独立入库（2026-11-03）
+
+- `extensions/parser/attachment/`提供有序Extractor Registry：PDF使用既有纯Go pdfcpu的`ExtractAttachmentsRaw`；Office读取OOXML的word/xl/ppt embeddings；DOCX正文按独立“附件N”段落拆分，保留对应段落、表格、样式及包资源，普通正文引用不拆。
+- 仅导入PDF/DOCX/XLSX/PPTX，单件严格小于20MiB，源50MiB、单批32件/64MiB；OLE `.bin`不解包。正文附录生成`annex-01.docx`等独立文件，保留主文档原件。
+- worker复用原生公开文件上传API，同库写入字符串Metadata `is_attachment="true"`、`parent_document_id`和`attachment_sha256`。导入器先核对父scope、串行提取上传、只提取一层；重试先查原生列表核对回执，其他父文档的去重冲突不覆盖Metadata。
+- PDF在字节校验后、预检前提取；Office通过`knowledge_process.convert`三行薄包装调用`POST /parser/native/v1/attachments`，原有reader、解析消费、分块和调度保持原逻辑。沿用Parser共享凭证、版本1和身份Header；未配置代理时Office保持原行为，probe无Importer时附件接口503。
+- 阶段一不创建`ext_lineage_edge`，父标记不构成来源证明；阶段二／三按上节在读取时校验父生命周期，子文档自身仍由Observer管理。原生无跨父附件专用去重键/事务，不能宣称批量原子性或跨Host exactly-once。操作及实测边界见`docs/operations/文档附件提取与入库.md`。
+
 ## M4/M5 后台业务接线（2026-11-02）
 
 - `extensions/business/`复用DB单写者、M3 Registry与M2/T3许可，提供同库规范性关联/语义候选、双向active关联查询、管理反馈与指导、修订提案和手工Markdown发布Saga。GraphRAG默认关闭，默认关联权重未做真实标定。

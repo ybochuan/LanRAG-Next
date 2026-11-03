@@ -337,6 +337,19 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
+	for _, kbID := range kbIDs {
+		var batch []*types.SearchResult
+		for _, r := range final {
+			if r.KnowledgeBaseID == kbID {
+				batch = append(batch, r.SearchResult)
+			}
+		}
+		tenant := t.searchTargets.GetTenantIDForKB(kbID)
+		if tenant == 0 {
+			tenant, _ = types.TenantIDFromContext(ctx)
+		}
+		extensionbridge.EnrichAttachmentResults(ctx, tenant, []string{kbID}, batch)
+	}
 	result, omitted := t.formatWithinBudget(ctx, final, kbIDs, query, mode)
 	if omitted > 0 {
 		result.Data["omitted_for_budget"] = omitted
@@ -1134,6 +1147,7 @@ func (t *SearchKnowledgeTool) formatOutput(
 			"match_snippet":       snippet,
 			"score":               result.Score,
 			"source_query":        result.SourceQuery,
+			"metadata":            result.Metadata,
 			"query_type":          result.QueryType,
 			"knowledge_base_type": result.KnowledgeBaseType,
 		}

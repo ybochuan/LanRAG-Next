@@ -45,6 +45,7 @@ func (p *ScopeProxy) createUpload(w http.ResponseWriter, r *http.Request, s *sco
 	}
 	id := "pu-" + hex.EncodeToString(nonce[:])
 	u := &sourceUpload{size: in.Bytes, hash: hex.EncodeToString(decoded), busy: true, declaredPDF: strings.HasSuffix(strings.ToLower(in.Filename), ".pdf") || strings.EqualFold(strings.TrimSpace(strings.Split(in.MimeType, ";")[0]), "application/pdf")}
+	u.filename = in.Filename
 	s.mu.Lock()
 	if len(s.uploads) >= proxyStateLimit {
 		s.mu.Unlock()
@@ -116,6 +117,16 @@ func (p *ScopeProxy) putUpload(w http.ResponseWriter, r *http.Request, s *scopeS
 		return
 	}
 	if isPDF {
+		if p.attachments != nil && s.nativeDocument != "" {
+			name := u.filename
+			if name == "" {
+				name = "source.pdf"
+			}
+			if _, err := p.attachments.Process(r.Context(), s.identity.TenantID, s.identity.KnowledgeBaseID, s.nativeDocument, name, b); err != nil {
+				proxyError(w, 503, "attachment_import_failed")
+				return
+			}
+		}
 		report, err := PreflightPDF(r.Context(), b)
 		if err != nil {
 			proxyError(w, 422, "pdf_preflight_failed")

@@ -18,10 +18,11 @@ import (
 // Policy permits only known active lifecycle facts in its configured scopes.
 // Missing facts are excluded until reconciliation confirms the source document.
 type Policy struct {
-	db      *store.DB
-	tenant  uint64
-	kbs     map[string]bool
-	sources SourceRefresher
+	db          *store.DB
+	tenant      uint64
+	kbs         map[string]bool
+	sources     SourceRefresher
+	attachments AttachmentSource
 }
 
 // SourceRefresher reacquires scoped native evidence; no cached permit is accepted.
@@ -86,11 +87,15 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 	if len(r.KnowledgeIDs) == 0 {
 		return []string{}, ctx.Err()
 	}
+	attachmentDocs, err := p.attachmentDocuments(ctx, r)
+	if err != nil {
+		return nil, err
+	}
 	// Collect only dependencies of native-authorized targets, refresh outside the
 	// final read transaction, then compare every pin again in that transaction.
 	verified := map[dependencies.Scope]string{}
 	var refs []dependencies.Scope
-	err := p.db.View(ctx, func(tx *sql.Tx) error {
+	err = p.db.View(ctx, func(tx *sql.Tx) error {
 		targets, e := dependencyTargets(ctx, tx, r)
 		if e != nil {
 			return e
@@ -175,6 +180,25 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 				s := dependencies.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, DocumentID: ref.DocumentID}
 				if verified[s] != ref.VersionID {
 					blocked[scope.DocumentID] = true
+				}
+			}
+		}
+		for _, id := range r.KnowledgeIDs {
+			if p.attachments == nil {
+				break
+			}
+			d, ok := attachmentDocs[id]
+			if !ok {
+				blocked[id] = true
+				continue
+			}
+			if d.IsAttachment {
+				permit, e := attachmentParentActive(ctx, tx, r.TenantID, d)
+				if e != nil {
+					return e
+				}
+				if !permit {
+					blocked[id] = true
 				}
 			}
 		}

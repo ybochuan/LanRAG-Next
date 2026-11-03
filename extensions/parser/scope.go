@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/parser/attachment"
 )
 
 // ScopeBinding is an operator-configured endpoint identity, not native KB authorization.
@@ -36,6 +38,7 @@ type ScopeProxy struct {
 	requestMu                     sync.Mutex // Native document requests, including ACK persistence.
 	active                        int        // Guarded by NativeHandler.mu; queued requests count too.
 	poisoned                      bool       // A failed durable write requires handler restart.
+	attachments                   *attachment.Importer
 }
 
 func (*ScopeProxy) String() string     { return "parser scope proxy (redacted)" }
@@ -91,6 +94,7 @@ type sourceUpload struct {
 	busy, verified                          bool
 	declaredPDF                             bool
 	preflight                               *PDFPreflight
+	filename                                string
 }
 type jobReceipt struct {
 	busy   bool

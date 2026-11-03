@@ -28,6 +28,7 @@ const MCPUpdateDropSecrets = "drop_secrets"
 
 // MCPService represents an MCP (Model Context Protocol) service configuration
 type MCPService struct {
+	AgentRAGScope json.RawMessage `json:"-" gorm:"-"` // Per-run native authorization; excluded from persisted discovery configuration.
 	// UsageInstructions is maintained locally and is not overwritten by directory refresh.
 	UsageInstructions string `json:"usage_instructions" gorm:"type:text;not null;default:''"`
 

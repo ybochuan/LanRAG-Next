@@ -431,9 +431,7 @@ func (s *agentService) registerMCPTools(
 ) {
 	// Catalog summaries and discovered schemas are model-visible inputs too.
 	// Opaque external services have no trusted source proof in this phase.
-	if rejectUnattributed(ctx) != nil {
-		return
-	}
+	restrictedMCP := rejectUnattributed(ctx) != nil
 	tenantID := uint64(0)
 	if tid, ok := types.TenantIDFromContext(ctx); ok {
 		tenantID = tid
@@ -482,8 +480,8 @@ func (s *agentService) registerMCPTools(
 
 	enabledServices := make([]*types.MCPService, 0)
 	for _, svc := range mcpServices {
-		if svc != nil && svc.Enabled {
-			enabledServices = append(enabledServices, svc)
+		if svc != nil && svc.Enabled && (!restrictedMCP || tools.TrustedRelatedMCPService(svc)) {
+			enabledServices = append(enabledServices, tools.RelatedMCPServiceScope(svc, config.SearchTargets))
 			config.MCPServices = append(config.MCPServices, svc.ID)
 		}
 	}
@@ -495,7 +493,13 @@ func (s *agentService) registerMCPTools(
 		}
 		registered, err := tools.RegisterMCPTools(
 			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate,
-			config.MCPAuthWaitTimeout, s.mcpServiceService.GetMCPServiceByID,
+			config.MCPAuthWaitTimeout, func(ctx context.Context, tenant uint64, id string) (*types.MCPService, error) {
+				svc, e := s.mcpServiceService.GetMCPServiceByID(ctx, tenant, id)
+				if e != nil {
+					return nil, e
+				}
+				return tools.RelatedMCPServiceScope(svc, config.SearchTargets), nil
+			},
 			&tools.MCPMetadataIO{Get: metadataService.GetMCPMetadata, Put: metadataService.PersistMCPMetadata},
 		)
 		if err != nil {

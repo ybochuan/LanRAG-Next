@@ -1,5 +1,7 @@
 # AgentRAG Extension Host
 
+文档内嵌文件及DOCX正文附录独立入库：见[附件提取与入库](../docs/operations/文档附件提取与入库.md)，支持PDF、DOCX/XLSX/PPTX embeddings及独立“附件N”正文标题；阶段一不建立生命周期父依赖。
+
 本机启动、服务拆分、WSL网络、认证和数据库恢复：见[AgentRAG 启动与运维指南](../docs/operations/AgentRAG-启动与运维指南.md)。
 
 

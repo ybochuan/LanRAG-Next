@@ -1,5 +1,31 @@
 # AgentRAG Task Backlog
 
+## 关联文件MCP（2026-11-03）
+
+- 状态：代码接线与组件验证完成，部署/真实模型自主调用待验。
+- 期望结果：Agent通过原生按需发现调用query_related_docs，返回active补充通知、附件及下载卡片；文件见`extensions/mcp/`、原生MCP薄白名单/运行范围DTO及前端结构化结果适配。
+- 依据：用户明确授权MCP白名单、/mcp、提示词和验证方法；attachment_of不在现有schema，沿用阶段一Metadata，不改迁移。
+- 何时重新审视：生产重编译与连接注册后，按`docs/operations/query-related-docs-MCP.md`验证真实模型；新增跨库/标签范围或attachment_of事实时重新审视。
+
+## 附件阶段二／三（2026-11-03）
+
+| 任务／状态 | 期望结果＋文件 | 依据 | 验证及何时重新审视 |
+|---|---|---|---|
+| ATTACH-04／已接线并验证 | 主命中关联附件、直接命中自身链接；`weknora/attachment_read.go`、`retrieval/attachments.go`、Bridge after-retrieve、原生RAG/Agent薄DTO | 用户明确授权阶段二 | 真实Core/Host/原生上传后的RAG主/子和Agent均返回下载Metadata；增强失败不保留旧链接。原生API、检索输出和权限形态变化时重审。 |
+| ATTACH-05／已接线并验证 | 父active前置条件、附件点击时许可；`retrieval/policy.go`及原生下载薄门卫 | 用户明确授权阶段三 | active/stale/archived/缺失及元数据故障单测；真实父active→stale而子保持active，链接消失、旧下载403；停Host旧地址403。不包括原生/files、signed grant和流中撤销，相关需求另行审视。 |
+| ATTACH-06／已交付（聊天配套） | TDesign卡片、RAG/Agent去重、登录下载和Markdown链接点击；`RelatedAttachments.vue`及相关工具/薄渲染 | 用户明确要求原生聊天UI | 全前端2379项中2378通过/1既有skip；type-check/build退出0；实际组件浏览器下载字节核对、403提示及截图。完整App生产替换未执行；新消息/嵌入页协议变化时重审。 |
+
+本轮证据：`docs/evidence/attachment-downloads-2026-11-03.md`；阶段一改动完整保留，未提交/推送。
+
+## 文档附件阶段一（2026-11-03）
+
+| 任务／状态 | 期望结果＋文件 | 依据 | 验证及何时重新审视 |
+|---|---|---|---|
+| ATTACH-01／已实现并验证 | Registry、PDF/三类Office内嵌文件、正文DOCX附录；`extensions/parser/attachment/` | 用户指定提取设计，并追加批准正文附录拆分 | 真实嵌入PDF字节往返、三类ZIP目录、白名单/严格20MiB、普通引用不拆；用户样本6附录/4表格。更换文件格式、标题识别规则或pdfcpu版本时重审。 |
+| ATTACH-02／已实现并验证 | 官方multipart上传与强制父标记；`extensions/weknora/attachment{,_test}.go`和Importer | 用户要求独立入库、可见于原生列表 | 同父同hash回执复用、不同父/跨scope/503拒绝、8并发只创建一次；不直接重放未知POST。新增并行Host或原生去重机制变化时重审。 |
+| ATTACH-03／已接线并隔离验收 | PDF预检前提取、Host认证端点、Office原生薄包装及定向测试 | 用户明确批准Office薄接线 | 真实候选Core/worker Host/隔离SQLite：用户DOCX上传后1主+6子列表可见、4表格下载核对、全部原生分块/索引完成，重复请求同ID。DocReader及模型为本地夹具；生产Office引擎/真实库部署未验收。启用说明及日志见`docs/evidence/attachments-2026-11-03.md`。 |
+| ATTACH-LATER／阶段外 | 复杂意图路由、OLE容器及跨父附件复用；父状态读取联动已转ATTACH-05 | 用户阶段一不写ext_lineage_edge；阶段三另批准父状态门禁，当前无专用原生去重键 | 用户另行授权持久血缘/递归或遇到跨父相同字节409时再审视。 |
+
 ## 本机启动闭环（2026-10-31）
 
 | 任务 / 状态 | 期望结果 | 依据 | 验证及何时重新审视 |

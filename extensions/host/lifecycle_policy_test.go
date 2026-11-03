@@ -34,6 +34,16 @@ func TestHostCompletedObservationDailyCatchupAndRealPolicy(t *testing.T) {
 	}
 	db.Close()
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/knowledge/batch" {
+			docs := []any{}
+			for _, id := range r.URL.Query()["ids"] {
+				if id == "doc-active" || id == "doc-stale" {
+					docs = append(docs, map[string]any{"id": id, "tenant_id": 7, "knowledge_base_id": "kb-a", "metadata": map[string]string{}})
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "data": docs})
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/knowledge") {
 			w.WriteHeader(503)
 			return

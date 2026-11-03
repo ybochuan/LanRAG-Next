@@ -1,5 +1,28 @@
 # 原生薄补丁记录
 
+## query_related_docs MCP薄接线（2026-11-03）
+
+- 用户明确授权可信例外。`agent_service.go`只将固定本机URL/服务端凭据匹配的服务送入现有按需发现；`mcp_catalog.go`只放行精确工具名，并为缓存工具转换当前服务DTO，不修改发现算法。
+- `related_mcp.go`与`types.MCPService.AgentRAGScope`承载本次已授权targets；字段json/gorm忽略，不写原生表、不污染目录配置。`mcp_tool.go`仅对可信工具豁免未知来源拒绝，并在实际调用前覆盖私有范围参数；原生启停、审批、超时保留。
+- `agent/prompts.go`追加指定引导；前端仅扩展既有相关文件收集器以读取MCP structured_content。治理、关系查询及JSON-RPC服务留在extensions，不新增依赖/迁移。实际验证与限制见操作文档。
+
+## 附件检索与下载接线（2026-11-03，阶段二／三）
+
+- 用户本轮明确批准检索附件Metadata、父生命周期及聊天UI。业务读取、父状态和附件关联留在extensions，无依赖、表结构或迁移变化。
+- 新`internal/extensionbridge/attachments.go`仅DTO、固定回环HTTP增强（2s、版本1、服务端凭据、scope/URL验证）和附件下载适配；before_retrieve仍500ms fail-closed。
+- `chat_pipeline/into_chat_message.go`在既有最终许可后增强当前结果；`agent/tools/search_knowledge.go`在既有检索/重排之后增强并透传Metadata。沿用原生scope及自有tenant从登录上下文兜底；未改检索、RRF、分块或工具算法。after失败只清除链接，回答继续。
+- `handler/knowledge.go`在原下载权限校验之后、文件读取之前，附加附件专用现有许可检查。普通原件下载权限/行为保持原逻辑；父stale/archived/缺失或Host故障拒绝附件原生下载。没有改/files或其他资源代理。
+- 前端`botmsg.vue`/`AgentStreamDisplay.vue`只接新卡片和已登记Markdown下载点击；TDesign组件及结构化解析/登录下载分别位于`components/RelatedAttachments.vue`、`utils/relatedAttachments.ts`和`api/relatedAttachments.ts`。
+- 验证、准确命令与已知范围：`docs/evidence/attachment-downloads-2026-11-03.md`。实际候选Core/worker Host验证成功；未替换生产服务，未提交/推送。
+
+## Office 附件薄接线（2026-11-03）
+
+- 授权：用户明确批准`knowledge_process.go convert`文件读取后的Office附件入口；另批准正文附录拆分。提取、大小/类型过滤、父scope校验、回执对账及上传均在extensions。
+- `internal/infrastructure/docparser/attachment_proxy.go`新增reader薄包装：仅配置`AGENTRAG_PARSER_PROXY_ADDR`且输入为DOCX/XLSX/PPTX文件时，先POST原字节到`/parser/native/v1/attachments`，携带Bearer、版本1和tenant/KB/doc身份；200且`status=ok`后调用原reader，超时/错误拒绝本次解析。固定120s上限、取消继承原生context，不改变解析结果。
+- `internal/application/service/knowledge_process.go`仅在原`callDocReaderWithTimeout`前增加三行包装；没有改动原生读取、解析消费、分块、索引、RRF或任务算法。PDF在既有扩展代理内接入，没有追加PDF原生补丁。
+- `attachment_proxy_test.go`覆盖身份传递、调用顺序、原结果保留和Host失败阻断。无原生依赖/表结构/迁移改动；源码路径与行号以当前diff为准。
+- 全部docparser测试、CGO Lite候选构建及实际候选Core/Host上传列表/分块测试通过；候选未替换用户生产Core。详见`docs/evidence/attachments-2026-11-03.md`。
+
 ## M4/M5 业务界面配套（2026-11-03）
 
 - 原生只改`internal/handler/extension_lifecycle.go`现有GET动作白名单，加入`business_relation_list`；沿用原有JWT、KB读权限、固定回环管理转发，不增加路由、依赖或原生业务算法。

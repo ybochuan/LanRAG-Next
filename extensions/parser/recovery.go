@@ -36,6 +36,7 @@ type uploadSnapshot struct {
 	Hash, BackendID, BackendFile, UploadURL string
 	Verified, DeclaredPDF                   bool
 	Preflight                               *PDFPreflight
+	Filename                                string
 }
 type receiptSnapshot struct {
 	Status int
@@ -77,7 +78,7 @@ func snapshot(s *scopeState) ([]byte, documentSnapshot, error) {
 		d.OutputJobKeys[k] = ref.JobKey
 	}
 	for k, u := range s.uploads {
-		d.Uploads[k] = uploadSnapshot{u.size, u.hash, u.backendID, u.backendFile, u.uploadURL, u.verified, u.declaredPDF, u.preflight}
+		d.Uploads[k] = uploadSnapshot{u.size, u.hash, u.backendID, u.backendFile, u.uploadURL, u.verified, u.declaredPDF, u.preflight, u.filename}
 	}
 	for k, r := range s.requests {
 		d.Requests[hex.EncodeToString(k[:])] = receiptSnapshot{r.status, r.body}
@@ -123,7 +124,7 @@ func (j *parserJournal) restore(ctx context.Context, s *scopeState) error {
 	defer s.mu.Unlock()
 	s.files, s.hashes, s.pdfs, s.documents, s.jobDocuments, s.outputDocuments, s.jobKeys, s.jobs = d.Files, d.Hashes, d.PDFs, d.Documents, d.JobDocuments, d.OutputDocuments, d.JobKeys, d.Jobs
 	for k, u := range d.Uploads {
-		s.uploads[k] = &sourceUpload{size: u.Size, hash: u.Hash, backendID: u.BackendID, backendFile: u.BackendFile, uploadURL: u.UploadURL, verified: u.Verified, declaredPDF: u.DeclaredPDF, preflight: u.Preflight}
+		s.uploads[k] = &sourceUpload{size: u.Size, hash: u.Hash, backendID: u.BackendID, backendFile: u.BackendFile, uploadURL: u.UploadURL, verified: u.Verified, declaredPDF: u.DeclaredPDF, preflight: u.Preflight, filename: u.Filename}
 	}
 	for k, r := range d.Requests {
 		raw, err := hex.DecodeString(k)

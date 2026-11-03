@@ -4426,6 +4426,9 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
+	reader = docparser.WithAttachmentExtraction(reader, docparser.ParserProxyIdentity{
+		TenantID: knowledge.TenantID, KBID: knowledge.KnowledgeBaseID, DocID: knowledge.ID,
+	})
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	// Parser resource limits are permanent document rejections, not transient reader failures.
 	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {

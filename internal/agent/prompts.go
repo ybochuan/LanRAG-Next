@@ -629,6 +629,7 @@ func BuildSystemPromptSections(
 		sections = append(sections, SystemPromptSection{"memory", options.MemoryPrompt},
 			SystemPromptSection{"protocol", options.ProtocolPrompt})
 	}
+	sections = append(sections, SystemPromptSection{"related_documents", "当你查阅制度条款时，如果用户需要下载表格，或你想确认是否有最新的补充通知，请务必调用 query_related_docs 获取关联文件。先通过 discover_mcp_tools 按需发现该工具，使用已授权检索结果中的 document_id。"})
 	return sections
 }
 

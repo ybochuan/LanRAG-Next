@@ -16,6 +16,8 @@ const Address = "127.0.0.1:8090"
 type Services struct {
 	Ready             func(context.Context) bool // Local DB/services only; never depends on Core availability.
 	BeforeRetrieve    *RetrieveHandler
+	AfterRetrieve     *AttachmentHandler
+	MCP               http.Handler
 	Parser            http.Handler  // Optional identity-bearing V1 parser; disabled unless configured.
 	ParserReadTimeout time.Duration // Zero uses 1000s; applies only to the parser body.
 }
@@ -28,6 +30,9 @@ func NewServer() *http.Server {
 // NewServerWithServices configures typed hooks without implying full readiness.
 func NewServerWithServices(services Services) *http.Server {
 	mux := http.NewServeMux()
+	if services.MCP != nil {
+		mux.Handle("/mcp", services.MCP)
+	}
 	if services.Parser != nil {
 		mux.Handle("/parser/native/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			budget := services.ParserReadTimeout
@@ -71,6 +76,9 @@ func NewServerWithServices(services Services) *http.Server {
 		})
 		if path == "/bridge/before-retrieve" && services.BeforeRetrieve != nil {
 			handler = services.BeforeRetrieve.ServeHTTP
+		}
+		if path == "/bridge/after-retrieve" && services.AfterRetrieve != nil {
+			handler = services.AfterRetrieve.ServeHTTP
 		}
 		mux.HandleFunc("POST "+path, requireVersion(func(w http.ResponseWriter, r *http.Request) {
 			if path == "/bridge/before-retrieve" {

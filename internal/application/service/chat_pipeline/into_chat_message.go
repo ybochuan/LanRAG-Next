@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"html"
 	"strings"
 
@@ -42,6 +43,11 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	if err := guardPromptResults(ctx, chatManage); err != nil {
 		return &PluginError{Err: err, Description: "Extension Bridge prompt policy failed", ErrorType: "bridge_prompt_policy_failed"}
 	}
+	attachmentKBs := chatManage.KnowledgeBaseIDs
+	if len(attachmentKBs) == 0 {
+		attachmentKBs = chatManage.SearchTargets.GetAllKnowledgeBaseIDs()
+	}
+	extensionbridge.EnrichAttachmentResults(ctx, chatManage.TenantID, attachmentKBs, chatManage.MergeResult)
 	pipelineInfo(ctx, "IntoChatMessage", "input", map[string]interface{}{
 		"session_id":       chatManage.SessionID,
 		"merge_result_cnt": len(chatManage.MergeResult),

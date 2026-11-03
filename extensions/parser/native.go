@@ -14,18 +14,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/parser/attachment"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
 // NativeConfig is operator configuration; request headers cannot set destinations.
 type NativeConfig struct {
-	UpstreamURL  string          `json:"upstream_url"`  // Explicit MinerU V1 origin.
-	UpstreamKey  string          `json:"-"`             // Backend credential, never the caller credential.
-	APIKey       string          `json:"-"`             // Shared trusted-core credential.
-	ArtifactRoot string          `json:"artifact_root"` // Required independent artifact directory.
-	Scopes       []ScopeIdentity `json:"scopes"`        // Authorized native owner tenant/KB pairs.
-	Report       func(string)    `json:"-"`             // Fixed non-sensitive event codes only.
-	BulkTimeout  time.Duration   `json:"bulk_timeout"`  // Zero uses 1000s, maximum 24h.
+	UpstreamURL  string               `json:"upstream_url"`  // Explicit MinerU V1 origin.
+	UpstreamKey  string               `json:"-"`             // Backend credential, never the caller credential.
+	APIKey       string               `json:"-"`             // Shared trusted-core credential.
+	ArtifactRoot string               `json:"artifact_root"` // Required independent artifact directory.
+	Scopes       []ScopeIdentity      `json:"scopes"`        // Authorized native owner tenant/KB pairs.
+	Report       func(string)         `json:"-"`             // Fixed non-sensitive event codes only.
+	BulkTimeout  time.Duration        `json:"bulk_timeout"`  // Zero uses 1000s, maximum 24h.
+	Attachments  *attachment.Importer `json:"-"`             // Worker-only native ingestion client.
 }
 
 func (NativeConfig) String() string     { return "native parser configuration (redacted)" }
@@ -97,6 +99,10 @@ func (h *NativeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxyError(w, 403, "native_identity_denied")
 		return
 	}
+	if r.URL.Path == "/parser/native/v1/attachments" {
+		h.extractAttachments(w, r, id)
+		return
+	}
 	h.mu.Lock()
 	p := h.documents[id]
 	if p == nil {
@@ -124,6 +130,7 @@ func (h *NativeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.scopes["native"].nativeDocument = id.DocID
+		p.attachments = h.cfg.Attachments
 		p.bulkClient.Timeout = h.cfg.BulkTimeout
 		if h.db != nil {
 			p.journal = newJournal(h.db, id, h.cfg)

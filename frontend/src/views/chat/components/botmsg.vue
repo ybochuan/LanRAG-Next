@@ -130,6 +130,7 @@
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
         </div>
+        <RelatedAttachments :session="session" />
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
@@ -158,6 +159,9 @@ import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
+import RelatedAttachments from '@/components/RelatedAttachments.vue';
+import { attachmentAtTarget } from '@/utils/relatedAttachments';
+import { downloadRelatedAttachment } from '@/api/relatedAttachments';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
@@ -510,6 +514,12 @@ const handleAddToKnowledge = () => {
 // 处理 markdown-content 中图片的点击事件
 const handleMarkdownImageClick = (e) => {
     const target = e.target;
+    const attachment = attachmentAtTarget(target, props.session);
+    if (attachment) {
+        e.preventDefault(); e.stopPropagation();
+        void downloadRelatedAttachment(attachment).catch(() => MessagePlugin.error('附件当前不可下载，所属制度可能已过期或访问权限已变化'));
+        return;
+    }
     const artifactIndex = artifactIndexFromEventTarget(target);
     if (artifactIndex !== null) {
         e.preventDefault();
