@@ -99,6 +99,9 @@ const router = createRouter({
       meta: { requiresInit: true, requiresAuth: true },
       children: [
         { path: "lifecycle", name: "lifecycle", component: () => import("../views/lifecycle/LifecycleView.vue"), meta: { requiresInit: true, requiresAuth: true } },
+        { path: "associations", name: "associations", component: () => import("../views/business/BusinessView.vue"), props: { section: 'associations' }, meta: { requiresInit: true, requiresAuth: true } },
+        { path: "feedback-governance", name: "feedback-governance", component: () => import("../views/business/BusinessView.vue"), props: { section: 'feedback-governance' }, meta: { requiresInit: true, requiresAuth: true } },
+        { path: "revisions", name: "revisions", component: () => import("../views/business/BusinessView.vue"), props: { section: 'revisions' }, meta: { requiresInit: true, requiresAuth: true } },
         { path: "model-supervisor", name: "model-supervisor", component: () => import("../views/model-supervisor/ModelSupervisorView.vue"), meta: { requiresInit: true, requiresAuth: true } },
         {
           path: "tenant",

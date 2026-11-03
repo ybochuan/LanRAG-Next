@@ -78,6 +78,9 @@ def run(http, kb, source, emit, extension_db):
         raise RuntimeError("published original remained active")
     emit("[M5-PUBLISH] PASS: activated feedback guidance -> reviewed proposal -> real native Markdown ingest/index -> supersedes; repeated publish retained target")
     edge = put("relation_declare", {"document_id": source["id"], "target_document_id": target["id"], "edge_type": "amends"})
+    persisted = http.api("GET", base + "relation_list?id=" + edge["id"])["data"]
+    if len(persisted) != 1 or persisted[0]["id"] != edge["id"] or persisted[0]["target_document_id"] != target["id"]:
+        raise RuntimeError("management relation list is not persisted/scoped")
     related = http.api("GET", base + "related?document_id=" + source["id"])["data"]
     if not any(v["document_id"] == target["id"] and v["edge_type"] == "amends" for v in related):
         raise RuntimeError("native related query missing active declaration")

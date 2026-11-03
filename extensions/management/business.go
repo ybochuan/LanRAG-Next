@@ -12,7 +12,7 @@ import (
 )
 
 func businessRead(action string) bool {
-	return action == "business_related" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
+	return action == "business_related" || action == "business_relation_list" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
 }
 func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	b := s.business
@@ -36,7 +36,7 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	switch c.Action {
 	case "related":
 		return b.QueryRelated(ctx, c.Scope, r.DocumentID)
-	case "feedback_list", "guidance_list", "revision_list":
+	case "relation_list", "feedback_list", "guidance_list", "revision_list":
 		return b.List(ctx, c)
 	case "revision_publish":
 		return b.Publish(ctx, c.Scope, c.ID)

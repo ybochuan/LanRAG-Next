@@ -1,5 +1,12 @@
 # 原生薄补丁记录
 
+## M4/M5 业务界面配套（2026-11-03）
+
+- 原生只改`internal/handler/extension_lifecycle.go`现有GET动作白名单，加入`business_relation_list`；沿用原有JWT、KB读权限、固定回环管理转发，不增加路由、依赖或原生业务算法。
+- `extensions/business/feedback.go`与`management/business.go`提供同scope、精确ID/分页的持久关联候选列表；无写权限仍可读，跨租户拒绝。
+- 原生导航新增关联、反馈与指导、修订发布三页，业务判断和事务仍由extensions处理。根go.mod/go.sum、007/008及原生数据库均未改变。
+- 验证和页面截图：`docs/evidence/m4-m5-business-ui-2026-11-03.md`；Core/Host真实API日志：`docs/evidence/m4-m5-business-ui-api-2026-11-02.log`（本次连续工作起始日期命名）。
+
 ## M4/M5 业务管理薄接线（2026-11-02）
 
 - 授权：用户2026-11-02明确要求尽快接线和推进M4/M5，沿用Frozen与受控区纪律；业务实现位于独立extensions，无新依赖。

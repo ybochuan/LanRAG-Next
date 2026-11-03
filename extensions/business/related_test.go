@@ -24,6 +24,10 @@ func TestRelatedCandidatesConfirmationRevocationAndStale(t *testing.T) {
 	if e != nil || r.Status != "candidate" {
 		t.Fatal(r, e)
 	}
+	listed, e := s.List(ctx, Command{Scope: scope, Action: "relation_list", ID: r.ID})
+	if e != nil || len(listed) != 1 || listed[0]["status"] != "candidate" || listed[0]["target_document_id"] != "target" {
+		t.Fatal("candidate not recoverable", listed, e)
+	}
 	items, e := s.QueryRelated(ctx, scope, "source")
 	if e != nil || len(items) != 0 {
 		t.Fatal("unconfirmed candidate visible", items, e)

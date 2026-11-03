@@ -24,7 +24,7 @@
 | 任务／状态 | 期望结果 | 依据 | 验证及何时重新审视 |
 |---|---|---|---|
 | BIZ-01／后台主链已接线 | 原生JWT管理→同库关联；反馈→指导→提案→真实manual ingest/index→supersedes和旧文档停用。路径`extensions/business/*`、`management/business.go`、`host/runtime.go`、schema11；原生仅handler/management DTO/router薄转发。 | 用户本轮业务优先授权；`docs/operations/M4-M5-业务验收.md`及`docs/evidence/m4-m5-business-2026-11-02.md`。 | 并发8单赢家、审计失败回滚、远端丢ACK不重复创建、失效/撤销复查、PDF模式拒绝与真实Core/Host联合验证。对业务状态、权限或发布协议改动时重审；不代表完整M4/M5完成。 |
-| BIZ-UI／待接线 | 关联候选确认、反馈待审/风险/冷静期、指导、提案内容与发布状态页面。现有后台列表已提供完整可审阅字段、ID读取和分页。 | 用户希望便于验收；冻结方案第13节，复用原生登录管理API。 | 前端实施时只调用已鉴权API；完成类型/构建/权限与真实浏览器验收后交付。 |
+| BIZ-UI／已交付（2026-11-03） | 原生导航的文档关联、反馈与指导、修订发布三页；持久候选列表/确认/撤销，反馈与种子录入、审批/冷静期/二次确认，提案创建/审批/发布恢复；KB切换、只读与20项分页。路径`frontend/src/{api/business.ts,views/business/*,router/index.ts,stores/menu.ts,components/menu.vue,i18n/locales/*.ts}`；后台仅补relation_list，原生仅已有handler的一个只读动作。 | 用户继续快速推进及已授权业务UI；`docs/evidence/m4-m5-business-ui-2026-11-03.md`。 | 全量前端测试/type-check/build、扩展测试/受影响race、定向原生/候选构建、真实Core/Host API联合验证与浏览器组件交互。操作结果未知不丢原请求，旧scope响应不覆盖新详情；权限/路由/状态变更时重审。浏览器使用合成业务数据，未替换生产服务，不代替完整M4/M5验收。 |
 | M4-MCP／待接线，存在既有拒绝冲突 | 经原生按需发现调用可信Host的query_related_docs，保留scope/active/版本门禁；不放开不透明外部MCP。候选`extensions/mcp/related_docs.go`及既有原生MCP薄点，实施前核实具体调用位置。 | 冻结9.4；现有M2/T4未知MCP摘要/schema/结果拒绝会阻挡此路径。当前管理查询成功不能算Agent已可用。 | 可信描述/参数/结果来源方案确认并做真实discover→call与停用/Host离线测试时；不重构ToolRegistry。 |
 | M4-CAL／待真实标注 | 20–50组每库关联对标定权重，真实precision≥0.70/recall≥0.60；Agentic问题集与GraphRAG预算门禁。 | 冻结9/14；本批默认0.60/0.25/0.15及合成用例不构成指标。 | 人工关联标签到位时；跨库/Graph申请需显式确认，默认Graph关闭。 |
 | M5-QA／待接线 | 原生本轮retrieved_chunk_ids与身份绑定的反馈采集；指导fail-open末尾注入、每轮≤3、每guidance每session≤2、session≤800 tokens；来源组成随真实输入登记。 | 冻结10/12；当前管理录入不冒充问答采集，未把指导注入模型。 | 核实原生薄点及实际输入组成后；测试本轮不反哺、预算/去重/取消/审计与停用、所有模型请求捕获。 |

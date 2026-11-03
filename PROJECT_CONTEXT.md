@@ -3,11 +3,12 @@
 ## M4/M5 后台业务接线（2026-11-02）
 
 - `extensions/business/`复用DB单写者、M3 Registry与M2/T3许可，提供同库规范性关联/语义候选、双向active关联查询、管理反馈与指导、修订提案和手工Markdown发布Saga。GraphRAG默认关闭，默认关联权重未做真实标定。
-- 原生GET/PUT `/api/v1/knowledge-bases/:id/lifecycle/business/:business_action`沿用JWT和KB权限，只传业务DTO；`extensions/management/business.go`执行业务。管理列表支持正文/风险/截止时间/完整修订内容、精确ID与20项分页；没有新增前端页面。
+- 原生GET/PUT `/api/v1/knowledge-bases/:id/lifecycle/business/:business_action`沿用JWT和KB权限，只传业务DTO；`extensions/management/business.go`执行业务。管理列表支持正文/风险/截止时间/完整修订内容、精确ID与20项分页，包括持久关联候选`relation_list`。
+- `frontend/src/views/business/`通过原生导航提供`/platform/associations`、`/platform/feedback-governance`、`/platform/revisions`；复用原生JWT，不向浏览器下发Host凭据。页面按当前KB读写权限展示动作；审批核对完整正文、冷静期和高风险二次确认。结果未知时保留原operation_id/内容供重试，结束核对前阻止切页。
 - 当前扩展schema11新增业务表/回执/审计；迁移001–010不因本批改变，review CLI识别5–11，12及以上拒绝。原生go.mod/go.sum及原生业务表不因本批改变。
 - 反馈仅写指导层：低/中/高风险24/48/72h，后两者需人工审批，高风险二次确认；同主题2次负反馈隔离指导并拒绝再激活，新种子同样隔离。种子confidence=0.75。当前为管理录入和显式激活，未接真实问答事件采集、自动激活扫描或before_generate预算注入。
 - 原生manual源可创建新Markdown修订；PDF/DOCX等仍需修订原件上传。发布先持久意向、租约/CAS，再完整远端对账；未知ACK不得重放创建。最后将supersedes边、旧文档superseded生命周期/Outbox、family投影意向、提案状态及审计同事务提交。`lifecycle.AppendTx`复用原生命周期实现。
-- 修订链保留逻辑family_id，M3的观察family/current仍按原生文档ID维护。family_tag处理器/真实投影尚未接通；MCP消费、UI、标定和完整M4/M5验收继续列在backlog。启动/API/自动验证见`docs/operations/M4-M5-业务验收.md`。
+- 修订链保留逻辑family_id，M3的观察family/current仍按原生文档ID维护。family_tag处理器/真实投影尚未接通；MCP消费、真实QA反馈/指导注入、标定和完整M4/M5验收继续列在backlog。启动/API/页面与自动验证见`docs/operations/M4-M5-业务验收.md`。
 
 ## T4 来源底座与未知来源拒绝（2026-11-02，接线进行中）
 

@@ -35,3 +35,14 @@ func TestBusinessManagementUsesExistingAuthorityAndReceipts(t *testing.T) {
 		t.Fatal("credential bypass")
 	}
 }
+
+func TestRelationManagementListIsScopedAndReadonly(t *testing.T) {
+	s := fixture(t)
+	w := call(s, `{"action":"business_relation_list","tenant_id":7,"knowledge_base_id":"kb","can_write":false}`, s.key)
+	if w.Code != 200 {
+		t.Fatalf("readonly relation list: %d %s", w.Code, w.Body.String())
+	}
+	if w = call(s, `{"action":"business_relation_list","tenant_id":8,"knowledge_base_id":"kb"}`, s.key); w.Code != 403 {
+		t.Fatal("foreign scope read", w.Code)
+	}
+}

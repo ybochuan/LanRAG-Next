@@ -156,6 +156,9 @@ func (s *Service) List(ctx context.Context, scopeScope Command) ([]map[string]an
 	table, idcol := "ext_feedback_staging", "feedback_id"
 	fields := `json_object('text',text,'topic',topic,'risk',risk,'ready_at',ready_at)`
 	switch c.Action {
+	case "relation_list":
+		table, idcol = "ext_document_relations", "relation_id"
+		fields = `json_object('document_id',document_id,'target_document_id',target_document_id,'edge_type',edge_type,'confidence',confidence,'source_version_id',source_version_id,'target_version_id',target_version_id)`
 	case "feedback_list":
 	case "guidance_list":
 		table, idcol = "ext_feedback_guidances", "guidance_id"

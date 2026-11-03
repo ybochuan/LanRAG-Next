@@ -539,6 +539,9 @@ export default {
   },
   menu: {
     lifecycle: 'Lifecycle',
+    associations: 'Document Links',
+    feedbackGovernance: 'Feedback & Guidance',
+    revisions: 'Revisions',
     modelSupervisor: 'Model Supervisor',
     sessionInProgress: 'Conversation in progress',
     sessionUnread: 'New reply',

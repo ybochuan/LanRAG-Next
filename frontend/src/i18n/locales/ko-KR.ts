@@ -9121,6 +9121,9 @@ export default {
   },
   menu: {
     lifecycle: '수명 주기',
+    associations: '문서 연결',
+    feedbackGovernance: '피드백 및 지침',
+    revisions: '개정 게시',
     modelSupervisor: '모델 프로세스 관리',
     sessionInProgress: '대화 진행 중',
     sessionUnread: '새 답변',

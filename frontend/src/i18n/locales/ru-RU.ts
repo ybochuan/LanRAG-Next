@@ -9121,6 +9121,9 @@ export default {
   },
   menu: {
     lifecycle: 'Жизненный цикл',
+    associations: 'Связи документов',
+    feedbackGovernance: 'Отзывы и рекомендации',
+    revisions: 'Публикация изменений',
     modelSupervisor: 'Процессы моделей',
     sessionInProgress: 'Диалог выполняется',
     sessionUnread: 'Новый ответ',

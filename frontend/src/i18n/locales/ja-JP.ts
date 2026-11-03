@@ -539,6 +539,9 @@ export default {
   },
   menu: {
     lifecycle: 'ライフサイクル',
+    associations: '文書の関連',
+    feedbackGovernance: 'フィードバックと指針',
+    revisions: '改訂の公開',
     modelSupervisor: 'モデルプロセス管理',
     sessionInProgress: '会話中',
     sessionUnread: '新しい回答',

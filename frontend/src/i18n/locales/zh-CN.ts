@@ -9122,6 +9122,9 @@ export default {
   },
   menu: {
     lifecycle: '生命周期',
+    associations: '文档关联',
+    feedbackGovernance: '反馈与指导',
+    revisions: '修订发布',
     modelSupervisor: '模型进程管理',
     sessionInProgress: '会话进行中',
     sessionUnread: '有新回复',
