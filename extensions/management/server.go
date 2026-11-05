@@ -62,6 +62,7 @@ type Request struct {
 	PageSize         int                   `json:"page_size,omitempty"`
 	State            string                `json:"state,omitempty"`
 	Title            string                `json:"title,omitempty"`
+	GraphMode        string                `json:"graph_mode,omitempty"`
 	CanWrite         bool                  `json:"can_write"`
 	ExpectedRevision int64                 `json:"expected_revision"`
 	Annotations      lifecycle.Annotations `json:"annotations"`

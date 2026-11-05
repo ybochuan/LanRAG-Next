@@ -3,6 +3,7 @@ import time
 import uuid
 import json
 import sqlite3
+import os
 
 
 def run(http, kb, source, emit, extension_db):
@@ -115,6 +116,21 @@ def run(http, kb, source, emit, extension_db):
     related = http.api("GET", base + "related?document_id=" + source["id"])["data"]
     if not any(v["document_id"] == target["id"] and v["edge_type"] == "amends" for v in related):
         raise RuntimeError("native related query missing active declaration")
+    if os.environ.get("AGENTRAG_LINEAGE_E2E") == "1":
+        graph = http.api("GET", base + "lineage_graph?mode=version-ancestry")["data"]
+        nodes = {node["id"]: node for node in graph["nodes"]}
+        if not any(link["type"] == "supersedes" and nodes[link["from"]]["document_id"] == target["id"] and nodes[link["to"]]["document_id"] == revision_source["id"] for link in graph["edges"]):
+            raise RuntimeError("lineage graph lost the actual published supersedes direction")
+        target_node = next(node["id"] for node in graph["nodes"] if node["document_id"] == target["id"] and node["current"])
+        history = http.api("GET", base + "lineage_graph?mode=version-ancestry&id=" + target_node)["data"]
+        provenance = http.api("GET", base + "lineage_graph?mode=provenance&id=" + target_node)["data"]
+        if not history["edges"] or any(link["type"] != "derived_from" for link in provenance["edges"]):
+            raise RuntimeError("lineage graph mixed version history and content provenance")
+        graph = http.api("GET", base + "lineage_graph?mode=relations")["data"]
+        nodes = {node["id"]: node for node in graph["nodes"]}
+        if not any(link["type"] == "amends" and nodes[link["from"]]["document_id"] == source["id"] and nodes[link["to"]]["document_id"] == target["id"] for link in graph["edges"]):
+            raise RuntimeError("lineage graph omitted the declared document relation")
+        emit("[M6-LINEAGE] PASS: JWT graph API preserved real published supersedes direction; ancestry and provenance remained separate; declared relation visible")
     put("relation_revoke", record=edge)
     if http.api("GET", base + "related?document_id=" + source["id"])["data"]:
         raise RuntimeError("revoked declaration remains visible")

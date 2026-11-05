@@ -9134,6 +9134,7 @@ export default {
     }
   },
   menu: {
+    lineage: '血缘图谱',
     lifecycle: '生命周期',
     associations: '文档关联',
     feedbackGovernance: '反馈与指导',

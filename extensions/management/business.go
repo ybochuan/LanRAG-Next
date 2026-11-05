@@ -12,7 +12,7 @@ import (
 )
 
 func businessRead(action string) bool {
-	return action == "business_related" || action == "business_relation_list" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
+	return action == "business_lineage_graph" || action == "business_related" || action == "business_relation_list" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
 }
 func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	b := s.business
@@ -29,6 +29,9 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF {
 			return nil, business.ErrInvalid
 		}
+	}
+	if r.Action == "business_lineage_graph" {
+		return s.lineageGraph(ctx, r, body.ID)
 	}
 	c := business.Command{Scope: provenance.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, ActorID: r.ActorID, Action: strings.TrimPrefix(r.Action, "business_"), OperationID: r.OperationID, ID: body.ID, ExpectedRevision: r.ExpectedRevision, Payload: body.Payload}
 	c.Page = r.Page

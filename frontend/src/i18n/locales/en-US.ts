@@ -538,6 +538,7 @@ export default {
     nameDescending: 'Z–A',
   },
   menu: {
+    lineage: 'Lineage',
     lifecycle: 'Lifecycle',
     associations: 'Document Links',
     feedbackGovernance: 'Feedback & Guidance',

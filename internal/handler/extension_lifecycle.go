@@ -78,7 +78,7 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 	switch {
 	case c.Param("business_action") != "":
 		action = "business_" + c.Param("business_action")
-		read := action == "business_related" || action == "business_relation_list" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
+		read := action == "business_lineage_graph" || action == "business_related" || action == "business_relation_list" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
 		if read == mutation {
 			lifecycleError(c, 400)
 			return
@@ -102,6 +102,9 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 		action = "reviews"
 	}
 	req := extensionbridge.ManagementRequest{Action: action, TenantID: grant.EffectiveTenantID, KnowledgeBaseID: grant.KnowledgeBase.ID, DocumentID: c.Param("document_id"), CanWrite: canWrite, Page: 1, PageSize: 20, State: c.Query("state")}
+	if action == "business_lineage_graph" {
+		req.GraphMode = c.Query("mode")
+	}
 	if action == "overview" {
 		req.Title = c.Query("title")
 	}

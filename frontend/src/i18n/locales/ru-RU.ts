@@ -9133,6 +9133,7 @@ export default {
     }
   },
   menu: {
+    lineage: 'Происхождение документов',
     lifecycle: 'Жизненный цикл',
     associations: 'Связи документов',
     feedbackGovernance: 'Отзывы и рекомендации',

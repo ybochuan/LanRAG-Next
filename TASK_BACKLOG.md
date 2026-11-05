@@ -91,7 +91,7 @@
 | M3／进行中：T1/T2已交付 | 已完成原生只读快照、schema8观察版本/family、真实源权威、分边查询及环防护；Critical Edge业务/完整来源封存继续实施。 | 用户批准与`docs/evidence/m3-trusted-sources-2026-11-01.md`；不将观察顺序称原生generation。 | 新边类型、真实来源适配、关键事务和原生接线变化时。 |
 | M4／进行中：后台关联已接线 | 同库amends/interprets声明、related_to候选/确认/撤销、双向active/当前版本过滤并联合T3 supplements；原生JWT管理API可调用。MCP消费、按库标定、跨库、UI与Agentic/Graph预算待做。 | 用户2026-11-02业务冲刺授权；`extensions/business/related.go`、管理薄转发；见业务验收记录。精确率/召回率不以合成用例冒充，GraphRAG保持关闭。 | 接原生MCP、标注数据可用、跨库或GraphRAG申请时重审。 |
 | M5／进行中：后台反馈与manual发布已接线 | 管理反馈→审批/冷静期→指导→修订提案→原生Markdown创建/索引→supersedes/旧文档停用；Saga先对账、治理+audit同事务。真实问答事件、guidance预算注入、抽样复核、binary正式文件、family投影和UI待做。 | 架构B/C/D；真实Core/Host业务E2E与SQLite并发/审计故障/未知ACK测试；`extensions/business/{feedback,revision,native}.go`，schema11。 | 详见新增细分条目；不据本批声明M5或M2整体验收完成。 |
-| M6／待开始 | 实现 opaque mDNS、认证能力查询、静态节点回退与架构列出的治理／运维／评估 UI；广播不含知识库元数据。 | 架构 11、13、15。 | 开始局域网发现或扩展 UI 前；暴露的网络范围和权限模型变化时。 |
+| M6／可视化提前进行中 | 单库血缘图首版已接通，opaque mDNS、认证能力查询、静态节点回退及其余运维／评估 UI 继续按规划推进。 | 用户2026-11-05明确提前启动M6-b；架构11/13/15。 | 单库血缘验收见M6-B；公开网络、跨库或新增权限范围时重审。 |
 
 ## 细分实施任务：文件、验证与依赖
 
@@ -126,7 +126,7 @@
 | M5-A／待开始 | 反馈指导治理：`extensions/feedback/events.go`、`governance.go`、`cooldown.go`、`governance_test.go`；扩展预算组件。 | GD-1/RV-1/TX-1：冷静期/二次确认/抽检/熔断/audit同事务/质量回归。 | 架构10/12；M0–M4基础稳定、审批策略明确后。 |
 | M5-B／待开始（C-06 POC） | 发布Saga与对账：`extensions/revision/saga.go`、`remote_identity.go`、`reconcile.go`、`publish_recovery_test.go`。 | RV-1：提交后响应丢失先对账，create保持1；未知状态不重放；binary源需用户正式上传。 | 不变量B/C/D、架构12；远端身份POC通过后。 |
 | M6-A／待开始 | mDNS/认证能力：`extensions/discovery/mdns.go`、`capabilities.go`、`static.go`、`discovery_test.go`。 | DS-1：广播字段抓包、无KB元数据、认证拒绝、静态回退。 | 架构11；公开网络范围与认证模型确定后。 |
-| M6-B／待开始 | 独立UI与最薄bootstrap：计划 `extensions/ui/src/routes.ts`、`views/`、`api/`；受控候选 `frontend/src/router/index.ts`。 | DS-1；前端测试/type-check/build；库切换权限，溯源/版本历史分离，运维真实状态。 | 架构13；独立构建/发布路由方案核实后，不提前重构前端。 |
+| M6-B／单库血缘图首版已交付（2026-11-05） | 原生导航 `/platform/lineage` 使用AntV X6，分开呈现版本历史、内容溯源、文档关联；支持库切换、图中搜索、缩放平移、节点详情和指定节点展开。扩展只读查询实际节点/边，复用JWT管理转发。 | 用户提前开工授权；沿用此前已批准的原生界面集成方式，业务在 `extensions/lineage/graph.go`、`management/lineage.go`，UI在 `frontend/src/views/lineage/`。 | 图查询/循环/菱形/隔离、切库旧响应、浏览器交互及真实Core/Host发布边方向已验证；详情见 `docs/operations/M6-血缘图验收.md`。Windows全量前端2385通过/1失败/1跳过，原有MCP开发代理测试因系统保留5173失败；type-check/build通过。跨库、其余运维及评估界面尚未接入，不标整阶段完成。 |
 | POST-M0-GOV／后续机制 | Agent直接读/旧handle/图谱/中途停用的完整治理；候选 `internal/agent/tools/read_document.go`、`query_knowledge_graph.go` 或共用执行门禁。 | FC-3；M0未验证，不得宣称所有工具已受控。 | 用户C-03决定；M0后结合真实绕过案例和补丁预算重审。 |
 | POST-M0-TAGS／后续，未实施 | 独立标签只读API，候选`internal/handler/knowledge.go`、`internal/router/routes_knowledge.go`；扩展`taggov/http_store.go`适配。 | 无标签显式[]、查询故障非2xx、跨tenant/KB拒绝；保留业务标签，重试后收敛；核心补丁范围须单独核实。 | 用户2026-10-30接受C-10安全拒绝并选择后续只读API；启动该任务并明确核心薄补丁授权时重审。 |
 

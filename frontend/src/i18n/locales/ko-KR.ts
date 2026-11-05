@@ -9133,6 +9133,7 @@ export default {
     }
   },
   menu: {
+    lineage: '문서 계보',
     lifecycle: '수명 주기',
     associations: '문서 연결',
     feedbackGovernance: '피드백 및 지침',

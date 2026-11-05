@@ -538,6 +538,7 @@ export default {
     }
   },
   menu: {
+    lineage: 'リネージ',
     lifecycle: 'ライフサイクル',
     associations: '文書の関連',
     feedbackGovernance: 'フィードバックと指針',

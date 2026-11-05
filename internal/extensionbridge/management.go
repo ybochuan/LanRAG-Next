@@ -22,6 +22,7 @@ type ManagementRequest struct {
 	PageSize         int             `json:"page_size,omitempty"`
 	State            string          `json:"state,omitempty"`
 	Title            string          `json:"title,omitempty"`
+	GraphMode        string          `json:"graph_mode,omitempty"`
 	ExpectedRevision int64           `json:"expected_revision"`
 	Annotations      json.RawMessage `json:"annotations,omitempty"`
 	Rules            json.RawMessage `json:"rules,omitempty"`

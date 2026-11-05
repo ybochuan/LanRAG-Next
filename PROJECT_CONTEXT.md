@@ -1,5 +1,12 @@
 # AgentRAG 项目上下文
 
+## 单库血缘可视化（2026-11-05）
+
+- 原生导航 `/platform/lineage` 使用 AntV X6 3.1.8，提供版本历史、内容溯源、文档关联三个视图。库切换沿用原生可访问知识库列表，支持图中名称/编号搜索、缩放、平移、节点详情及指定节点展开。
+- 查询通过已有JWT接口 `GET /api/v1/knowledge-bases/:id/lifecycle/business/lineage_graph?mode=...&id=...`，mode为 `version-ancestry`、`provenance` 或 `relations`，id为可选根节点。原生仅鉴权和转发；`extensions/lineage/graph.go` 在同一只读事务内读取实际节点与边。根节点查询复用现有有界、带循环保护的遍历。
+- 图只包含当前库登记的节点和实际边。版本历史使用supersedes/merged_into，内容溯源仅derived_from，关联使用supplements/amends/interprets/related_to。最多256节点/512边，响应与界面显式标出截断。附件Metadata不会自动转为血缘边，尚未登记的生产者及分块不会凭空出现在图里。
+- 节点名称来自当前原生文档标题，生命周期表示文档当前状态，观测序号和current标记来自已有观察版本族。普通编辑和当前观测版本均不自动代表制度已发布。浏览器验收使用 `frontend/src/views/lineage/browser.fixture.mjs` 的合成数据，真实接口验收通过 `AGENTRAG_LINEAGE_E2E=1` 与既有business E2E联合运行。
+
 ## 关联文件MCP接线（2026-11-03）
 
 - `extensions/mcp/server.go`在worker的现有回环端口挂载`/mcp` Streamable HTTP，提供只读query_related_docs；使用现有管理凭据。supplements查询当前版本边及当前声明、active许可，附件仍从Metadata读取；schema不支持attachment_of，本批不新增迁移。

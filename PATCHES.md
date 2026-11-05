@@ -1,5 +1,11 @@
 # 原生薄补丁记录
 
+## M6-b 单库血缘图管理查询（2026-11-05）
+
+- 用户明确要求提前启动血缘DAG可视化，沿用已批准的原生界面集成。新增 `business_lineage_graph` 只读动作，复用既有JWT、Viewer、KBRead及management固定回环转发。原生仅修改 `internal/handler/extension_lifecycle.go` 的读动作映射及模式参数，`internal/extensionbridge/management.go` 增加独立DTO字段。
+- 图的作用域、模式、真实边、循环保护、节点/边上限和只读事务均在 `extensions/lineage/graph.go` 与 `management/lineage.go`。前端仅增加路由、菜单和 `views/lineage/`，依赖固定AntV X6 3.1.8及其运行时tslib。
+- 版本历史和内容溯源的语义分开。当前仅展示已登记的单库图，不因附件Metadata或观测头自动产生边。验证和已知Windows端口问题见 `docs/operations/M6-血缘图验收.md`。
+
 ## query_related_docs MCP薄接线（2026-11-03）
 
 - 用户明确授权可信例外。`agent_service.go`只将固定本机URL/服务端凭据匹配的服务送入现有按需发现；`mcp_catalog.go`只放行精确工具名，并为缓存工具转换当前服务DTO，不修改发现算法。

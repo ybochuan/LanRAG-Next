@@ -9134,6 +9134,7 @@ export default {
     }
   },
   menu: {
+    lineage: '血緣圖譜',
     lifecycle: '生命週期',
     associations: '文件關聯',
     feedbackGovernance: '回饋與指導',
