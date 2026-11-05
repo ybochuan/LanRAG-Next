@@ -1,4 +1,4 @@
-// Package mcp exposes AgentRAG's read-only related-document tool.
+// Package mcp exposes AgentRAG's scoped read-only Agent tools.
 package mcp
 
 import (
@@ -20,12 +20,13 @@ import (
 
 // Server uses the worker's existing scoped API client and lifecycle policy.
 type Server struct {
-	DB     *store.DB
-	Client *weknora.Client
-	Policy *retrieval.Policy
-	Key    string
-	Tenant uint64
-	KBs    []string
+	DB           *store.DB
+	Client       *weknora.Client
+	Policy       *retrieval.Policy
+	Key          string
+	Tenant       uint64
+	KBs          []string
+	NativeDBPath string // Lite database; required for archived chunk reads.
 }
 type nativeScope struct {
 	Tenant   uint64   `json:"tenant_id"`
@@ -166,16 +167,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		result = map[string]any{}
 	case "tools/list":
-		result = map[string]any{"tools": []any{map[string]any{"name": "query_related_docs", "description": "查询制度的有效补充通知和附件下载链接。先从已授权检索结果获取document_id。", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"document_id": map[string]string{"type": "string"}}, "required": []string{"document_id"}, "additionalProperties": false}, "annotations": map[string]bool{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false}}}}
+		tools := []any{readTool("query_related_docs", "查询制度的有效补充通知和附件下载链接。先从已授权检索结果获取document_id。", "document_id")}
+		if s.NativeDBPath != "" {
+			tools = append(tools, readTool("search_archived_documents", "仅当用户明确要求查阅过期或归档文档时，用短关键词 query 查询授权范围内的历史条款；必须提醒用户结果已失效。", "query"))
+		}
+		result = map[string]any{"tools": tools}
 	case "tools/call":
 		var p struct {
 			Name string `json:"name"`
 			Args struct {
 				ID    string      `json:"document_id"`
+				Query string      `json:"query"`
 				Scope nativeScope `json:"_native_scope"`
 			} `json:"arguments"`
 		}
 		json.Unmarshal(in.Params, &p)
+		if p.Name == "search_archived_documents" {
+			hits, err := s.searchArchive(r.Context(), p.Args.Query, p.Args.Scope)
+			if err != nil {
+				result = map[string]any{"isError": true, "content": []any{map[string]string{"type": "text", "text": "历史文档不可用：请检查查询词、授权范围及 Lite 数据库"}}}
+				break
+			}
+			raw, _ := json.Marshal(hits)
+			result = map[string]any{"content": []any{map[string]string{"type": "text", "text": archiveNotice + "\n" + string(raw)}}}
+			break
+		}
 		if p.Name != "query_related_docs" {
 			rpcError = map[string]any{"code": -32601, "message": "unknown tool"}
 			break
@@ -198,4 +214,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out["result"] = result
 	}
 	json.NewEncoder(w).Encode(out)
+}
+
+func readTool(name, description, argument string) map[string]any {
+	return map[string]any{
+		"name": name, "description": description,
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{argument: map[string]string{"type": "string"}}, "required": []string{argument}, "additionalProperties": false},
+		"annotations": map[string]bool{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false},
+	}
 }

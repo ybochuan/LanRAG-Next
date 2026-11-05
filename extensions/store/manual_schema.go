@@ -55,7 +55,7 @@ func adoptManualSchema(ctx context.Context, tx *sql.Tx) error {
 	}
 	defer reference.Close()
 	reference.SetMaxOpenConns(1)
-	migrations := []string{lifecycleMigration, ingestTagMigration, parserMigration, lifecyclePolicyMigration, reviewAlertsMigration, provenanceMigration, lifecycleConsistencyMigration, lineageSourcesMigration, supplementsMigration, provenanceRunsMigration, businessMigration}
+	migrations := []string{lifecycleMigration, ingestTagMigration, parserMigration, lifecyclePolicyMigration, reviewAlertsMigration, provenanceMigration, lifecycleConsistencyMigration, lineageSourcesMigration, supplementsMigration, provenanceRunsMigration, businessMigration, qaFeedbackMigration, guidanceBudgetMigration}
 	for i, migration := range migrations {
 		if _, err := reference.ExecContext(ctx, migration); err != nil {
 			return err

@@ -4378,6 +4378,19 @@ export default {
     }
   },
   chat: {
+    answerFeedback: {
+      title: 'この回答にフィードバックする',
+      topic: '件名',
+      details: '詳細',
+      incorrect: 'この回答には誤りがあります',
+      send: 'フィードバックを送信',
+      sent: 'フィードバックを送信しました。審査待ちです。',
+      forbidden: 'このナレッジベースのフィードバックを管理する権限がありません。',
+      unavailable: '検証済みの出典がないか、すでにフィードバックが送信されています。',
+      retry: '送信結果を確認できませんでした。同じ内容で再試行してください。',
+      invalid: '短い件名と詳細を入力してください。',
+      retryButton: '送信を再試行',
+    },
     memoryUsedCount: '{count}件のメモリを使用',
     memoryForget: 'このメモリを削除',
     memoryForgotten: 'メモリを削除しました',

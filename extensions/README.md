@@ -4,6 +4,12 @@
 
 本机启动、服务拆分、WSL网络、认证和数据库恢复：见[AgentRAG 启动与运维指南](../docs/operations/AgentRAG-启动与运维指南.md)。
 
+### 治理列表搜索与 Agent 历史查阅
+
+- `start-all.sh` 会将原生 Lite 库的绝对 `DB_PATH` 传给 Host；单独启动 worker 时也请设置同一个 `DB_PATH`，并将 `AGENTRAG_EXT_DB` 指向独立扩展库。生命周期页支持在当前知识库内按标题和状态组合筛选，筛选后再分页。联查遇到 `SQLITE_BUSY` 时，Host 用已授权的原生批量 API 取标题并在内存合并；如果 API 也不可读，会报加载错误。
+- 更新 Core、Host 和前端后，在原生 MCP 设置中刷新现有 AgentRAG 服务的工具目录，并为要使用的 Agent 启用该服务及 `search_archived_documents`。也可用现有 `python3 extensions/scripts/register_related_mcp.py` 注册或刷新。
+- 在 Agent 模式选中对应知识库，输入“仅查阅历史已过期或已归档的制度，查找‘双人复核’，并提醒我是否仍有效”。有匹配的原文分块时，工具结果以失效警示开头；没有匹配时返回空列表。当前仅支持本机 SQLite Lite 的关键词匹配；普通问答继续使用生效文档。
+
 
 M1提供显式scope/V1代理构造器（未挂载生产Host）。PDF在冷/热源字节验证后执行纯Go预检；有文本强制flash/txt，只有全纯图才可basic/ocr，其余422。复现真实4.0.1预检/协议/产物测试：
 

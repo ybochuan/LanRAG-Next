@@ -7,12 +7,16 @@
         <p>启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。</p>
       </div>
       <div class="heading-actions">
+        <button v-if="hasToken" class="secondary" type="button" @click="toggleTokenForm">
+          {{ showTokenForm ? '取消' : '令牌' }}
+        </button>
         <button class="secondary" :disabled="busy || !hasToken" @click="reload">刷新</button>
       </div>
     </header>
 
-    <div v-if="!hasToken" class="notice" role="status">
-      <p>模型管理器需要访问令牌。它的令牌和 Core 的登录态是两套，不会自动带上。</p>
+    <div v-if="tokenFormVisible" class="notice" role="status">
+      <p v-if="tokenError" class="token-error" role="alert">{{ tokenError }}</p>
+      <p v-else>模型管理器需要访问令牌。它的令牌和 Core 的登录态是两套，不会自动带上。</p>
       <form class="token-form" @submit.prevent="saveToken">
         <label>访问令牌
           <input v-model="tokenDraft" type="password" autocomplete="off" placeholder="MODEL_SUPERVISOR_TOKEN" />
@@ -22,7 +26,7 @@
       <p class="hint">令牌只保存在本机浏览器里；服务地址 {{ api.baseUrl() }}。</p>
     </div>
 
-    <template v-else>
+    <template v-if="hasToken">
       <p v-if="error" class="notice error" role="alert">{{ error }}</p>
 
       <section v-if="res" class="resource-bar" aria-label="主机资源">
@@ -193,6 +197,12 @@ const reachLabel: Record<api.Reachability, string> = {
 
 const hasToken = ref(!!api.token())
 const tokenDraft = ref('')
+const tokenError = ref('')
+// The token form is shown when no token is stored, and can also be reopened on
+// demand: a supervisor restarted with a new MODEL_SUPERVISOR_TOKEN makes the
+// stored value wrong, and hiding the only input would leave the page unusable.
+const showTokenForm = ref(false)
+const tokenFormVisible = computed(() => !hasToken.value || showTokenForm.value)
 const instances = ref<api.Instance[]>([])
 const res = ref<api.Resources>()
 const probes = ref<Record<string, api.Probe>>({})
@@ -209,6 +219,12 @@ const formError = ref('')
 const logBox = ref<HTMLElement | HTMLElement[]>()
 
 let logTimer: ReturnType<typeof setInterval> | undefined
+
+// How often the cards re-read process status. A failure arrives seconds after
+// the start call that reported success, and a badge that keeps saying 运行中
+// after the process is gone is worse than no badge at all.
+const STATUS_POLL_MS = 5000
+let statusTimer: ReturnType<typeof setInterval> | undefined
 
 // gpu_layers is held as text: an empty box must mean "omit the field" (let the
 // supervisor resolve the default), which a number-typed field cannot express.
@@ -232,7 +248,7 @@ async function loadCatalog() {
       form.model = catalogData.value.models[0].name
     }
   } catch (cause) {
-    error.value = message(cause)
+    error.value = fail(cause)
   }
 }
 
@@ -273,7 +289,35 @@ function saveToken() {
   api.setToken(tokenDraft.value)
   hasToken.value = !!api.token()
   tokenDraft.value = ''
-  if (hasToken.value) void reload()
+  tokenError.value = ''
+  if (!hasToken.value) return
+  showTokenForm.value = false
+  void reload()
+}
+
+function toggleTokenForm() {
+  showTokenForm.value = !showTokenForm.value
+  tokenDraft.value = ''
+  tokenError.value = ''
+}
+
+/**
+ * Records a failed call. A 401 is not a normal error: the stored token is stale,
+ * so it is dropped and the form is reopened with an explanation instead of
+ * leaving the page stuck on an error with no way to enter a new token.
+ * Returns the text for a plain error slot (empty when the token gate took over).
+ */
+function fail(cause: unknown): string {
+  if (api.isAuthFailure(cause)) {
+    api.setToken('')
+    hasToken.value = false
+    showTokenForm.value = false
+    tokenDraft.value = ''
+    error.value = ''
+    tokenError.value = '访问令牌无效或已失效，请重新填写模型管理器当前的 MODEL_SUPERVISOR_TOKEN。'
+    return ''
+  }
+  return message(cause)
 }
 
 async function reload() {
@@ -293,10 +337,31 @@ async function reload() {
     // does not spawn a WSL curl for every configured model.
     await Promise.all(instances.value.map((item) => probeOne(item.id)))
   } catch (cause) {
-    error.value = message(cause)
+    error.value = fail(cause)
   } finally {
     busy.value = false
   }
+}
+
+/**
+ * Re-reads instance status only. It deliberately skips probes: this runs on a
+ * timer, and a probe shells out to WSL per instance. Without it the cards keep
+ * whatever the last manual refresh saw — a process that died right after a
+ * successful start stays "运行中" indefinitely.
+ */
+async function refreshStatuses() {
+  if (!hasToken.value || busy.value || acting.value) return
+  try {
+    const listed = await api.list()
+    instances.value = listed.instances
+  } catch (cause) {
+    error.value = fail(cause)
+  }
+}
+
+function stopStatusPolling() {
+  if (statusTimer) clearInterval(statusTimer)
+  statusTimer = undefined
 }
 
 async function probeOne(id: string) {
@@ -305,7 +370,7 @@ async function probeOne(id: string) {
     const result = await api.probe(id)
     probes.value = { ...probes.value, [id]: result.probe }
   } catch (cause) {
-    error.value = message(cause)
+    error.value = fail(cause)
   } finally {
     probing.value = { ...probing.value, [id]: false }
   }
@@ -334,11 +399,11 @@ async function doStart(item: api.Instance) {
           )
           await reload()
         } catch (retry) {
-          error.value = message(retry)
+          error.value = fail(retry)
         }
       }
     } else {
-      error.value = message(cause)
+      error.value = fail(cause)
     }
   } finally {
     acting.value = ''
@@ -352,7 +417,7 @@ async function doStop(item: api.Instance) {
     await api.stop(item.id)
     await reload()
   } catch (cause) {
-    error.value = message(cause)
+    error.value = fail(cause)
   } finally {
     acting.value = ''
   }
@@ -385,7 +450,7 @@ async function doAdd() {
     form.gpu_layers = ''
     await reload()
   } catch (cause) {
-    formError.value = message(cause)
+    formError.value = fail(cause)
   } finally {
     busy.value = false
   }
@@ -414,7 +479,7 @@ async function pullLogs() {
       scrollLogsToEnd()
     }
   } catch (cause) {
-    error.value = message(cause)
+    error.value = fail(cause)
     stopLogPolling()
   }
 }
@@ -452,8 +517,12 @@ function message(cause: unknown) {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-onBeforeUnmount(stopLogPolling)
+onBeforeUnmount(() => {
+  stopLogPolling()
+  stopStatusPolling()
+})
 void (hasToken.value ? reload() : Promise.resolve())
+statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 </script>
 
 <style scoped>
@@ -465,6 +534,7 @@ void (hasToken.value ? reload() : Promise.resolve())
 .heading-actions { display: flex; gap: 8px; }
 .notice { padding: 12px 14px; border-radius: var(--app-radius-md); background: #f5f7fa; font-size: var(--app-text-md); }
 .notice.error { background: #fdecee; color: #b3261e; }
+.token-error { margin: 0 0 6px; color: #b3261e; }
 .token-form { display: flex; gap: 8px; align-items: flex-end; margin: 10px 0; }
 .token-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--app-text-sm); }
 .token-form input { min-width: 320px; padding: 6px 8px; border: 1px solid #dcdfe6; border-radius: var(--app-radius-sm); }

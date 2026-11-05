@@ -208,3 +208,12 @@ export const stop = (id: string) =>
 /** The supervisor reports capacity refusal as 428 with the numbers attached. */
 export const isCapacityRefusal = (error: unknown): error is SupervisorError =>
   error instanceof SupervisorError && error.status === 428
+
+/**
+ * A 401 means the token this browser holds is not the one the running supervisor
+ * was started with — most often the operator restarted it with a new
+ * MODEL_SUPERVISOR_TOKEN. The caller has to clear the stored value and ask
+ * again, because a rejected token is otherwise a dead end.
+ */
+export const isAuthFailure = (error: unknown): error is SupervisorError =>
+  error instanceof SupervisorError && (error.status === 401 || error.code === 'unauthorized')

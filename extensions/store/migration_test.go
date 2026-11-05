@@ -32,7 +32,7 @@ func TestMigrationUpgradesV1WithoutLosingData(t *testing.T) {
 		if err := tx.QueryRow("SELECT id FROM ext_upgrade_probe").Scan(&id); err != nil {
 			return err
 		}
-		if version != 11 || id != 42 {
+		if version != 13 || id != 42 {
 			t.Errorf("version=%d id=%d", version, id)
 		}
 		for _, table := range []string{"ext_ingest_current", "ext_ingest_observations", "ext_kb_tag_mapping", "ext_tag_sync_failures", "ext_parser_documents", "ext_parser_jobs", "ext_parser_artifacts", "ext_lifecycle_rules", "ext_document_annotations", "ext_lifecycle_decisions", "ext_review_alerts"} {
@@ -70,7 +70,7 @@ func TestMigrationUpgradesV2ParserWithoutLosingData(t *testing.T) {
 		if err := tx.QueryRow("SELECT id FROM ext_preserved").Scan(&id); err != nil {
 			return err
 		}
-		if version != 11 || id != 42 {
+		if version != 13 || id != 42 {
 			t.Errorf("migration version=%d preserved=%d", version, id)
 		}
 		_, err := tx.Exec("SELECT * FROM ext_parser_artifacts")

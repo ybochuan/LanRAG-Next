@@ -2,12 +2,57 @@ package provenance
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
+
+func TestAgentSearchEvidenceRecordsOnlyVerifiedToolChunks(t *testing.T) {
+	r, h := runFixture(t)
+	ctx := context.Background()
+	tool, err := r.BeginStep(ctx, h, StepRequest{OperationID: "tool", Kind: "tool"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := r.BeginStep(ctx, h, StepRequest{OperationID: "model", Kind: "model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct {
+		op, step, field, chunk string
+		marked                 bool
+		want                   error
+	}{
+		{"search", tool.StepID, "content", "search-chunk", true, nil},
+		{"direct-read", tool.StepID, "content", "read-chunk", false, nil},
+		{"metadata", tool.StepID, "title", "search-chunk", true, ErrInvalid},
+		{"missing-chunk", tool.StepID, "content", "", true, ErrInvalid},
+		{"wrong-step", model.StepID, "content", "wrong-chunk", true, ErrInvalid},
+	} {
+		err := r.RecordInput(ctx, h, InputRequest{OperationID: item.op, StepID: item.step, Evidence: InputEvidence{
+			DocumentID: "doc", ChunkID: item.chunk, Field: item.field, ValueHash: strings.Repeat("a", 64), AgentSearch: item.marked,
+		}})
+		if !errors.Is(err, item.want) {
+			t.Fatalf("%s returned %v, want %v", item.op, err, item.want)
+		}
+	}
+	if err := r.db.View(ctx, func(tx *sql.Tx) error {
+		var total, retrieved int
+		var chunk string
+		if err := tx.QueryRow(`SELECT count(*), count(nullif(retrieved_chunk_id,'')), max(retrieved_chunk_id) FROM ext_provenance_inputs`).Scan(&total, &retrieved, &chunk); err != nil {
+			return err
+		}
+		if total != 2 || retrieved != 1 || chunk != "search-chunk" {
+			t.Fatalf("got %d verified inputs, %d retrieved chunks, last ID %q", total, retrieved, chunk)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // This verifier is deliberately confined to tests. Production must verify native components.
 type inputFixture struct{}

@@ -96,12 +96,14 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	var sourceRuns *provenance.Runs
 	var sourceLedger *provenance.Ledger
 	var businessService *business.Service
+	var upstream *weknora.Client
 	var scopes []ingest.Scope
 	if cfg.Mode == "worker" {
 		client, err := weknora.NewClient(cfg.UpstreamURL, cfg.APIKey, cfg.TenantID)
 		if err != nil {
 			return errors.New("worker client initialization failed")
 		}
+		upstream = client
 		db, err = store.OpenDurable(runCtx, cfg.DBPath)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -185,7 +187,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			return err
 		}
 		policy.WithAttachments(attachmentSource)
-		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs}
+		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs, NativeDBPath: cfg.NativeDBPath}
 		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
 		services.BeforeRetrieve, err = bridge.NewRetrieveHandler(cfg.TenantID, cfg.KnowledgeBaseIDs, policy)
 		if err != nil {
@@ -209,13 +211,16 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	{
 		original := server.Handler
 		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService)
+		if upstream != nil {
+			manager.WithNativeSQLite(cfg.NativeDBPath, upstream.DocumentTitles)
+		}
 		proofScopes := make([]provenance.Scope, 0, len(scopes))
 		for _, scope := range scopes {
 			proofScopes = append(proofScopes, provenance.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID})
 		}
 		proofs := provenance.NewHTTPServer(sourceRuns, sourceLedger, cfg.ManagementKey, proofScopes)
 		server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/provenance/") {
+			if strings.HasPrefix(r.URL.Path, "/provenance/") || r.URL.Path == "/bridge/before-generate" {
 				proofs.ServeHTTP(w, r)
 				return
 			}

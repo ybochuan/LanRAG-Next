@@ -26,10 +26,12 @@
 - `extensions/business/`复用DB单写者、M3 Registry与M2/T3许可，提供同库规范性关联/语义候选、双向active关联查询、管理反馈与指导、修订提案和手工Markdown发布Saga。GraphRAG默认关闭，默认关联权重未做真实标定。
 - 原生GET/PUT `/api/v1/knowledge-bases/:id/lifecycle/business/:business_action`沿用JWT和KB权限，只传业务DTO；`extensions/management/business.go`执行业务。管理列表支持正文/风险/截止时间/完整修订内容、精确ID与20项分页，包括持久关联候选`relation_list`。
 - `frontend/src/views/business/`通过原生导航提供`/platform/associations`、`/platform/feedback-governance`、`/platform/revisions`；复用原生JWT，不向浏览器下发Host凭据。页面按当前KB读写权限展示动作；审批核对完整正文、冷静期和高风险二次确认。结果未知时保留原operation_id/内容供重试，结束核对前阻止切页。
-- 当前扩展schema11新增业务表/回执/审计；迁移001–010不因本批改变，review CLI识别5–11，12及以上拒绝。原生go.mod/go.sum及原生业务表不因本批改变。
-- 反馈仅写指导层：低/中/高风险24/48/72h，后两者需人工审批，高风险二次确认；同主题2次负反馈隔离指导并拒绝再激活，新种子同样隔离。种子confidence=0.75。当前为管理录入和显式激活，未接真实问答事件采集、自动激活扫描或before_generate预算注入。
+- 扩展 schema 11 新增业务表、回执和审计。schema 12 增加问答反馈绑定和已核验分块 ID。schema 13 保存指导调用、会话预算与模型步骤的指导指纹。review CLI 识别 5–13，14 及以上拒绝。
+- 反馈沿用低/中/高风险 24/48/72 小时冷静期和审批流程。聊天页 `AnswerFeedback.vue` 为已完成且带单库引用的快速问答提供入口。`feedback_capture` 用原生登录身份匹配已封存的本人答复，分块从扩展账本读取。Agent 文本重排前核验实际候选，`search_knowledge` 只为最终返回的已核验正文登记反馈分块。缺少分块 ID 或完整来源证明的运行会被拒绝。同一答复只收一条反馈。
+- `extensions/guidance/` 在 `before_generate` 按置信度选择当前授权库的 active 指导。快速问答的流式、非流式调用和 Agent 每轮调用将指导作为临时消息追加到请求末尾。接口身份由原生已认证的 run 派生，有可绑定的 model step 时记录指导指纹。默认快速问答等 unattributed 运行也可接受指导，其来源状态仍保持 unattributed。缺少已认证run时省略指导。HTTP 500ms、失败省略指导；原生来源校验继续独立执行。
+- 指导预算按租户、会话 owner 与 session 持久化，跨重启及并发共用。每次最多3条，同一指导每会话最多2次。相同 run 和原始模型请求指纹重试复用回执，重新检查当前状态与版本。总预算800按每次追加内容的 UTF-8 字节数加16消息开销保守扣减，可能提前耗尽。当前没有跨库指导和语义匹配，选择顺序为置信度、创建时间及ID。
 - 原生manual源可创建新Markdown修订；PDF/DOCX等仍需修订原件上传。发布先持久意向、租约/CAS，再完整远端对账；未知ACK不得重放创建。最后将supersedes边、旧文档superseded生命周期/Outbox、family投影意向、提案状态及审计同事务提交。`lifecycle.AppendTx`复用原生命周期实现。
-- 修订链保留逻辑family_id，M3的观察family/current仍按原生文档ID维护。family_tag处理器/真实投影尚未接通；MCP消费、真实QA反馈/指导注入、标定和完整M4/M5验收继续列在backlog。启动/API/页面与自动验证见`docs/operations/M4-M5-业务验收.md`。
+- 修订链保留逻辑 `family_id`，M3 的观察 family/current 按原生文档 ID 维护。Host 单写者消费 `family_tag` 并向新旧版本投影同库标签，原生标签读取未知时保留 C-10 拒绝。启动、API、页面与自动验证见 `docs/operations/M4-M5-业务验收.md`。
 
 ## T4 来源底座与未知来源拒绝（2026-11-02，接线进行中）
 
@@ -38,8 +40,8 @@
 - 既有source-snapshot可选 `view=components-v1&chunk_ids=...`，1–64个精确chunk；完整v1快照/root不变，组件全部字段hash折叠到其leaf。`extensions/lineage/components.go`核验实际字段与当前root；不返回原文，不写原生表。
 - 核验意向先持久化，未核验输入不能先结束步骤；unknown不可洗白，全部步骤/producer完成且源集非空才可封存。副本许可每次展开最新T3父依赖，权限依赖不伪称模型实际输入。
 - 原生已增加薄HTTP客户端，以及未知shell、memory、skill、目录、网页、文件/缓存、追加/编辑、后台通知拒绝。work保留原授权ID/状态与取消，省略未知详情且不确认未展示通知；图片门卫早于自动VLM。用户附件保留独立原生授权，原件与任务不删除。
-- 普通RAG/Agent已按原生授权targets、会话owner及服务端assistant message ID建立run。最终模型调用登记实际编码消息/选项和原始响应分片指纹；Agent工具有独立step，read_document原始字段、search_knowledge无重排文本可向当前原生快照核验。RAG流由实际消费终态收束，取消/异常不能封存；无法封存的已结束运行中止或保持unattributed。
-- 查询改写、重排、FAQ/图像/合并变换、格式化custom metadata和listing的updated_at等未适配组成仍不可封存，不能靠引用或结果hash补齐。外部MCP未知服务摘要/工具schema和pin描述在加载进模型前省略；不改ToolRegistry算法或删除配置，内置知识工具保持原授权与active检查。
+- 普通RAG/Agent已按原生授权targets、会话owner及服务端assistant message ID建立run。最终模型调用登记实际编码消息/选项和原始响应分片指纹；Agent工具有独立step，`read_document` 原始字段、`search_knowledge` 正文和受支持的重排文本可向当前原生快照核验。RAG流由实际消费终态收束，取消/异常不能封存；无法封存的已结束运行中止或保持unattributed。
+- 查询改写、快速问答重排、无法由原始字段解释的 Agent 重排文本、FAQ、图像、合并变换、格式化 custom metadata 和 listing 的 updated_at 等未适配组成仍不可封存。外部MCP未知服务摘要/工具schema和pin描述在加载进模型前省略，内置知识工具保持原授权与active检查。
 - **实际文件写入producer、收集和已封存文件正向读取仍未接通。** 当前文件读取、追加和编辑属于安全拒绝，覆盖写入也不会签发来源。产物收集位于问答调用之外，后续需关联原生消息身份对应的原生产者，不能用新run认领旧文件。真实Core/Host与合成模型联合验证已覆盖实际运行封存、stale及断Host；它不等于真实云模型/文件E2E，T4与M2仍未整体验收；见 `docs/evidence/m3-t4-native-inputs-2026-11-02.md`。
 
 ## 补充文档依赖（T3，2026-11-01）
@@ -66,6 +68,7 @@
 - WSL网络模式（2026-11-01实测）：已启用WSL2镜像网络（`.wslconfig`含`networkingMode=mirrored`与`autoProxy=false`），`127.0.0.1`在WSL与Windows两侧双向互通，Windows侧MinerU与模型服务保持只绑回环即可。`autoProxy=false`必需：本机残留`ProxyServer=127.0.0.1:7897`会导致镜像网络配置失败并回退`networkingMode=none`（WSL完全无网络）。启用前为NAT，WSL→Windows回环不通。检查与回退步骤见运维指南第5节。
 - Windows侧本地模型运行时（2026-11-01）：`data/bin/`已放置llama-server `0.2.0-dev (build 10709)`及其13个依赖文件（含必需的`mtmd.dll`，缺失时进程静默`exit 127`）；`data/models/`已放置`Qwen3-Embedding-4B-Q6_K.gguf`与`qwen3-reranker-0.6b-q8_0.gguf`。两者均由`data/.gitignore`排除。实测embedding 7秒就绪、输出2560维向量，rerank 4秒就绪、`/v1/rerank`判别正确。
 - 模型进程管理器 P1（2026-11-01）：`extensions/modelsupervisor/` + `extensions/cmd/model-supervisor/`，独立进程监听`127.0.0.1:8092`，强制鉴权与回环绑定；Windows Job Object 保证 supervisor 退出即清理子进程；`/extensions/models/probe` 是唯一能回答「该地址从 WSL 侧是否真的可达」的接口（`loopback`/`unverified` 两态，`embedding_dim` 来自真实向量请求）。`MODEL_SUPERVISOR_WSL_DISTRO` 必须显式指定，本机默认发行版是 `docker-desktop` 无 `curl`。尚未接入 `start-all.sh`。证据见 `docs/evidence/model-supervisor-p1-2026-11-01.md`。
+- supervisor 必须运行在 **Windows 侧**（2026-11-04）：`data/bin/llama-server.exe` 是 Windows 程序，在 WSL 里起 Linux 版 supervisor 会把 `/mnt/d/…` 模型路径交给 Windows 子进程，必然 `failed to open GGUF file`；`launch` 现在按二进制头拒绝跨 OS 运行时。控制台状态每 5 秒重读 `/list`（探活仍按需），避免进程已退出而卡片仍显示「运行中」。
 - 模型进程管理器 P2 控制台（2026-11-01）：`frontend/src/views/model-supervisor/`，入口 `/platform/model-supervisor`；卡片每次刷新都调 `GET /extensions/models/{id}/probe`（`/list` 的 `reachability` 是启动快照，不能直接渲染）；前端用 `frontend/src/api/modelSupervisor.ts` 的裸 `fetch`，**不复用 `@/utils/request`**（那条链路会加 `/api/v1` 前缀、带 Core JWT、打到 Core）；supervisor 增加 CORS 允许列表 `MODEL_SUPERVISOR_ALLOWED_ORIGINS`（默认 `127.0.0.1:18880`/`localhost:18880`），预检在鉴权之前处理。证据见 `docs/evidence/model-supervisor-p2-2026-11-01.md`。
 - 模型进程管理器任务类型与模型目录（2026-11-01）：支持 `embedding`/`rerank`/`chat` 三类，默认端口 8081/8082/8083，与 Core `models.parameters` 已存地址对齐；`chat` 不带模式开关（传未知 flag 会让 llama-server 启动即退出）并自动追加 `--jinja`，探测走 `/v1/chat/completions` 且超时 45s（其余 3s）。`GET /extensions/models/catalog` 扫描 `data/models/` 的 `.gguf` 供控制台下拉选择；模型目录缺失只出 `note` 不算错误。显存防呆只对开启 GPU 的实例生效，`use_gpu:false` 不会被 428 拦下。
 - 模型进程管理器 GPU 层数（2026-11-01）：`Spec.GPULayers *int`（`gpu_layers`）对应 llama-server `-ngl`，由 `Spec.GPULayerCount()` 统一解析（显式值 > `use_gpu:false`=0 > 默认 99），`/list` 回传解析后的真实值；`use_gpu:false` 配 `gpu_layers>0` 直接拒绝，`-ngl` 属受保护参数不能经 `extra_args` 覆盖。控制台提供「使用 GPU」复选框与层数输入（留空=全部）。实测 `-ngl 30` 部分卸载仍返回 2560 维向量。

@@ -93,7 +93,7 @@ func TestImageCandidatesSurviveDedupBeforeRerank(t *testing.T) {
 			caption.Score, vector.Score, vector.VectorScore = 0.8, 0.4, 0.8
 			candidates := tool.deduplicateResultsForRerank([]*searchResultWithMeta{caption, vector, vector})
 			require.Len(t, candidates, 2, "dedup only repeated image IDs before judging the pixels")
-			got, err := tool.rerankResults(t.Context(), "which quarter peaked", candidates, false)
+			got, _, err := tool.rerankResults(t.Context(), "which quarter peaked", candidates, false)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 			assert.Equal(t, "vector", got[0].ID)

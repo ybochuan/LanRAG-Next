@@ -15,7 +15,10 @@ func TestProjectionDispatcherSeparatesReviewFromNativeTags(t *testing.T) {
 	if err := dispatch(context.Background(), outbox.Item{ProjectionType: "tag_projection"}); err != nil || tags != 1 || reviews != 1 {
 		t.Fatal(err)
 	}
-	if err := dispatch(context.Background(), outbox.Item{ProjectionType: "unknown"}); err == nil || tags != 1 || reviews != 1 {
+	if err := dispatch(context.Background(), outbox.Item{ProjectionType: "family_tag"}); err != nil || tags != 2 || reviews != 1 {
+		t.Fatal("family projection did not use the shared tag handler", err)
+	}
+	if err := dispatch(context.Background(), outbox.Item{ProjectionType: "unknown"}); err == nil || tags != 2 || reviews != 1 {
 		t.Fatal("unknown projection entered a handler")
 	}
 }

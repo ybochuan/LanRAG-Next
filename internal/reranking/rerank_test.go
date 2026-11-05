@@ -55,6 +55,22 @@ func ids(results []*types.SearchResult) string {
 	return strings.Join(parts, ",")
 }
 
+func TestRerankStopsBeforeModelWhenInputProofFails(t *testing.T) {
+	model := &stubReranker{}
+	rejected := errors.New("input proof failed")
+	result := Rerank(t.Context(), model, "query", rows("**body**"), Options{
+		BeforeScore: func(candidates []*types.SearchResult, passages []string, hasImages bool) error {
+			if len(candidates) != 1 || len(passages) != 1 || passages[0] != "body" || hasImages {
+				t.Fatalf("unexpected prepared model inputs: %v, images=%v", passages, hasImages)
+			}
+			return rejected
+		},
+	})
+	if !errors.Is(result.InputError, rejected) || model.calls != 0 || len(result.Results) != 0 {
+		t.Fatalf("input refusal did not stop rerank: error=%v calls=%d results=%d", result.InputError, model.calls, len(result.Results))
+	}
+}
+
 func TestRerank_thresholdKeepsPassingBestFirst(t *testing.T) {
 	t.Parallel()
 	in := rows("alpha", "beta", "gamma")

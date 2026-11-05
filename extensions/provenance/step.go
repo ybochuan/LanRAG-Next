@@ -13,6 +13,8 @@ type InputEvidence struct {
 	ChunkID    string `json:"chunk_id,omitempty"`
 	Field      string `json:"field"`
 	ValueHash  string `json:"value_hash"`
+	// AgentSearch distinguishes search result content from direct tool reads.
+	AgentSearch bool `json:"agent_search,omitempty"`
 }
 
 // InputVerifier must consult current native evidence and return immutable refs.
@@ -92,6 +94,9 @@ func (r *Runs) RecordInput(ctx context.Context, h RunHandle, q InputRequest) (er
 	if !id(q.OperationID) || !id(q.StepID) || !id(q.Evidence.DocumentID) || !id(q.Evidence.Field) || !digest(q.Evidence.ValueHash) || q.Evidence.ChunkID != "" && !id(q.Evidence.ChunkID) {
 		return ErrInvalid
 	}
+	if q.Evidence.AgentSearch && (q.Evidence.Field != "content" || q.Evidence.ChunkID == "") {
+		return ErrInvalid
+	}
 	v, e := r.Inspect(ctx, h)
 	if e != nil {
 		return e
@@ -100,7 +105,16 @@ func (r *Runs) RecordInput(ctx context.Context, h RunHandle, q InputRequest) (er
 	if exists, e := r.replayMutation(ctx, h, q.OperationID, "input", q, &result); e != nil || exists {
 		return e
 	}
-	if e = r.db.View(ctx, func(tx *sql.Tx) error { _, e := stepOpen(ctx, tx, h, q.StepID); return e }); e != nil {
+	if e = r.db.View(ctx, func(tx *sql.Tx) error {
+		kind, err := stepOpen(ctx, tx, h, q.StepID)
+		if err != nil {
+			return err
+		}
+		if q.Evidence.AgentSearch && kind != "tool" {
+			return ErrInvalid
+		}
+		return nil
+	}); e != nil {
 		return e
 	}
 	intentOp := payloadHash("input-intent", []string{h.RunID, q.OperationID})
@@ -143,8 +157,9 @@ func (r *Runs) RecordInput(ctx context.Context, h RunHandle, q InputRequest) (er
 		return ErrEvidence
 	}
 	return r.mutate(ctx, h, q.OperationID, "input", q, &result, func(tx *sql.Tx, v *RunSnapshot) error {
-		if _, e := stepOpen(ctx, tx, h, q.StepID); e != nil {
-			return e
+		kind, err := stepOpen(ctx, tx, h, q.StepID)
+		if err != nil {
+			return err
 		}
 		var intentHash, intentState string
 		if e := tx.QueryRowContext(ctx, "SELECT payload_hash,state FROM ext_provenance_input_intents WHERE tenant_id=? AND knowledge_base_id=? AND run_id=? AND step_id=? AND operation_id=?", args(h.Scope, h.RunID, q.StepID, q.OperationID)...).Scan(&intentHash, &intentState); e != nil || intentHash != payloadHash("input-intent", q) || intentState != "pending" {
@@ -167,7 +182,14 @@ func (r *Runs) RecordInput(ctx context.Context, h RunHandle, q InputRequest) (er
 		if _, e = tx.ExecContext(ctx, "UPDATE ext_provenance_input_intents SET state='verified' WHERE tenant_id=? AND knowledge_base_id=? AND run_id=? AND operation_id=?", args(h.Scope, h.RunID, q.OperationID)...); e != nil {
 			return e
 		}
-		_, e = tx.ExecContext(ctx, "INSERT INTO ext_provenance_inputs VALUES(?,?,?,?,?,?,?)", args(h.Scope, h.RunID, q.StepID, q.OperationID, payloadHash("input-evidence", q.Evidence), string(body))...)
+		// Quick QA records retrieved content in the model step. Agent tools
+		// contribute only when native search marked the verified result content.
+		chunkID := ""
+		if q.Evidence.Field == "content" && (kind == "model" || kind == "tool" && q.Evidence.AgentSearch) {
+			chunkID = q.Evidence.ChunkID
+		}
+		_, e = tx.ExecContext(ctx, `INSERT INTO ext_provenance_inputs(tenant_id,knowledge_base_id,run_id,step_id,operation_id,evidence_hash,refs_json,retrieved_chunk_id)
+VALUES(?,?,?,?,?,?,?,?)`, args(h.Scope, h.RunID, q.StepID, q.OperationID, payloadHash("input-evidence", q.Evidence), string(body), chunkID)...)
 		return e
 	})
 }

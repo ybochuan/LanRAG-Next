@@ -131,6 +131,7 @@
                 $t('common.loading') }}</span></div>
         </div>
         <RelatedAttachments :session="session" />
+        <AnswerFeedback v-if="!embeddedMode" :message="session" :session-id="sessionId" />
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
@@ -160,6 +161,7 @@ import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import RelatedAttachments from '@/components/RelatedAttachments.vue';
+import AnswerFeedback from './AnswerFeedback.vue';
 import { attachmentAtTarget } from '@/utils/relatedAttachments';
 import { downloadRelatedAttachment } from '@/api/relatedAttachments';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';

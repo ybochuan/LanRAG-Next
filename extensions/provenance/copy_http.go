@@ -30,6 +30,7 @@ type HTTPRequest struct {
 	Binding               *Binding         `json:"binding,omitempty"`
 	CopyID                string           `json:"copy_id,omitempty"`
 	AuthorizedDocumentIDs []string         `json:"authorized_document_ids,omitempty"`
+	Guidance              *GuidanceRequest `json:"guidance,omitempty"`
 }
 
 // HTTPServer serves proof APIs on the existing loopback listener. A missing
@@ -144,6 +145,10 @@ func (s *HTTPServer) execute(ctx context.Context, path string, q HTTPRequest) (a
 		return nil, ErrInvalid
 	}
 	switch path {
+	case "/bridge/before-generate":
+		if q.Guidance != nil {
+			return s.runs.PrepareGuidance(ctx, *q.Handle, *q.Guidance)
+		}
 	case "/provenance/runs/steps":
 		if q.Action == "begin" && q.Step != nil {
 			return s.runs.BeginStep(ctx, *q.Handle, *q.Step)

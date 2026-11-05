@@ -5035,6 +5035,19 @@ export default {
     }
   },
   chat: {
+    answerFeedback: {
+      title: '이 답변에 피드백 남기기',
+      topic: '주제',
+      details: '상세 설명',
+      incorrect: '이 답변에 오류가 있습니다',
+      send: '피드백 제출',
+      sent: '피드백이 제출되었으며 검토 대기 중입니다.',
+      forbidden: '이 지식 베이스의 피드백을 관리할 권한이 없습니다.',
+      unavailable: '검증된 출처가 없거나 이미 피드백을 제출한 답변입니다.',
+      retry: '제출 결과를 확인하지 못했습니다. 같은 요청으로 다시 시도하세요.',
+      invalid: '짧은 주제와 설명을 입력하세요.',
+      retryButton: '제출 다시 시도',
+    },
     memoryUsedCount: '기억 {count}개를 참고했습니다',
     memoryForget: '이 기억 삭제',
     memoryForgotten: '기억을 삭제했습니다',

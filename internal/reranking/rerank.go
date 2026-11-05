@@ -74,6 +74,9 @@ type Options struct {
 	// that reads images scores those hits by their image; without it they
 	// are scored by their text like any other row.
 	LoadImage func(ctx context.Context, r *types.SearchResult) ([]byte, error)
+	// BeforeScore receives the prepared candidates before any model request.
+	// Text passages have already been fitted to the model's limit.
+	BeforeScore func(candidates []*types.SearchResult, passages []string, hasImages bool) error
 	// ImageKeepScore, when positive, keeps a pictorial image_vector hit a
 	// text reranker rejected if its VectorScore reaches this, at most
 	// maxKeptImages of them, after the ranked results and marked with
@@ -93,6 +96,8 @@ type Result struct {
 	Indices []int
 	// Diagnostics summarises the run for API callers and logs.
 	Diagnostics types.RerankDiagnostics
+	// InputError reports a BeforeScore refusal before the model was called.
+	InputError error
 
 	// Candidates are the input rows with a non-empty passage, in input
 	// order; Passages are what the model scored for them. ModelScores index
@@ -147,6 +152,11 @@ func Rerank(
 	fitPassages(ctx, res.Passages, rerank.MaxPassageRunes(model, query))
 
 	imagePositions, images := imageCandidates(ctx, model, res.Candidates, opts)
+	if opts.BeforeScore != nil {
+		if res.InputError = opts.BeforeScore(res.Candidates, res.Passages, len(images) > 0); res.InputError != nil {
+			return res
+		}
+	}
 	scores, scoredAsImage, err := scoreCandidates(ctx, model, query, res.Passages, imagePositions, images)
 	res.Diagnostics.ImagesScored = len(scoredAsImage)
 	if err != nil {

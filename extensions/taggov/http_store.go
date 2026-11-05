@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
@@ -16,8 +17,16 @@ var ErrAmbiguousTags = errors.New("native tags missing or null; full replacement
 // HTTPStore reads/replaces tags through the authenticated native public API.
 type HTTPStore struct{ client *weknora.Client }
 
-// NewHTTPStore shares a tenant-bound client; it never creates native tags.
+// NewHTTPStore shares a tenant-bound client for native tag operations.
 func NewHTTPStore(client *weknora.Client) *HTTPStore { return &HTTPStore{client} }
+
+func (s *HTTPStore) createFamilyTag(ctx context.Context, scope Scope, name string) error {
+	id, ok := strings.CutPrefix(name, familyNamespace)
+	if !s.validScope(scope) || !ok || !weknora.ValidID(id) {
+		return errors.New("invalid native family tag")
+	}
+	return s.client.JSON(ctx, http.MethodPost, "/api/v1/knowledge-bases/"+url.PathEscape(scope.KnowledgeBaseID)+"/tags", nil, map[string]string{"name": name}, new(any))
+}
 
 func (s *HTTPStore) validScope(scope Scope) bool {
 	return s != nil && s.client != nil && scope.TenantID == s.client.TenantID() && validScope(scope)

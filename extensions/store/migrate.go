@@ -37,6 +37,12 @@ var provenanceRunsMigration string
 //go:embed migrations/011_business_workflows.sql
 var businessMigration string
 
+//go:embed migrations/012_qa_feedback.sql
+var qaFeedbackMigration string
+
+//go:embed migrations/013_guidance_budget.sql
+var guidanceBudgetMigration string
+
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
 
@@ -52,7 +58,7 @@ func (db *DB) migrate(ctx context.Context) error {
 		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(version),0) FROM ext_schema_migrations").Scan(&version); err != nil {
 			return err
 		}
-		if version > 11 {
+		if version > 13 {
 			return fmt.Errorf("unsupported extension schema version %d", version)
 		}
 		if version < 1 {
@@ -146,6 +152,22 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(11)"); err != nil {
+				return err
+			}
+		}
+		if version < 12 {
+			if _, err := tx.ExecContext(ctx, qaFeedbackMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(12)"); err != nil {
+				return err
+			}
+		}
+		if version < 13 {
+			if _, err := tx.ExecContext(ctx, guidanceBudgetMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(13)"); err != nil {
 				return err
 			}
 		}

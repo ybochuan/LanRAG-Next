@@ -32,6 +32,8 @@ var (
 type Payload struct {
 	DocumentID         string   `json:"document_id,omitempty"`
 	TargetDocumentID   string   `json:"target_document_id,omitempty"`
+	SessionID          string   `json:"session_id,omitempty"`
+	MessageID          string   `json:"message_id,omitempty"`
 	EdgeType           string   `json:"edge_type,omitempty"`
 	Text               string   `json:"text,omitempty"`
 	Topic              string   `json:"topic,omitempty"`
@@ -200,7 +202,7 @@ func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 	switch c.Action {
 	case "relation_declare", "relation_confirm", "relation_revoke":
 		return s.relation(ctx, c)
-	case "feedback_create", "feedback_approve", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "guidance_seed", "guidance_quarantine_topic":
+	case "feedback_create", "feedback_capture", "feedback_approve", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "guidance_seed", "guidance_quarantine_topic":
 		return s.feedback(ctx, c)
 	case "revision_create", "revision_approve", "revision_reject":
 		return s.revision(ctx, c)

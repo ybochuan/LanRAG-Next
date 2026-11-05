@@ -53,6 +53,8 @@ type SourceInput struct {
 	ChunkID    string `json:"chunk_id,omitempty"`
 	Field      string `json:"field"`
 	ValueHash  string `json:"value_hash"`
+	// AgentSearch is set only for content returned by search_knowledge.
+	AgentSearch bool `json:"agent_search,omitempty"`
 }
 
 type sourceStep struct {
@@ -104,6 +106,7 @@ type sourceRequest struct {
 	Binding               *SourceCopyBinding  `json:"binding,omitempty"`
 	CopyID                string              `json:"copy_id,omitempty"`
 	AuthorizedDocumentIDs []string            `json:"authorized_document_ids,omitempty"`
+	Guidance              *generationRequest  `json:"guidance,omitempty"`
 }
 
 var sourceHTTPClient = &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

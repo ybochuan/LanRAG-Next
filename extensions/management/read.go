@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 )
 
 type document struct {
 	DocumentID  string                `json:"document_id"`
+	Title       string                `json:"title,omitempty"`
 	State       string                `json:"state"`
 	LastEventID string                `json:"last_event_id"`
 	Annotations lifecycle.Annotations `json:"annotations"`
@@ -38,45 +40,31 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 	if _, ok := counts[r.State]; r.State != "" && !ok {
 		return nil, errors.New("invalid state")
 	}
-	ids := []document{}
-	total := 0
+	r.Title = strings.TrimSpace(r.Title)
+	if len(r.Title) > 1024 {
+		return nil, errors.New("invalid title")
+	}
 	tenant := strconv.FormatUint(r.TenantID, 10)
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, "SELECT state,count(*) FROM ext_lifecycle_current WHERE tenant_id=? AND knowledge_base_id=? GROUP BY state", tenant, r.KnowledgeBaseID)
 		if err != nil {
 			return err
 		}
+		defer rows.Close()
 		for rows.Next() {
 			var state string
 			var n int
 			if err = rows.Scan(&state, &n); err != nil {
-				rows.Close()
 				return err
 			}
 			counts[state] = n
-			if r.State == "" || r.State == state {
-				total += n
-			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		rows, err = tx.QueryContext(ctx, `SELECT document_id,state,last_event_id FROM ext_lifecycle_current WHERE tenant_id=? AND knowledge_base_id=? AND (?='' OR state=?) ORDER BY document_id LIMIT ? OFFSET ?`, tenant, r.KnowledgeBaseID, r.State, r.State, r.PageSize, (r.Page-1)*r.PageSize)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var d document
-			if err = rows.Scan(&d.DocumentID, &d.State, &d.LastEventID); err != nil {
-				return err
-			}
-			ids = append(ids, d)
 		}
 		return rows.Err()
 	})
+	if err != nil {
+		return nil, errDatabase
+	}
+	ids, total, err := s.overviewPage(ctx, r, tenant)
 	if err != nil {
 		return nil, errDatabase
 	}

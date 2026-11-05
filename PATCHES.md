@@ -54,6 +54,18 @@
 - 治理与持久化均在 `extensions/provenance/`；worker生产provider由真实Registry/组件核验及持久Runs组成。核验中意向、源并集、步骤/producer及回执审计有原子约束，非active/T3依赖每次重查。根go.mod/go.sum及007/008未变。
 - 已验证与未验证项目、并行测试基线失败、后续模型/实际写入/资源别名与E2E接线见 `docs/evidence/m3-t4-progress-2026-11-02.md`。本批没有替换生产服务或迁移用户库，T4/M2未标完成。
 
+### Agent 文本重排来源（M5-QA）
+
+- `internal/reranking/rerank.go` 在候选裁剪及输入准备后增加可选的调用前回调。`internal/agent/tools/{search_knowledge,governance}.go` 核对实际发送的文本是否可由原文、标题和章节路径推导，再走既有 T4 字段指纹登记。
+- 重排候选提供来源证据，最终返回的正文提供反馈分块 ID。已支持文本清洗与长度截断。图像和无法核验的扩展文本沿用未封存状态。Host 校验失败会阻止该次模型调用，重排服务故障沿用原检索顺序降级。
+
+### 生成前指导（M5-QA，2026-11-05）
+
+- `internal/application/service/chat_pipeline/chat_completion{,_stream}.go` 与 `internal/agent/think.go` 的既有实际模型调用点改用 `extensionbridge.BeginGuidedSourceCall`。新增 `internal/extensionbridge/generate.go` 通过版本1、500ms回环HTTP调用 `/bridge/before-generate`，校验trace、scope、step、call及预算后追加临时消息。
+- Host从认证run派生用户与会话身份。调用回执与active指导版本同事务写入，可绑定model step时同时保存指导指纹，原生记录追加后的实际请求hash。unattributed运行也能接受指导，来源状态保持不完整。指导接口错误、省略或非法响应时继续发送原消息。
+- 业务与预算位于 `extensions/guidance/`、`provenance/guidance.go` 及迁移013。每次3条、同ID每会话2次，800预算按UTF-8字节加16消息开销保守扣减。仅当前授权库按置信度排序，缺少认证run时省略指导。
+- 验证覆盖原生三包、扩展全量/build/vet、模块边界、定向race及 `AGENTRAG_GUIDANCE_E2E=1` 的真实Core/Host隔离联合运行。部署需要更新Host和重编Core。
+
 ## M2-GOVERNANCE-SOURCES（2026-11-01）
 
 - 授权：用户要求修复RAG摘要、Agent搜索/直接读绕过，并明确接受无完整来源的历史、Wiki/图谱读取暂时安全拒绝。

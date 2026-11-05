@@ -5037,6 +5037,19 @@ export default {
     }
   },
   chat: {
+    answerFeedback: {
+      title: '反馈此答复',
+      topic: '反馈主题',
+      details: '说明',
+      incorrect: '这条答复有误',
+      send: '提交反馈',
+      sent: '反馈已提交，等待审核。',
+      forbidden: '当前账号没有此知识库的反馈管理权限。',
+      unavailable: '这条答复无法绑定已核验的来源，或已提交过反馈。',
+      retry: '提交结果尚未确认，请重试原请求。',
+      invalid: '请填写简短的主题和说明。',
+      retryButton: '重试提交',
+    },
     memoryUsedCount: '本次使用了 {count} 条记忆',
     memoryForget: '删除这条记忆',
     memoryForgotten: '已删除这条记忆',

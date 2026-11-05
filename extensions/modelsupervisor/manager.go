@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -195,6 +196,12 @@ func (m *Manager) launch(inst *instance) error {
 	binary, err := ResolveUnder(m.opts.BinaryDir, BinaryName)
 	if err != nil {
 		return fmt.Errorf("resolve binary: %w", err)
+	}
+	// A runtime from the other OS cannot be driven across the WSL boundary: the
+	// child receives an unopenable model path. Refuse with the reason instead of
+	// letting it fail as if the model were missing.
+	if err := checkRuntimePlatform(binary, runtime.GOOS); err != nil {
+		return err
 	}
 	modelPath, err := ResolveUnder(m.opts.ModelDir, inst.spec.Model)
 	if err != nil {

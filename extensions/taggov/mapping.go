@@ -22,12 +22,16 @@ type Mapping struct {
 	catalog Catalog
 }
 
-// NewMapping shares its dependencies and never creates tags upstream.
+// NewMapping shares its dependencies. Only family projections may create a tag.
 func NewMapping(db *store.DB, catalog Catalog) *Mapping { return &Mapping{db, catalog} }
 
 // Resolve refreshes from the native catalog before every write. Canonical tags
 // must already exist in that KB; an absent/ambiguous mapping is never guessed.
 func (m *Mapping) Resolve(ctx context.Context, scope Scope, name string) (Tag, error) {
+	return m.resolve(ctx, scope, name, false)
+}
+
+func (m *Mapping) resolve(ctx context.Context, scope Scope, name string, createFamily bool) (Tag, error) {
 	if m.db == nil || m.catalog == nil || !validScope(scope) {
 		return Tag{}, errors.New("invalid mapping configuration or scope")
 	}
@@ -40,17 +44,21 @@ func (m *Mapping) Resolve(ctx context.Context, scope Scope, name string) (Tag, e
 	if !governed {
 		return Tag{}, errors.New("canonical governance tag name required")
 	}
-	tags, err := m.catalog.Catalog(ctx, scope)
+	selected, err := m.catalogTag(ctx, scope, name)
 	if err != nil {
 		return Tag{}, err
 	}
-	var selected Tag
-	for _, tag := range tags {
-		if tag.Name == name {
-			if selected.ID != "" {
-				return Tag{}, errors.New("ambiguous canonical tag")
+	if selected.ID == "" && createFamily && strings.HasPrefix(name, familyNamespace) {
+		if catalog, ok := m.catalog.(interface {
+			createFamilyTag(context.Context, Scope, string) error
+		}); ok {
+			createErr := catalog.createFamilyTag(ctx, scope, name)
+			// A conflict or missing ACK can still mean the tag exists. Never
+			// repeat POST here; use the KB-local catalog's verified native ID.
+			selected, err = m.catalogTag(ctx, scope, name)
+			if err != nil || selected.ID == "" && createErr != nil {
+				return Tag{}, errors.Join(createErr, err)
 			}
-			selected = tag
 		}
 	}
 	if selected.ID == "" {
@@ -63,6 +71,23 @@ func (m *Mapping) Resolve(ctx context.Context, scope Scope, name string) (Tag, e
 	})
 	if err != nil {
 		return Tag{}, err
+	}
+	return selected, nil
+}
+
+func (m *Mapping) catalogTag(ctx context.Context, scope Scope, name string) (Tag, error) {
+	tags, err := m.catalog.Catalog(ctx, scope)
+	if err != nil {
+		return Tag{}, err
+	}
+	var selected Tag
+	for _, tag := range tags {
+		if tag.Name == name {
+			if selected.ID != "" {
+				return Tag{}, errors.New("ambiguous canonical tag")
+			}
+			selected = tag
+		}
 	}
 	return selected, nil
 }

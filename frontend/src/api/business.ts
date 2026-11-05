@@ -32,6 +32,19 @@ async function unwrap<T>(request: Promise<unknown>): Promise<T> {
 }
 export const list = (kb: string, kind: BusinessKind, page = 1, id = '') => unwrap<BusinessRecord[]>(get(`${base(kb)}${kind}_list?page=${page}&page_size=20&id=${encodeURIComponent(id)}`))
 export const write = (kb: string, action: BusinessAction, body: BusinessBody) => unwrap<BusinessResult>(put(`${base(kb)}${action}`, body))
+export interface AnswerFeedbackPayload {
+  session_id: string
+  message_id: string
+  topic: string
+  text: string
+  negative: boolean
+}
+export const captureAnswerFeedback = (kb: string, operationId: string, payload: AnswerFeedbackPayload) =>
+  unwrap<BusinessResult>(put(`${base(kb)}feedback_capture`, {
+    operation_id: operationId,
+    expected_revision: 0,
+    business: { payload },
+  }))
 export const related = (kb: string, document: string) => unwrap<RelatedDocument[]>(get(`${base(kb)}related?document_id=${encodeURIComponent(document)}`))
 export async function documentTitle(kb: string, id: string): Promise<string> {
   const value = await unwrap<{ title: string; knowledge_base_id: string }>(get(`/api/v1/knowledge/${encodeURIComponent(id)}`))

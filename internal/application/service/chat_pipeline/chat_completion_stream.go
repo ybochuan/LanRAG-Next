@@ -100,7 +100,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		"chat_model": chatManage.ChatModelID,
 	})
 	inputs, complete := sourceInputsForModel(chatManage)
-	ctx, sourceCall, err := extensionbridge.BeginSourceCall(ctx, "model", struct{ Messages, Options any }{chatMessages, opt}, inputs, complete)
+	ctx, chatMessages, sourceCall, err := extensionbridge.BeginGuidedSourceCall(ctx, chatMessages, opt, inputs, complete)
 	if err != nil {
 		finishSourceModelRun(ctx, nil, false)
 		return ErrModelCall.WithError(err)

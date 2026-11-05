@@ -17,7 +17,7 @@ import (
 )
 
 func TestCLIRecognizesOnlyCompatibleReviewSchemas(t *testing.T) {
-	for _, version := range []int{5, 6, 7, 8, 9, 10, 11, 12} {
+	for _, version := range []int{5, 6, 7, 8, 9, 10, 11, 12, 13, 14} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "ext.db")
 			raw, e := sql.Open("sqlite", path)
@@ -46,8 +46,8 @@ func TestCLIRecognizesOnlyCompatibleReviewSchemas(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			if version == 12 {
-				if _, e = raw.Exec("INSERT INTO ext_schema_migrations VALUES(12)"); e != nil {
+			if version == 14 {
+				if _, e = raw.Exec("INSERT INTO ext_schema_migrations VALUES(14)"); e != nil {
 					t.Fatal(e)
 				}
 			}
@@ -60,10 +60,10 @@ func TestCLIRecognizesOnlyCompatibleReviewSchemas(t *testing.T) {
 			}
 			var out bytes.Buffer
 			e = run(context.Background(), []string{"-db", path, "-tenant", "7", "-kb", "kb"}, &out)
-			if (e != nil) != (version == 12) {
+			if (e != nil) != (version == 14) {
 				t.Fatalf("schema%d query: %v", version, e)
 			}
-			if version == 12 && out.Len() != 0 {
+			if version == 14 && out.Len() != 0 {
 				t.Fatal("unknown schema emitted data")
 			}
 			after, e := os.ReadFile(path)

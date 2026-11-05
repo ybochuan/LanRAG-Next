@@ -8,6 +8,12 @@
   <div v-else-if="!kb" class="empty">请选择一个知识库。</div>
   <template v-if="kb">
    <div class="tabs" role="tablist" aria-label="生命周期视图"><button v-for="item in tabs" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="tab===item.key" :class="{selected:tab===item.key}" @click="tab=item.key">{{ item.label }}</button></div>
+   <div v-if="tab==='documents'" class="document-filters">
+    <label for="lifecycle-title-search">文档标题</label>
+    <input id="lifecycle-title-search" v-model="titleQuery" type="search" maxlength="160" placeholder="搜索标题" />
+    <label for="lifecycle-state-filter">状态</label>
+    <select id="lifecycle-state-filter" v-model="filter"><option value="">全部状态</option><option v-for="state in states" :key="state" :value="state">{{ stateLabels[state] }}</option></select>
+   </div>
    <div v-if="busy" class="loading" role="status">正在读取生命周期事实…</div>
    <template v-else-if="data">
     <section v-if="tab==='documents'" class="document-panel" role="tabpanel" aria-labelledby="tab-documents">
@@ -35,7 +41,7 @@ const tabs=[{key:'documents',label:'文档状态'},{key:'reviews',label:'待复�
 const auth=useAuthStore()
 const kbFence=requestFence()
 const tab=ref('documents'),kb=ref(''),knowledgeBases=ref<{id:string;name:string}[]>([]),loadingKB=ref(true)
-const data=ref<api.Overview>(),busy=ref(false),error=ref(''),filter=ref<api.LifecycleState|''>(''),page=ref(1)
+const data=ref<api.Overview>(),busy=ref(false),error=ref(''),filter=ref<api.LifecycleState|''>(''),titleQuery=ref(''),page=ref(1)
 const reviewItems=ref<api.ReviewAlert[]>([]),reviewError=ref(''),reviewBusy=ref(false),reviewsTruncated=ref(false)
 const ruleForm=reactive<api.Rules>({effective_delay_days:0,valid_days:0,review_days:0}),ruleError=ref(''),ruleSuccess=ref(false),savingRules=ref(false)
 const selectedID=ref(''),selectedTitle=ref(''),detail=ref<api.Detail>(),detailBusy=ref(false),detailError=ref(''),documentSuccess=ref(''),savingDocument=ref(false),documentConflict=ref(false),drawer=ref<HTMLElement>()
@@ -47,16 +53,18 @@ const totalCount=computed(()=>Object.values(data.value?.counts||{}).reduce((sum,
 const date=(value?:string|null)=>value?new Date(value).toLocaleString():'未设置'
 const label=(state:string)=>stateLabels[state as api.LifecycleState]||state||'初始'
 let previousFocus:HTMLElement|null=null
+let searchTimer:ReturnType<typeof setTimeout>|undefined
 function trapFocus(event:KeyboardEvent){const items=drawer.value?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),[tabindex="0"]');if(!items?.length)return;const first=items[0]!,last=items[items.length-1]!;if(event.shiftKey&&(document.activeElement===first||document.activeElement===drawer.value)){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
 function closeDocument(){if(savingDocument.value||supplementBusy.value)return;detailFence.invalidate();selectedID.value='';detail.value=undefined;detailError.value='';documentSuccess.value='';previousFocus?.focus()}
 async function loadOverview(){
+ clearTimeout(searchTimer)
  const token=listFence.begin(),scope=kb.value;if(!scope)return
  busy.value=true;error.value=''
- try{const result=await api.overview(scope,page.value,filter.value);if(!listFence.current(token))return;data.value=result;Object.assign(ruleForm,result.rules.rules)}catch(e){if(listFence.current(token)){data.value=undefined;error.value=errorMessage(e)}}finally{if(listFence.current(token))busy.value=false}
+ try{const result=await api.overview(scope,page.value,filter.value,titleQuery.value.trim());if(!listFence.current(token))return;data.value=result;Object.assign(ruleForm,result.rules.rules)}catch(e){if(listFence.current(token)){data.value=undefined;error.value=errorMessage(e)}}finally{if(listFence.current(token))busy.value=false}
 }
 async function loadReviews(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;reviewBusy.value=true;reviewError.value='';reviewItems.value=[];try{const result=await api.reviews(scope);if(reviewFence.current(token)){reviewItems.value=result.alerts||[];reviewsTruncated.value=result.truncated}}catch(e){if(reviewFence.current(token))reviewError.value=errorMessage(e)}finally{if(reviewFence.current(token))reviewBusy.value=false}}
 function loadAll(){if(!kb.value){void loadKnowledgeBases();return}ruleError.value='';ruleSuccess.value=false;void loadOverview();void loadReviews()}
-function setFilter(state:api.LifecycleState|''){filter.value=state;page.value=1;void loadOverview()}
+function setFilter(state:api.LifecycleState|''){filter.value=state}
 function changePage(delta:number){page.value+=delta;void loadOverview()}
 function applyDetail(value:api.Detail){detail.value=value;dateForm.effective_from=toLocalInput(value.snapshot.annotations.effective_from);dateForm.effective_until=toLocalInput(value.snapshot.annotations.effective_until);dateForm.review_due=toLocalInput(value.snapshot.annotations.review_due)}
 async function openDocument(id:string,title?:string){previousFocus=document.activeElement as HTMLElement;selectedID.value=id;selectedTitle.value=title||'';await nextTick();drawer.value?.focus();await reloadDocument()}
@@ -64,14 +72,18 @@ async function reloadDocument(){const token=detailFence.begin(),scope=kb.value,i
 async function submitDocument(){if(!detail.value||!data.value?.can_write||savingDocument.value||supplementBusy.value||documentConflict.value)return;const token=detailFence.begin(),scope=kb.value,id=selectedID.value,original=detail.value.snapshot.annotations;savingDocument.value=true;detailError.value='';documentSuccess.value='';try{const result=await api.saveAnnotations(scope,id,original.revision,annotationsForSave(original,dateForm));if(!detailFence.current(token))return;applyDetail(result);documentSuccess.value=result.evaluation_status==='pending'?'日期已保存；状态待后台扫描确认，请稍后刷新。':'日期已保存，状态已重新核验。';void loadOverview();void loadReviews()}catch(e){if(detailFence.current(token)){detailError.value=errorMessage(e);documentConflict.value=true}}finally{if(detailFence.current(token))savingDocument.value=false}}
 function supplementSaved(){void loadOverview();void loadReviews()}
 async function submitRules(){if(!data.value?.can_write||!validRules(ruleForm)||savingRules.value)return;const token=ruleFence.begin(),scope=kb.value,revision=data.value.rule_revision;savingRules.value=true;ruleError.value='';ruleSuccess.value=false;try{const result=await api.saveRules(scope,revision,{...ruleForm});if(ruleFence.current(token)&&data.value){data.value.rules=result.rules;data.value.rule_revision=result.rule_revision;ruleSuccess.value=true}}catch(e){if(ruleFence.current(token))ruleError.value=errorMessage(e)}finally{if(ruleFence.current(token))savingRules.value=false}}
-watch(kb,()=>{listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';reviewItems.value=[];filter.value='';page.value=1;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
+watch([titleQuery,filter],([,state],[,previousState])=>{clearTimeout(searchTimer);listFence.invalidate();page.value=1;if(!kb.value)return;if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
+watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';reviewItems.value=[];page.value=1;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
 async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];if(knowledgeBases.value[0])kb.value=knowledgeBases.value[0].id}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
 watch(()=>auth.effectiveTenantId,()=>void loadKnowledgeBases())
 onMounted(loadKnowledgeBases)
-onBeforeUnmount(()=>{kbFence.invalidate();listFence.invalidate();detailFence.invalidate();reviewFence.invalidate();ruleFence.invalidate()})
+onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.invalidate();detailFence.invalidate();reviewFence.invalidate();ruleFence.invalidate()})
 </script>
 
 <style scoped>
+.document-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0; }
+.document-filters input,.document-filters select { padding:8px 10px; border:1px solid var(--td-component-stroke); border-radius:6px; background:var(--td-bg-color-container); color:var(--td-text-color-primary); }
+.document-filters input { width:min(240px,100%); }
 .lifecycle-page {
   height:100%;
   overflow:auto;

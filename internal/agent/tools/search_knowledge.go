@@ -277,18 +277,14 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 
 	ranked := deduplicated
 	rerankRejected := 0
+	sourceKnown := true
 	if t.rerankModel != nil && len(deduplicated) > 0 {
-		if err := extensionbridge.CaptureSourceInputs(ctx, nil, false); err != nil {
+		ranked, sourceKnown, err = t.rerankResults(ctx, query, deduplicated, mode == SearchModeKeyword)
+		if err != nil {
 			return blockedKnowledgeResult(err)
 		}
-		reranked, err := t.rerankResults(ctx, query, deduplicated, mode == SearchModeKeyword)
-		if err != nil {
-			logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank failed, using retrieval order: %v", err)
-		} else {
-			ranked = reranked
-			if len(reranked) == 0 {
-				rerankRejected = len(deduplicated)
-			}
+		if len(ranked) == 0 {
+			rerankRejected = len(deduplicated)
 		}
 	}
 
@@ -355,7 +351,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		result.Data["omitted_for_budget"] = omitted
 	}
 	t.attachContextImages(ctx, result, final[:len(final)-omitted])
-	if t.rerankModel == nil {
+	if sourceKnown {
 		inputs, known := searchSourceInputs(final[:len(final)-omitted])
 		if err := extensionbridge.CaptureSourceInputs(ctx, inputs, known); err != nil {
 			return blockedKnowledgeResult(err)
@@ -863,9 +859,9 @@ func (t *SearchKnowledgeTool) rerankResults(
 	query string,
 	results []*searchResultWithMeta,
 	orderOnly bool,
-) ([]*searchResultWithMeta, error) {
+) ([]*searchResultWithMeta, bool, error) {
 	if len(results) == 0 || t.rerankModel == nil {
-		return results, nil
+		return results, true, nil
 	}
 
 	rows := make([]*types.SearchResult, len(results))
@@ -877,11 +873,19 @@ func (t *SearchKnowledgeTool) rerankResults(
 		threshold = math.Inf(-1)
 	}
 	_, vectorThreshold, _ := t.retrievalParams(0)
+	sourceKnown := true
 	opts := reranking.Options{
 		Threshold:        threshold,
 		FallbackMinScore: reranking.FallbackMinScore(t.searchTargets.HasRecallThresholdOverride()),
 		MaxCandidates:    reranking.DefaultMaxCandidates,
 		ImageKeepScore:   reranking.ImageKeepScoreFor(vectorThreshold),
+	}
+	if _, tracked := extensionbridge.SourceRunFromContext(ctx); tracked {
+		opts.BeforeScore = func(candidates []*types.SearchResult, passages []string, hasImages bool) error {
+			inputs, known := rerankSourceInputs(candidates, passages, hasImages)
+			sourceKnown = known
+			return extensionbridge.CaptureSourceInputs(ctx, inputs, known)
+		}
 	}
 	if t.knowledgeBaseService != nil {
 		opts.LoadImage = t.knowledgeBaseService.ReadChunkImage
@@ -895,10 +899,13 @@ func (t *SearchKnowledgeTool) rerankResults(
 		}
 	}
 	res := reranking.Rerank(ctx, t.rerankModel, query, rows, opts)
+	if res.InputError != nil {
+		return nil, false, res.InputError
+	}
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
 		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",
 			res.Diagnostics.Error)
-		return results, nil
+		return results, sourceKnown, nil
 	}
 
 	reranked := make([]*searchResultWithMeta, 0, len(res.Results))
@@ -909,7 +916,7 @@ func (t *SearchKnowledgeTool) rerankResults(
 	}
 	logger.Infof(ctx, "[Tool][SearchKnowledge] Reranked %d/%d results above threshold %.2f (%s)",
 		len(reranked), len(results), threshold, res.Diagnostics.Outcome)
-	return reranked, nil
+	return reranked, sourceKnown, nil
 }
 
 // faqMetadataFromResult parses FAQ metadata carried on the search result.

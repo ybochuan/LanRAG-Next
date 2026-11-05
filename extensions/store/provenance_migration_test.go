@@ -35,7 +35,7 @@ func TestUpgradeProvenanceFromTrackedSchemaFive(t *testing.T) {
 		if e := tx.QueryRow("SELECT revision FROM ext_lifecycle_rules WHERE knowledge_base_id='preserved'").Scan(&kept); e != nil {
 			return e
 		}
-		if version != 11 || kept != 1 {
+		if version != 13 || kept != 1 {
 			t.Fatal(version, kept)
 		}
 		rows, e := tx.Query("PRAGMA foreign_key_check")

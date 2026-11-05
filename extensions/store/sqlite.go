@@ -21,6 +21,7 @@ var ErrClosed = errors.New("extension database is closed")
 // DB reserves one writer connection and provides a separate read-only pool.
 // Write callbacks must not recursively call Write or finish the supplied transaction.
 type DB struct {
+	path      string
 	writerDB  *sql.DB
 	writer    *sql.Conn
 	readers   *sql.DB
@@ -81,7 +82,7 @@ func open(ctx context.Context, path string, fullSync bool) (*DB, error) {
 		writers.Close()
 		return nil, err
 	}
-	db := &DB{writerDB: writers, writer: conn, gate: make(chan struct{}, 1), closed: make(chan struct{}), fullSync: fullSync}
+	db := &DB{path: abs, writerDB: writers, writer: conn, gate: make(chan struct{}, 1), closed: make(chan struct{}), fullSync: fullSync}
 	if err := db.migrate(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate extension database: %w", err)

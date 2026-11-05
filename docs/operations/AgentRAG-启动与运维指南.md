@@ -160,14 +160,26 @@ TXT 等内置 Go 解析，以及已接线的 PDF→Host→MinerU 路径，不需
 
 4.2 与 4.3 也可以交给 `model-supervisor` 托管：它负责拉起 `llama-server.exe`、挂 Job Object 防孤儿、按需探活并给出**两侧可达性**结论。它不参与任何治理决策，故障不影响 fail-closed 判定。
 
+**它必须运行在 Windows 侧**：`data/bin/llama-server.exe` 是 Windows 程序，孤儿清理也依赖 Windows Job Object。在 WSL 里运行 supervisor 会通过 WSL 互操作把 `/mnt/d/...` 路径原样交给 Windows 子进程，llama-server 只能报 `failed to open GGUF file (No such file or directory)`——看起来像模型缺失，其实模型一直在。现在 supervisor 会直接拒绝这种跨 OS 启动并提示改到 Windows 侧，不再让它以「加载模型失败」的形式出现。
+
+在 WSL 里交叉编译出 Windows 二进制（纯 Go，不需要 CGO）：
+
 ```bash
 cd /d/LanRAG-Next/extensions
-go build -mod=readonly -o ../data/bin/model-supervisor.exe ./cmd/model-supervisor
-cd /d/LanRAG-Next
-export MODEL_SUPERVISOR_TOKEN='<自定义长随机串>'
-export MODEL_SUPERVISOR_WSL_DISTRO=Ubuntu
-./data/bin/model-supervisor.exe
+GOOS=windows GOARCH=amd64 go build -mod=readonly -o ../data/bin/model-supervisor.exe ./cmd/model-supervisor
 ```
+
+在 **Windows PowerShell** 里启动（不要用 WSL bash 起它）：
+
+```powershell
+cd D:\LanRAG-Next
+$env:MODEL_SUPERVISOR_TOKEN='<自定义长随机串>'
+$env:MODEL_SUPERVISOR_WSL_DISTRO='Ubuntu'
+$env:MODEL_SUPERVISOR_ALLOWED_ORIGINS='http://127.0.0.1:18880,http://localhost:18880'
+.\data\bin\model-supervisor.exe
+```
+
+控制台的「两侧可达性」仍由 Windows 侧 supervisor 调 `wsl -d Ubuntu curl ...` 判定，所以 `MODEL_SUPERVISOR_WSL_DISTRO` 必须写对；不写就是本机默认发行版（本机是 `docker-desktop`，没有 `curl`），探测会永远停在 `unverified`。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -182,7 +194,7 @@ export MODEL_SUPERVISOR_WSL_DISTRO=Ubuntu
 
 鉴权头用 `X-API-Key` 或 `Authorization: Bearer` 均可，并需带 `X-AgentRAG-Model-Supervisor-Version: 1`（不匹配返回 400）。
 
-**控制台页面**：Core 起来后打开 `http://127.0.0.1:18880/platform/model-supervisor`（左侧菜单「模型进程管理」）。页面会先要一次访问令牌——它和 Core 的登录态是两套，填 `MODEL_SUPERVISOR_TOKEN` 的值。卡片上的「可达性」是每次刷新时**现调** `GET /extensions/models/{id}/probe` 得到的，不是启动时的快照；`loopback` 表示 Core 与浏览器两侧都能连上该地址。显存读数来自 `nvidia-smi`，取不到时显示 `unverified` 并说明容量检查已跳过。
+**控制台页面**：Core 起来后打开 `http://127.0.0.1:18880/platform/model-supervisor`（左侧菜单「模型进程管理」）。页面会先要一次访问令牌——它和 Core 的登录态是两套，填 `MODEL_SUPERVISOR_TOKEN` 的值。supervisor 换了 `MODEL_SUPERVISOR_TOKEN` 重启后旧令牌会失效：页面收到 401 时自动清掉浏览器里那个失效值并重新显示输入框，右上角「令牌」按钮也可以随时更换。卡片上的「可达性」是每次刷新时**现调** `GET /extensions/models/{id}/probe` 得到的，不是启动时的快照；`loopback` 表示 Core 与浏览器两侧都能连上该地址。显存读数来自 `nvidia-smi`，取不到时显示 `unverified` 并说明容量检查已跳过。
 
 ```bash
 H='-H Content-Type:application/json -H X-API-Key:'"$MODEL_SUPERVISOR_TOKEN"

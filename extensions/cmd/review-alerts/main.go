@@ -50,7 +50,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	var version int
 	// Schema6 adds independent provenance tables and schema7 adds lifecycle guards;
 	// Schema9 adds inherited deadlines while retaining the review inbox contract.
-	if err = tx.QueryRowContext(ctx, "SELECT MAX(version) FROM ext_schema_migrations").Scan(&version); err != nil || version < 5 || version > 11 {
+	if err = tx.QueryRowContext(ctx, "SELECT MAX(version) FROM ext_schema_migrations").Scan(&version); err != nil || version < 5 || version > 13 {
 		return errors.New("extension schema5 to schema10 required; this query never upgrades a database")
 	}
 	alerts, err := review.ListTx(ctx, tx, outbox.Scope{TenantID: *tenant, KnowledgeBaseID: *kb}, *limit, time.Now().UTC())

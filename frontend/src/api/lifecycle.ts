@@ -19,7 +19,7 @@ async function unwrap<T>(request:Promise<unknown>):Promise<T>{
  if(!response.success||!response.data)throw new Error(response.error?.code||'lifecycle_unavailable')
  return response.data
 }
-export const overview=(kb:string,page:number,state:string)=>unwrap<Overview>(get(`${base(kb)}?page=${page}&page_size=20&state=${encodeURIComponent(state)}`))
+export const overview=(kb:string,page:number,state:string,title='')=>unwrap<Overview>(get(`${base(kb)}?${new URLSearchParams({page:String(page),page_size:'20',state,title})}`))
 export const documentDetail=(kb:string,id:string)=>unwrap<Detail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}`))
 export const saveAnnotations=(kb:string,id:string,expected_revision:number,annotations:Annotations)=>unwrap<Detail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}`,{expected_revision,annotations}))
 export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules}))

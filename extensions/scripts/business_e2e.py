@@ -23,6 +23,15 @@ def run(http, kb, source, emit, extension_db):
             raise RuntimeError("manual source observer did not become active")
         time.sleep(0.3)
 
+    tag_route = "/knowledge-bases/" + kb["id"] + "/tags"
+    user_tag = http.api("POST", tag_route, {"name": "fixture-business-label"})["data"]
+
+    def keep_user_tag(doc):
+        tag_ids = {tag["id"] for tag in (doc.get("tags") or [])}
+        http.api("PUT", "/knowledge/tags", {"kb_id": kb["id"], "knowledge_ids": [doc["id"]], "tag_ids": sorted(tag_ids | {user_tag["id"]})})
+
+    keep_user_tag(http.api("GET", "/knowledge/" + revision_source["id"])["data"])
+
     def put(action, payload=None, record=None, operation=None):
         business = {"payload": payload or {}}
         if record:
@@ -77,6 +86,28 @@ def run(http, kb, source, emit, extension_db):
     if old_view["snapshot"]["current"]["state"] != "superseded":
         raise RuntimeError("published original remained active")
     emit("[M5-PUBLISH] PASS: activated feedback guidance -> reviewed proposal -> real native Markdown ingest/index -> supersedes; repeated publish retained target")
+    keep_user_tag(target)
+    with sqlite3.connect(extension_db) as db:
+        family, = db.execute("SELECT family_id FROM ext_revision_proposals WHERE tenant_id=? AND knowledge_base_id=? AND proposal_id=?", (str(kb["tenant_id"]), kb["id"], proposal["id"])).fetchone()
+    family_name = "gov:family:" + family
+    deadline = time.monotonic() + 25
+    while True:
+        with sqlite3.connect(extension_db) as db:
+            projected, = db.execute("SELECT count(*) FROM ext_projection_outbox WHERE tenant_id=? AND knowledge_base_id=? AND projection_type='family_tag' AND aggregate_id IN (?,?) AND status='done'", (str(kb["tenant_id"]), kb["id"], revision_source["id"], target["id"])).fetchone()
+        if projected == 2:
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError("real family projection did not complete for both versions")
+        time.sleep(0.4)
+    ids = set()
+    for document_id in (revision_source["id"], target["id"]):
+        tags = {tag["name"]: tag["id"] for tag in http.api("GET", "/knowledge/" + document_id)["data"]["tags"]}
+        if tags.get(user_tag["name"]) != user_tag["id"] or not tags.get(family_name):
+            raise RuntimeError("native family projection lost a business tag or did not attach the family")
+        ids.add(tags[family_name])
+    if len(ids) != 1:
+        raise RuntimeError("old/new native documents do not share the same family tag ID")
+    emit("[M5-FAMILY-TAG] PASS: real worker projected a shared native family ID to both versions and preserved the business tag")
     edge = put("relation_declare", {"document_id": source["id"], "target_document_id": target["id"], "edge_type": "amends"})
     persisted = http.api("GET", base + "relation_list?id=" + edge["id"])["data"]
     if len(persisted) != 1 or persisted[0]["id"] != edge["id"] or persisted[0]["target_document_id"] != target["id"]:

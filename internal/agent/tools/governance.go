@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -135,8 +137,49 @@ func searchSourceInputs(rows []*searchResultWithMeta) ([]extensionbridge.SourceI
 			return nil, false
 		}
 		inputs = append(inputs,
-			extensionbridge.SourceInput{DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "content", ValueHash: extensionbridge.SourceFieldHash(row.Content)},
+			extensionbridge.SourceInput{DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "content", ValueHash: extensionbridge.SourceFieldHash(row.Content), AgentSearch: true},
 			extensionbridge.SourceInput{DocumentID: row.KnowledgeID, Field: "title", ValueHash: extensionbridge.SourceFieldHash(row.KnowledgeTitle)})
+	}
+	return inputs, true
+}
+
+// rerankSourceInputs proves the cleaned text and its optional raw prefixes
+// against native fields. Only the later tool output marks retrieved chunks.
+func rerankSourceInputs(rows []*types.SearchResult, passages []string, hasImages bool) ([]extensionbridge.SourceInput, bool) {
+	if hasImages || len(rows) != len(passages) {
+		return nil, false
+	}
+	var inputs []extensionbridge.SourceInput
+	titles := make(map[extensionbridge.SourceInput]bool)
+	for i, row := range rows {
+		if row == nil || row.KnowledgeID == "" || row.ID == "" || row.ContentRewritten || row.ChunkType == string(types.ChunkTypeFAQ) {
+			return nil, false
+		}
+		body := reranking.CleanPassage(row.Content)
+		if body == "" || passages[i] == "" {
+			return nil, false
+		}
+		inputs = append(inputs, extensionbridge.SourceInput{
+			DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "content", ValueHash: extensionbridge.SourceFieldHash(row.Content),
+		})
+		if header := strings.TrimSpace(row.ContextHeader); header != "" {
+			body = header + "\n\n" + body
+			inputs = append(inputs, extensionbridge.SourceInput{
+				DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "context_header", ValueHash: extensionbridge.SourceFieldHash(row.ContextHeader),
+			})
+		}
+		if title := strings.TrimSpace(row.KnowledgeTitle); title != "" {
+			body = title + "\n\n" + body
+			input := extensionbridge.SourceInput{DocumentID: row.KnowledgeID, Field: "title", ValueHash: extensionbridge.SourceFieldHash(row.KnowledgeTitle)}
+			if !titles[input] {
+				inputs = append(inputs, input)
+				titles[input] = true
+			}
+		}
+		// Rerank can trim the prepared passage to its character limit.
+		if !strings.HasPrefix(body, passages[i]) {
+			return nil, false
+		}
 	}
 	return inputs, true
 }

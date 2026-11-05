@@ -50,7 +50,7 @@ func TestStreamableDiscoveryScopeAndLifecycle(t *testing.T) {
 	c, _ := weknora.NewClient(native.URL, "test", 7)
 	p, _ := retrieval.NewPolicy(db, 7, []string{"kb-a"})
 	p.WithAttachments(c)
-	s := &Server{db, c, p, strings.Repeat("k", 32), 7, []string{"kb-a"}}
+	s := &Server{DB: db, Client: c, Policy: p, Key: strings.Repeat("k", 32), Tenant: 7, KBs: []string{"kb-a"}}
 	endpoint := httptest.NewServer(s)
 	defer endpoint.Close()
 	call := func(body string, key bool) *httptest.ResponseRecorder {

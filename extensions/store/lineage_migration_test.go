@@ -64,7 +64,7 @@ func TestLineageUpgradePreservesUnattestedSourceAndCopyFacts(t *testing.T) {
 				if e := tx.QueryRow("SELECT MAX(version) FROM ext_schema_migrations").Scan(&count); e != nil {
 					return e
 				}
-				if count != 11 {
+				if count != 13 {
 					t.Fatal(count)
 				}
 				if e := tx.QueryRow("SELECT payload_json FROM ext_provenance_manifests").Scan(&payload); e != nil {

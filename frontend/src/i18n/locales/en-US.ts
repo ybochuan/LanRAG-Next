@@ -4378,6 +4378,19 @@ export default {
     }
   },
   chat: {
+    answerFeedback: {
+      title: 'Give feedback on this answer',
+      topic: 'Topic',
+      details: 'Details',
+      incorrect: 'This answer is incorrect',
+      send: 'Submit feedback',
+      sent: 'Feedback submitted for review.',
+      forbidden: 'Your account cannot manage feedback for this knowledge base.',
+      unavailable: 'Verified sources are unavailable for this answer, or feedback was already submitted.',
+      retry: 'The submission could not be confirmed. Retry the same request.',
+      invalid: 'Enter a short topic and a description.',
+      retryButton: 'Retry submission',
+    },
     memoryUsedCount: 'Used {count} memories',
     memoryForget: 'Delete this memory',
     memoryForgotten: 'Memory deleted',

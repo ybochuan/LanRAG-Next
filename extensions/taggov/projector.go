@@ -12,7 +12,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
-// Projector handles lifecycle tag intents using current facts rather than an old
+// Projector handles lifecycle and revision family tag intents using current facts rather than an old
 // event payload. One application shares one Writer across all KBs and retries.
 type Projector struct {
 	db        *store.DB
@@ -33,7 +33,11 @@ func (p *Projector) Handle(ctx context.Context, item outbox.Item) (err error) {
 		return errors.New("tag projector dependencies required")
 	}
 	scope := Scope{item.TenantID, item.KnowledgeBaseID, item.AggregateID}
-	if !validScope(scope) || item.ID == "" || item.ProjectionType != "tag_projection" || item.AggregateType != "document" || item.CausationType != "lifecycle_event" {
+	if !validScope(scope) || item.ID == "" || item.AggregateType != "document" {
+		return errors.New("unsupported tag projection intent")
+	}
+	family := item.ProjectionType == FamilyProjectionType && item.CausationType == "document_version"
+	if !family && (item.ProjectionType != "tag_projection" || item.CausationType != "lifecycle_event") {
 		return errors.New("unsupported tag projection intent")
 	}
 	defer func() {
@@ -65,6 +69,9 @@ func (p *Projector) Handle(ctx context.Context, item outbox.Item) (err error) {
 		})
 		err = errors.Join(err, recordErr)
 	}()
+	if family {
+		return p.projectFamily(ctx, scope)
+	}
 	lcScope := lifecycle.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, DocumentID: scope.DocumentID}
 	var projectedEvent string
 	err = p.writer.ApplyResolved(ctx, scope, "gov:state:", func(ctx context.Context) ([]Tag, error) {

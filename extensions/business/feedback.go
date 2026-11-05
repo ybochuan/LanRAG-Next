@@ -13,7 +13,7 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 		p := c.Payload
 		out := Result{ID: c.ID, Revision: c.ExpectedRevision + 1}
 		switch c.Action {
-		case "feedback_create", "guidance_seed":
+		case "feedback_create", "feedback_capture", "guidance_seed":
 			if strings.TrimSpace(p.Text) == "" || len(p.Text) > 16000 || strings.TrimSpace(p.Topic) == "" || len(p.Topic) > 128 || c.ExpectedRevision != 0 {
 				return Result{}, ErrInvalid
 			}
@@ -29,6 +29,11 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 			}
 			if _, e := tx.ExecContext(ctx, `INSERT INTO ext_feedback_events VALUES(?,?,?,?,?,?,?,?)`, args(c.Scope, out.ID, source, p.Topic, p.Text, p.Negative, s.now().UTC().Format(time.RFC3339Nano))...); e != nil {
 				return Result{}, e
+			}
+			if c.Action == "feedback_capture" {
+				if e := bindQAFeedback(ctx, tx, c, out.ID); e != nil {
+					return Result{}, e
+				}
 			}
 			if source == "seed" {
 				var negatives int
@@ -154,7 +159,9 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 func (s *Service) List(ctx context.Context, scopeScope Command) ([]map[string]any, error) {
 	c := scopeScope
 	table, idcol := "ext_feedback_staging", "feedback_id"
-	fields := `json_object('text',text,'topic',topic,'risk',risk,'ready_at',ready_at)`
+	fields := `json_object('text',text,'topic',topic,'risk',risk,'ready_at',ready_at,'source',CASE WHEN EXISTS (
+SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.tenant_id AND b.knowledge_base_id=ext_feedback_staging.knowledge_base_id AND b.feedback_id=ext_feedback_staging.feedback_id
+) THEN 'qa' ELSE 'manual' END)`
 	switch c.Action {
 	case "relation_list":
 		table, idcol = "ext_document_relations", "relation_id"

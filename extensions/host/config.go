@@ -23,6 +23,7 @@ type Config struct {
 	Parser            *parser.NativeConfig `json:"-"` // Optional authenticated native PDF route.
 	Mode              string
 	DBPath            string
+	NativeDBPath      string
 	UpstreamURL       string
 	APIKey            string `json:"-"`
 	TenantID          uint64
@@ -86,6 +87,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	c.DBPath, c.UpstreamURL, c.APIKey = getenv("AGENTRAG_EXT_DB"), getenv("AGENTRAG_WEKNORA_URL"), getenv("AGENTRAG_WEKNORA_API_KEY")
 	if c.Mode == "worker" {
+		if driver := strings.TrimSpace(getenv("DB_DRIVER")); driver == "" || driver == "sqlite" {
+			c.NativeDBPath = strings.TrimSpace(getenv("DB_PATH"))
+		}
 		if strings.TrimSpace(c.DBPath) == "" {
 			c.DBPath = defaultDBPath()
 		}

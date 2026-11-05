@@ -5037,6 +5037,19 @@ export default {
     }
   },
   chat: {
+    answerFeedback: {
+      title: '回饋此答覆',
+      topic: '回饋主題',
+      details: '說明',
+      incorrect: '這條答覆有誤',
+      send: '提交回饋',
+      sent: '回饋已提交，等待審核。',
+      forbidden: '目前帳號沒有此知識庫的回饋管理權限。',
+      unavailable: '這條答覆無法綁定已核驗的來源，或已提交過回饋。',
+      retry: '提交結果尚未確認，請重試原請求。',
+      invalid: '請填寫簡短的主題和說明。',
+      retryButton: '重試提交',
+    },
     memoryUsedCount: '本次使用了 {count} 條記憶',
     memoryForget: '刪除這條記憶',
     memoryForgotten: '已刪除這條記憶',

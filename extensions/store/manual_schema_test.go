@@ -8,14 +8,14 @@ import (
 )
 
 func TestManualSchemaAdoption(t *testing.T) {
-	for _, version := range []int{1, 3, 5, 6, 7, 8, 9, 10} {
+	for _, version := range []int{1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13} {
 		t.Run(string(rune('0'+version)), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "manual.db")
 			raw, err := sql.Open("sqlite", path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			migrations := []string{lifecycleMigration, ingestTagMigration, parserMigration, lifecyclePolicyMigration, reviewAlertsMigration, provenanceMigration, lifecycleConsistencyMigration, lineageSourcesMigration, supplementsMigration, provenanceRunsMigration}
+			migrations := []string{lifecycleMigration, ingestTagMigration, parserMigration, lifecyclePolicyMigration, reviewAlertsMigration, provenanceMigration, lifecycleConsistencyMigration, lineageSourcesMigration, supplementsMigration, provenanceRunsMigration, businessMigration, qaFeedbackMigration, guidanceBudgetMigration}
 			for _, migration := range migrations[:version] {
 				if _, err := raw.Exec(migration); err != nil {
 					t.Fatal(err)
@@ -43,7 +43,7 @@ func TestManualSchemaAdoption(t *testing.T) {
 			if err := db.View(context.Background(), func(tx *sql.Tx) error {
 				var n int
 				err := tx.QueryRow("SELECT COUNT(*) FROM ext_schema_migrations").Scan(&n)
-				if n != 11 {
+				if n != 13 {
 					t.Errorf("migration count=%d", n)
 				}
 				return err

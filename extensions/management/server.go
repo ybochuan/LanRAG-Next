@@ -27,6 +27,14 @@ type Server struct {
 	scopes   map[lifecycle.PolicyScope]bool
 	sources  *lineage.Registry
 	business *business.Service
+	nativeDB string
+	titles   func(context.Context, string, []string) (map[string]string, error)
+}
+
+// WithNativeSQLite supplies the read-only join and its scoped API fallback.
+func (s *Server) WithNativeSQLite(path string, titles func(context.Context, string, []string) (map[string]string, error)) *Server {
+	s.nativeDB, s.titles = path, titles
+	return s
 }
 
 // WithBusiness shares the worker's real source and native publisher adapters.
@@ -53,6 +61,7 @@ type Request struct {
 	Page             int                   `json:"page,omitempty"`
 	PageSize         int                   `json:"page_size,omitempty"`
 	State            string                `json:"state,omitempty"`
+	Title            string                `json:"title,omitempty"`
 	CanWrite         bool                  `json:"can_write"`
 	ExpectedRevision int64                 `json:"expected_revision"`
 	Annotations      lifecycle.Annotations `json:"annotations"`

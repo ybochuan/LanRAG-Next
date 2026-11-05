@@ -67,7 +67,7 @@ func TestRerankResults_modelErrorKeepsRawResults(t *testing.T) {
 	tool := newRerankTestTool(model)
 	results := newRerankTestResults()
 
-	out, err := tool.rerankResults(context.Background(), "query", results, false)
+	out, _, err := tool.rerankResults(context.Background(), "query", results, false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRerankResults_allBelowFallbackFloorReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	tool := newRerankTestTool(&stubReranker{scores: []float64{0.10, 0.04}})
 
-	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
+	out, _, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRerankResults_keepsCandidatesAboveThreshold(t *testing.T) {
 	t.Parallel()
 	tool := newRerankTestTool(&stubReranker{scores: []float64{0.9, 0.05}})
 
-	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
+	out, _, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestRerankResults_withoutModelIsPassthrough(t *testing.T) {
 	tool := newRerankTestTool(nil)
 	results := newRerankTestResults()
 
-	out, err := tool.rerankResults(context.Background(), "query", results, false)
+	out, _, err := tool.rerankResults(context.Background(), "query", results, false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestRerankResults_keywordModeOrdersWithoutFiltering(t *testing.T) {
 	t.Parallel()
 	tool := newRerankTestTool(&stubReranker{scores: []float64{0.01, 0.05}})
 
-	out, err := tool.rerankResults(context.Background(), "ERR_4012", newRerankTestResults(), true)
+	out, _, err := tool.rerankResults(context.Background(), "ERR_4012", newRerankTestResults(), true)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}

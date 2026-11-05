@@ -64,7 +64,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	inputs, complete := e.modelSourceInputs(messages)
-	llmCtx, sourceCall, sourceErr := extensionbridge.BeginSourceCall(llmCtx, "model", struct{ Messages, Options any }{messages, opts}, inputs, complete)
+	llmCtx, messages, sourceCall, sourceErr := extensionbridge.BeginGuidedSourceCall(llmCtx, messages, opts, inputs, complete)
 	if sourceErr != nil {
 		return nil, sourceErr
 	}

@@ -102,6 +102,9 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 		action = "reviews"
 	}
 	req := extensionbridge.ManagementRequest{Action: action, TenantID: grant.EffectiveTenantID, KnowledgeBaseID: grant.KnowledgeBase.ID, DocumentID: c.Param("document_id"), CanWrite: canWrite, Page: 1, PageSize: 20, State: c.Query("state")}
+	if action == "overview" {
+		req.Title = c.Query("title")
+	}
 	if action == "business_related" {
 		req.DocumentID = c.Query("document_id")
 	}
@@ -183,23 +186,6 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 	if err != nil {
 		lifecycleError(c, extensionbridge.ManagementStatus(err))
 		return
-	}
-	if action == "overview" {
-		var view map[string]json.RawMessage
-		var documents []map[string]json.RawMessage
-		if json.Unmarshal(data, &view) == nil && json.Unmarshal(view["documents"], &documents) == nil {
-			for _, row := range documents {
-				var id string
-				if json.Unmarshal(row["document_id"], &id) == nil {
-					doc, e := h.knowledgeService.GetKnowledgeByID(grant.Context(ctx), id)
-					if e == nil && doc != nil && doc.KnowledgeBaseID == req.KnowledgeBaseID && doc.TenantID == req.TenantID {
-						row["title"], _ = json.Marshal(doc.Title)
-					}
-				}
-			}
-			view["documents"], _ = json.Marshal(documents)
-			data, _ = json.Marshal(view)
-		}
 	}
 	c.JSON(200, gin.H{"success": true, "data": data})
 }
