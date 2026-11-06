@@ -1,6 +1,8 @@
 # AgentRAG private local state. Keep this file tracked, never its payloads.
 agentrag-launcher.json
 agentrag-launcher.json.*.tmp
+onekey-private.env
+logs/
 launcher-backups/
 launcher-run-*/
 bin/

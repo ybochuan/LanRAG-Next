@@ -1,5 +1,16 @@
 # AgentRAG 项目上下文
 
+## 一键启动（2026-11-05）
+
+- 入口分层：Windows `start.cmd` → `scripts/onekey.ps1`（Docker Desktop/docreader、MinerU、supervisor 与两台模型、WSL 网络模式），随后前台调用 WSL 的 `start-all.sh`（Core/Host/凭证/MCP）。`start-all.sh` 仍可单独运行，只做 WSL 半并如实报告 Windows 侧缺失。
+- 网络前提被脚本接管：检测**运行态**（`wslinfo --networking-mode`，不是读配置文件），非 `mirrored` 时备份 `.wslconfig` 并改写、`wsl --shutdown` 重启；`start-all.sh` 启动前从 WSL 侧实测 8092/8000/8081/8082，缺失只降级告警，`AGENTRAG_STRICT=1` 才中止。WSL→Windows 回环只有 mirrored 成立，NAT 下模型地址无解。
+- WSL 网络（2026-11-05 实测）：本机 mirrored 在启动期失败（`CreateInstance/CreateVm/ConfigureNetworking/0x8007054f`），WSL 回退；`dnsTunneling=true` 时回退到 `none`（只有 `lo`，Windows 进不来、网页打不开），关掉后回退到 `nat`。`wsl --shutdown` 不够，重启 Windows 才能恢复 mirrored。启动器因此：切失败写 `data/.wsl-mirrored-failed` 并在后续启动跳过（`start.cmd -FixNetwork` 强制重试）。NAT 下 docreader（Docker 端口转发）仍可达，MinerU/embedding/rerank 不可达。
+- 令牌只生成一次并存 0600 状态：`launcher_config.py` 新增 `STATE_ONLY` 键（supervisor token/addr/bin/state、模型清单、Docker 服务、MCP 开关与 `MCP_ADMIN_KEY`），`emit_env` 不再写入 private.env；只有 `token` 动作打印它。控制台一 次输入后重启不再需要。
+- supervisor 实例状态不持久（state 只存 spec），因此一键流程按 spec 逐台 `POST /start` 并做能力验真（embedding 维度、rerank 分数），而不是“supervisor 活着就算好”。
+- docreader 由一键启动接管（2026-11-05）：上游 compose 只在容器网络 expose 50051，本机 Core 跑在 WSL，因此新增 `docker-compose.docreader-host.yml` 把 `127.0.0.1:50051` 发布出来，并用 `AGENTRAG_DOCREADER_IMAGE` 固定镜像（本机 docker.io 不可达，实测用 SWR 的 `weknora-docreader:v0.8.0`，与 v0.9.0 Core 的 `ListEngines` 协议兼容：builtin/markitdown/opendataloader 全部 available）。`prepare` 只在 50051 真可达时写 `DOCREADER_ADDR=127.0.0.1:50051`/`TRANSPORT=grpc`，避免页面假装已连接。
+- 一期一键启动踩到的真实故障：`MINERU_ENDPOINT` 在某次镜像模式启动时被回退逻辑算成 `172.0.0.1:8000` 并写进状态，Host 启动后一直用它，表现为「MinerU 服务不可用 / request canceled」。现在 `normalize_mineru` 每次 `prepare` 重校验：可达的远程地址保留，不可达且本机回环可用时改回 `127.0.0.1`，镜像模式下不再回退到网关；地址只在 Host 启动时读入，改完必须重启一次。
+- MCP 注册改为专用 full-access API key（`X-API-Key` + `X-Tenant-ID`，路由守卫 `apiKeyManageMCPServices(apiKeyFullAccess())`，full-access 短路能力检查），幂等创建/更新并刷新目录；`mcp-key` 需一次交互登录签发，未签发时只告警不影响启动。
+
 ## 单库血缘可视化（2026-11-05）
 
 - 原生导航 `/platform/lineage` 使用 AntV X6 3.1.8，提供版本历史、内容溯源、文档关联三个视图。库切换沿用原生可访问知识库列表，支持图中名称/编号搜索、缩放、平移、节点详情及指定节点展开。

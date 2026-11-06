@@ -1,0 +1,12 @@
+# Host-side override for the native (non-compose) Lite deployment.
+#
+# The upstream compose file deliberately keeps docreader's 50051 inside the
+# compose network because the app container reaches it as `docreader:50051`.
+# Here Core runs directly in WSL, so the port has to be published on loopback,
+# and the image has to be selectable: docker.io is unreachable on some networks
+# while a mirror copy already exists locally.
+services:
+  docreader:
+    image: ${AGENTRAG_DOCREADER_IMAGE:-wechatopenai/weknora-docreader:latest}
+    ports:
+      - "127.0.0.1:50051:50051"

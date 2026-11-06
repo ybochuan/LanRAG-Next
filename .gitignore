@@ -68,3 +68,7 @@ miniprogram/project.private.config.json
 
 # Locally built BrowserSkill runtime and extension bundles
 /artifacts/browserskill/
+
+# Content-addressed blob store written at the repo root by the local storage
+# backend (uploaded user documents). Never commit these.
+/blobs/

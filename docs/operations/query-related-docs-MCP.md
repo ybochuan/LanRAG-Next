@@ -21,15 +21,24 @@ CGO_ENABLED=1 go build -mod=readonly -tags=lite,sqlite_fts5 \
 
 需要anydoc的部署保留既有anydoc标签。候选构建不会自动覆盖生产二进制。前端按既有流程type-check/build并部署，运维入口见[启动指引](AgentRAG-启动与运维指南.md)。
 
-2. 使用管理员当前登录JWT和已有共享密钥执行注册脚本（不要把值写进仓库）：
+2. 注册连接。一键启动已经接管这一步：首次执行一次
+
+```bash
+cd /mnt/d/LanRAG-Next
+./start-all.sh mcp-key     # 交互输入一次原生登录；签发专用 full-access key 存入 0600 私有状态
+```
+
+之后每次 `start.cmd` 都会幂等地创建/更新名为 `AgentRAG`、URL 为 `http://127.0.0.1:8090/mcp` 的连接并刷新工具目录；注册失败只告警，不影响启动。`mcp-key` 只需一次，密码不保存。
+
+手工/旧路线仍可用（需要管理员 JWT，不要把值写进仓库）：
 
 ```bash
 export AGENTRAG_WEKNORA_URL=http://127.0.0.1:18880
-# 在本机环境中设置 AGENTRAG_CORE_JWT 和 AGENTRAG_MANAGEMENT_KEY
+export AGENTRAG_CORE_JWT='<管理员 JWT>'
 python3 extensions/scripts/register_related_mcp.py
 ```
 
-脚本通过原生API创建/更新名为AgentRAG、URL为上述固定地址的连接，并刷新持久工具目录；不会输出凭据。也可在原生MCP设置手工创建：传输`http-streamable`，Header `Authorization: Bearer <已有共享密钥>`，刷新目录后应看到唯一工具`query_related_docs`。保留现有本地SSRF地址配置；本批不另行关闭SSRF。
+脚本优先用私有状态里的专用 key（`X-API-Key` + `X-Tenant-ID`），没有才回退到 `AGENTRAG_CORE_JWT`；不会输出凭据。也可在原生 MCP 设置手工创建：传输 `http-streamable`，Header `Authorization: Bearer <已有共享密钥>`，刷新目录后应看到唯一工具 `query_related_docs`。保留现有本地 SSRF 地址配置；本批不另行关闭 SSRF。
 
 3. 在智能体设置启用该MCP服务（MCP选择“全部”或显式选中AgentRAG，不能是“禁用”），确保该工具启用；沿用原生审批/只读权限。无需把动态MCP工具名手工写进allowed_tools。
 

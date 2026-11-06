@@ -1,71 +1,111 @@
 # AgentRAG 本机启动与运维指南
 
-## 本机当前入口（2026-11-01）
+## 本机当前入口（2026-11-05）
 
-当前已安装来源治理修复后的Core，访问 **http://localhost:18880/**。本机Windows的TCP保留范围包含7991–8090，因此8080无法建立WSL→Windows的本机转发；无需删除系统保留范围。Core端口18880及Host使用的Core地址已保存到忽略的私密启动配置，后续正常执行`bash start-all.sh`会沿用。下文历史默认端口8080的示例，在本机替换为18880。
+一键入口是 Windows 的 `start.cmd`，细节见第 1 节；启动完成后访问 **http://localhost:18880/**。本机 Windows 的 TCP 保留范围包含 7991–8090，8080 无法建立 WSL→Windows 的转发，所以 Core 端口取 18880 而不是默认 8080；该值已保存在忽略的私密启动配置里，后续启动沿用。下文凡写 8080 的历史示例，在本机按 18880 理解。
 
-Bridge仍固定运行于 **WSL的127.0.0.1:8090**；原生500ms客户端不变。Windows不能访问保留端口8090不影响同一WSL内的Core→Host通信。检查Host请在WSL中执行`curl --fail http://127.0.0.1:8090/health`。
+Bridge 仍固定运行于 **WSL 的 127.0.0.1:8090**，原生 500ms 客户端不变；检查 Host 在 WSL 执行 `curl --fail http://127.0.0.1:8090/health`，或直接 `./start-all.sh status`。
 
-当前服务已由隐藏的Windows进程托管。若需要停止本次实例，可在WSL执行下面命令（只针对已核对的本次启动器；旧PID或不匹配时拒绝）：
+停止：启动窗口里按 Ctrl+C 只停 Core/Host；Windows 侧（MinerU、模型、supervisor、docreader）用 `start.cmd -Stop`。启动窗口丢失时，用 `./start-all.sh stop` 清理脚本自己拉起的 Core/Host——它只认最新运行时目录里的 `pids`，不匹配的进程一律不碰。
 
-```bash
-python3 - <<'PY'
-import os, pathlib, signal
-root = pathlib.Path('/mnt/d/LanRAG-Next')
-pid = int((root / 'data/governance-runtime-20261101-092201/active-launcher.pid').read_text())
-process = pathlib.Path('/proc') / str(pid)
-assert process.joinpath('cmdline').read_bytes() == b'bash\x00./start-all.sh\x00'
-assert os.readlink(process / 'cwd') == str(root)
-os.kill(pid, signal.SIGTERM)
-PY
+适用目录：Windows `D:\LanRAG-Next`，对应 WSL `/mnt/d/LanRAG-Next`。当前为 WeKnora Lite + 独立 Extension Host + Windows 侧模型进程管理器；一键入口 `start.cmd`，说明更新于 2026-11-05。
+
+## 1. 日常启动：一条命令
+
+在 **Windows** 执行（PowerShell 或双击）：
+
+```
+D:\LanRAG-Next\start.cmd
 ```
 
-启动器收到TERM后会优雅关闭自己拥有的Core/Host。之后可在可见WSL终端运行`bash start-all.sh`，继续用Ctrl+C停止。备份、PID与私密日志均在被忽略的`data/governance-runtime-20261101-092201/`内；不要提交这些文件。实时验收见[部署验证记录](../evidence/m2-governance-deployment-2026-11-01.md)。
+它按依赖顺序把一个完整的本机环境拉起来，每一步都是幂等的（已健康的服务直接复用）：
 
-适用目录：Windows `D:\LanRAG-Next`，对应 WSL `/mnt/d/LanRAG-Next`。当前为 WeKnora Lite + 独立 Extension Host；说明更新于 2026-10-31。
+1. 读 `data/agentrag-launcher.json`（缺失时生成）：supervisor 令牌、模型清单、Docker 服务、MCP 开关；
+2. 检查 WSL 网络模式，不是 `mirrored` 就改写 `.wslconfig`（先备份为 `.wslconfig.bak`）并 `wsl --shutdown` 重启 WSL；
+3. 起 Docker Desktop（未运行时）并 `docker compose up -d --wait docreader`；
+4. 起 MinerU（`D:\mineru-venv\Scripts\mineru-api.exe`）并等 `/v1/health`；
+5. 起 supervisor（注入令牌）→ 按计划确保 embedding/rerank 处于 running → **真实能力自检**（向量维度、rerank 分数），不只是端口通；
+6. 进入 WSL 执行 `start-all.sh`：Host ready → Core → 机器凭证校验 → MCP 幂等注册；前台运行，**Ctrl+C 只停 Core/Host**，Windows 侧服务保持运行。
 
-## 1. 日常启动：推荐使用一键脚本
+参数：`-DryRun` 只打印计划不动手；`-SkipDocker`、`-SkipMinerU` 跳层；`-NoNetworkFix` 不改系统网络；`-Strict` 让 Windows 侧缺失也中止；`-Stop` 停模型、supervisor 和 docreader 容器。
 
-在 **WSL Ubuntu** 执行：
+只想起 Core/Host（Windows 侧已就绪）时仍可直接：
 
 ```bash
 cd /mnt/d/LanRAG-Next
-bash start-all.sh
+./start-all.sh            # = start
+./start-all.sh status     # 七个服务 + WSL 网络模式
+./start-all.sh doctor     # 断链时给出下一步
+./start-all.sh logs       # 最新一次运行目录的日志
+./start-all.sh token      # 控制台所需的 supervisor 令牌（唯一会打印它的地方）
+./start-all.sh stop       # 只停脚本自己拉起的 Core/Host
 ```
 
-看到 `[READY] AgentRAG: http://localhost:8080` 后，再访问浏览器。终端保持打开；按 **Ctrl+C** 关闭这次启动的 Core、Host。脚本保留日志，遇到已有端口占用会退出，不会杀掉其他进程。
+### 1.1 模型进程管理的访问令牌
 
-首次准备条件：已经编译 Linux 版 `WeKnora-lite`，仓库根目录有原有 `.env`，原生数据库中已有用户和知识库。不要重新生成已有的 JWT、AES、签名密钥。空库首次注册、模型与知识库配置属于原生初始化流程；本脚本不自动创建业务知识库。
+`/platform/model-supervisor`（左侧「模型进程管理」）问的**不是账号密码**，是 supervisor 自己的访问令牌。它和 Core 登录态、模型 API Key 是三套互不通用的凭据：
 
-首次没有有效机器 API Key 时，脚本提示输入**原生 WeKnora 登录邮箱和密码**，通过官方登录/API Key 接口申请指定知识库范围的凭证。密码不保存。该用户必须有目标空间的 API Key 管理权限。后续复用私有配置，不需要重复登录。
+- 启动器**首次运行随机生成一次**（43 字符 URL-safe），之后固定复用——不会每次重启都变，这是浏览器只需输入一次的原因；
+- 存在 `data/agentrag-launcher.json` 的 `MODEL_SUPERVISOR_TOKEN`，该文件在 `.gitignore` 内；WSL 侧是 POSIX 0600，`/mnt/d` 位于 NTFS 时以 Windows ACL 为准（见第 6 节）；
+- 只用于浏览器 → `127.0.0.1:8092`，不经过 Core，也不会被任何 Core 接口下发。
 
-可以在首次运行前指定范围与 Windows MinerU 地址：
+获取方式：
 
 ```bash
-export AGENTRAG_TENANT_ID=1
-export AGENTRAG_KB_IDS='<知识库ID1>,<知识库ID2>'
-export MINERU_ENDPOINT='http://<WSL能访问的Windows地址>:8000'
-bash start-all.sh
+cd /mnt/d/LanRAG-Next
+./start-all.sh token                # 只打印这一项，不写日志
+./start-all.sh token | clip.exe     # 直接放进 Windows 剪贴板，粘一下即可
 ```
 
-只有一个原生空间时可自动识别空间；未指定 KB 时从该空间现有知识库生成范围。已有私有配置中的范围会保留；新增知识库后，应显式更新 `AGENTRAG_KB_IDS`，必要时重新登录签发覆盖新范围的机器凭证。不要把知识库名称当作 ID。
+等价地从私有状态里读（脚本校验的是同一个字段）：
+
+```bash
+python3 -c "import json; print(json.load(open('data/agentrag-launcher.json'))['MODEL_SUPERVISOR_TOKEN'])"
+```
+
+用法：粘到页面的「访问令牌」输入框后保存。浏览器把它存在 localStorage，**输一次长期有效**，以后重启 supervisor 也不用重填；页面收到 401（例如哪天换了令牌）会自动清掉旧值并要求重填。
+
+命令行自检：
+
+```bash
+curl -s -H "X-API-Key: $(./start-all.sh token)" \
+     -H "X-AgentRAG-Model-Supervisor-Version: 1" \
+     http://127.0.0.1:8092/extensions/models/list
+```
+
+需要主动轮换（例如怀疑外泄）：先 `start.cmd -Stop` 停掉 supervisor，删掉状态文件里的 `MODEL_SUPERVISOR_TOKEN` 字段，再 `start.cmd`；启动器会生成新值，浏览器下次会提示重填。**不要**在 supervisor 运行时手改状态文件——进程里用的还是旧值。
+
+安全边界：这串不要贴进截图、聊天记录、提交或终端日志。`./start-all.sh token` 是唯一会打印它的入口；启动器日志、`private.env`、`plan` 输出都不含它。
+
+MCP 首次需要一次登录来签发专用 key：
+
+```bash
+./start-all.sh mcp-key    # 或 python3 extensions/scripts/launcher_config.py mcp-key
+```
+
+之后每次启动都会幂等地创建/更新名为 `AgentRAG` 的连接并刷新工具目录；注册失败只告警，不影响系统启动。
+
+首次运行条件未变：已编译 Linux 版 `WeKnora-lite`，原生数据库中已有用户和知识库。没有有效机器 API Key 时会提示输入一次**原生登录邮箱和密码**（密码不保存），随后复用私有配置。
+
+已有私有配置中的范围会保留；新增知识库后应显式更新 `AGENTRAG_KB_IDS`，必要时重新登录签发覆盖新范围的机器凭证。不要把知识库名称当作 ID。
 
 ## 2. 服务分工和端口
 
 | 服务 | 运行位置 | 默认地址 | 用途 / 启动方式 |
 |---|---|---|---|
-| WeKnora Core | WSL | `http://127.0.0.1:8080` | 原生 UI/API、认证、分块、索引、问答；一键脚本管理 |
-| Extension Host | 与 Core 相同的 WSL | `http://127.0.0.1:8090` | 生命周期、检索策略、解析代理；一键脚本构建并管理 |
-| MinerU 4.0.1 | Windows | `http://<Windows地址>:8000` | PDF 解析；Windows 单独启动 |
-| Embedding | Windows | `http://127.0.0.1:8081/v1` | 本地 Qwen3 向量服务；Windows 单独启动 |
-| Reranker | Windows | `http://127.0.0.1:8082` | 本地 Qwen3 重排服务；Windows 单独启动 |
+| WeKnora Core | WSL | `http://127.0.0.1:8080`（本机 18880） | 原生 UI/API、认证、分块、索引、问答；start-all.sh 管理 |
+| Extension Host | 与 Core 相同的 WSL | `http://127.0.0.1:8090` | 生命周期、检索策略、解析代理；start-all.sh 构建并管理 |
+| MinerU 4.0.1 | Windows | `http://<Windows地址>:8000` | PDF 解析；start.cmd 自动拉起（也可单独启动） |
+| Embedding | Windows | `http://127.0.0.1:8081/v1` | 本地 Qwen3 向量服务；start.cmd 经 supervisor 拉起并验真 |
+| Reranker | Windows | `http://127.0.0.1:8082` | 本地 Qwen3 重排服务；start.cmd 经 supervisor 拉起并验真 |
+| docreader | Docker | `127.0.0.1:50051`（gRPC） | 复杂格式解析（docx/pdf/xlsx/pptx/图片等）；start.cmd 自动拉起，容器名 `WeKnora-docreader` |
 | 生成模型 | DeepSeek 云端 | `https://api.deepseek.com/v1` | 在原生模型管理中配置账户可用模型和 API Key |
 
-`start-all.sh` 管理 **Core 和 Host**；不会自动启动 Windows MinerU、两个模型进程或修改模型配置。纯文本可由原生 Go 解析器处理；PDF 和向量检索分别需要对应后端服务。Lite 使用 SQLite、内存任务/流管理器，不需要为这套本机配置额外启动 PostgreSQL、Redis、Neo4j。
+`start.cmd`（Windows 半）负责 Docker、MinerU、supervisor 与两个模型；`start-all.sh`（WSL 半）负责 Core 和 Host，并在启动前从 WSL 侧验证 Windows 服务真实可达。任何一层缺失都只降级并打印影响范围，`-Strict`/`AGENTRAG_STRICT=1` 时才中止。纯文本可由原生 Go 解析器处理；PDF 和向量检索分别需要对应后端服务。Lite 使用 SQLite、内存任务/流管理器，不需要为这套本机配置额外启动 PostgreSQL、Redis、Neo4j。
 
 Host 必须与 Core 在同一网络空间。原生 Bridge 固定访问 `127.0.0.1:8090`，不能把 Host 放在 Windows、Core 放在隔离的 WSL，再期待它们共享回环地址。Host 始终只绑定 IPv4 回环。
 
-上表中 Windows 侧服务的地址取决于 WSL 网络模式：**镜像网络下 MinerU 与两个模型都可以用 `127.0.0.1`**；NAT 模式下模型必须换成 WSL 可达的 Windows 地址，且 Windows 侧服务要相应改监听地址。先按第 5 节确认模式，再填原生模型配置里的 base URL。
+上表中 Windows 侧服务的地址取决于 WSL 网络模式：**镜像网络下 MinerU 与两个模型都可以用 `127.0.0.1`**（start.cmd 会自动切到 mirrored 并重启 WSL）；NAT 模式下模型必须换成 WSL 可达的 Windows 地址，且 Windows 侧服务要相应改监听地址——一键脚本会拒绝这种半配置状态并说明原因。
 
 ## 3. 编译 WeKnora 与 Host
 
@@ -95,9 +135,11 @@ CGO_ENABLED=0 GOWORK=off go build -mod=readonly \
 
 ## 4. Windows 后端服务启动
 
+这一节的服务日常都由 `start.cmd` 负责拉起和检测；下面的手工命令用于排障、临时替换参数，或在没有一键脚本的机器上复现同一套环境。手工启动时要注意：supervisor 必须跑在 Windows 侧，MinerU 与模型地址要和 WSL 网络模式匹配（第 5 节）。
+
 ### 4.1 MinerU
 
-在 **Windows PowerShell** 执行：
+`start.cmd` 会在 `D:\mineru-venv\Scripts\mineru-api.exe` 存在且 `:8000/v1/health` 不通时自动拉起它（`-SkipMinerU` 可跳过）。手工启动等价于在 **Windows PowerShell** 执行：
 
 ```powershell
 & 'D:\mineru-venv\Scripts\mineru-api.exe' --host 127.0.0.1 --port 8000
@@ -115,11 +157,11 @@ MinerU 后端如配置了鉴权，通过 `AGENTRAG_PARSER_UPSTREAM_KEY` 提供�
 
 ### 4.2 Qwen3 Embedding
 
-Windows PowerShell：
+`start.cmd` 通过 supervisor 拉起它并校验真实输出维度（见 4.6）。手工启动等价于在 Windows PowerShell：
 
 ```powershell
-& 'D:\Bonsai\llama-server.exe' `
-  --model 'D:\Models\Qwen3-Embedding-4B-Q6_K.gguf' `
+& 'D:\LanRAG-Next\data\bin\llama-server.exe' `
+  --model 'D:\LanRAG-Next\data\models\Qwen3-Embedding-4B-Q6_K.gguf' `
   -a Qwen3-Embedding-4B-Q6_K `
   --host 127.0.0.1 --port 8081 --embeddings
 ```
@@ -128,11 +170,11 @@ Windows PowerShell：
 
 ### 4.3 Qwen3 Reranker
 
-Windows PowerShell：
+手工启动等价于在 Windows PowerShell：
 
 ```powershell
-& 'D:\Bonsai\llama-server.exe' `
-  --model 'D:\Models\qwen3-reranker-0.6b-q8_0.gguf' `
+& 'D:\LanRAG-Next\data\bin\llama-server.exe' `
+  --model 'D:\LanRAG-Next\data\models\qwen3-reranker-0.6b-q8_0.gguf' `
   -a qwen3-reranker-0.6b-q8_0 `
   --host 127.0.0.1 --port 8082 --reranking
 ```
@@ -154,13 +196,41 @@ npm run dev
 
 默认开发端口为 5173；依赖尚未安装时才先执行 `npm ci --no-audit --no-fund`。Core 和 Host 仍须单独运行。开发服务不会自动更新根目录 `web/`；正式前端构建/嵌入按对应前端任务执行。本轮未重建前端。
 
-TXT 等内置 Go 解析，以及已接线的 PDF→Host→MinerU 路径，不需要额外 docreader。原生其他解析引擎/格式若配置为 docreader，则需要可达的 gRPC 后端。仓库 Compose 中的 docreader 默认只向容器网络 expose 50051，不向宿主发布端口；直接 `docker compose up -d docreader` 不能保证 WSL 原生 Core 可访问。此类部署需另行配置回环端口发布与 `DOCREADER_ADDR`，不能直接使用只有 Compose 内可解析的 `docreader:50051`。本轮未启动或验收该可选服务。
+TXT 等内置 Go 解析，以及已接线的 PDF→Host→MinerU 路径，不需要额外 docreader。原生其他解析引擎/格式若配置为 docreader，则需要可达的 gRPC 后端。仓库 Compose 中的 docreader 默认只向容器网络 expose 50051，不向宿主发布端口；直接 `docker compose up -d docreader` 不能保证 WSL 原生 Core 可访问。此类部署需另行配置回环端口发布与 `DOCREADER_ADDR`，不能直接使用只有 Compose 内可解析的 `docreader:50051`。
+
+`start.cmd` 默认把 `docreader` 列入要拉起的容器：Docker Desktop 未运行会先拉起，然后
+`docker compose -f docker-compose.yml -f docker-compose.docreader-host.yml up -d --wait --no-build docreader`。
+上游 compose 只把 50051 `expose` 在容器网络里（给 app 容器用 `docreader:50051`），而本机 Core 直接跑在 WSL，所以新增 host override 把端口发布到 `127.0.0.1:50051`；镜像可用 `AGENTRAG_DOCREADER_IMAGE` 固定（默认 `wechatopenai/weknora-docreader:latest`）。
+
+Core 侧需要两个环境变量，启动器按实际可达性自动写入并随 `private.env` 传给 Core：
+
+```
+DOCREADER_ADDR=127.0.0.1:50051
+DOCREADER_TRANSPORT=grpc
+```
+
+`prepare` 每次都会探测 50051：容器没起来就**不写**地址（原生设置页因此显示「未连接」，而不是假装连上后让每次上传都失败）；容器起来后再启动一次 Core 即可。地址生效后，原生「解析引擎」页会显示 `已连接 gRPC`，并列出远端引擎。
+
+选引擎：进入知识库设置 → 解析引擎，选择 DocReader 提供的引擎（本机 v0.8.0 镜像实测提供 `builtin`/`markitdown`/`opendataloader`）。`builtin` 覆盖 docx/doc/pdf/md/xlsx/pptx/epub/html/图片/音频等 21 类。**引擎是每个知识库的配置，改完只影响之后入库的文档。**
+
+本机 2026-11-05 实测：`docreader:v0.8.0`（华为 SWR 镜像）与 v0.9.0 Core 的 gRPC 协议兼容——`ListEngines` 返回三个引擎且全部 `available=true`；容器 healthy、`127.0.0.1:50051` 从 WSL 可达、`./start-all.sh status` 显示 `docreader :50051 UP`。
+
+拉不到 Docker Hub 时（本机就是这种网络）：先确认本地已有镜像，再把它固定到状态里，例如
+
+```bash
+AGENTRAG_DOCREADER_IMAGE='swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/wechatopenai/weknora-docreader:v0.8.0' \
+  python3 extensions/scripts/launcher_config.py prepare /tmp/private.env
+```
+
+然后重跑 `start.cmd`；没有 Docker 的机器用 `-SkipDocker` 或 `AGENTRAG_DOCKER_SERVICES=` 关掉这一项，Core/Host 不受影响。
 
 ### 4.6 可选：用模型进程管理器托管 4.2 / 4.3
 
 4.2 与 4.3 也可以交给 `model-supervisor` 托管：它负责拉起 `llama-server.exe`、挂 Job Object 防孤儿、按需探活并给出**两侧可达性**结论。它不参与任何治理决策，故障不影响 fail-closed 判定。
 
 **它必须运行在 Windows 侧**：`data/bin/llama-server.exe` 是 Windows 程序，孤儿清理也依赖 Windows Job Object。在 WSL 里运行 supervisor 会通过 WSL 互操作把 `/mnt/d/...` 路径原样交给 Windows 子进程，llama-server 只能报 `failed to open GGUF file (No such file or directory)`——看起来像模型缺失，其实模型一直在。现在 supervisor 会直接拒绝这种跨 OS 启动并提示改到 Windows 侧，不再让它以「加载模型失败」的形式出现。
+
+日常不需要手工启动：`start.cmd` 会生成/复用令牌、启动 supervisor，并按计划把 embedding 和 rerank 拉起来做真实能力自检。下面的命令只在单独调试或首次编译时使用。
 
 在 WSL 里交叉编译出 Windows 二进制（纯 Go，不需要 CGO）：
 
@@ -169,13 +239,12 @@ cd /d/LanRAG-Next/extensions
 GOOS=windows GOARCH=amd64 go build -mod=readonly -o ../data/bin/model-supervisor.exe ./cmd/model-supervisor
 ```
 
-在 **Windows PowerShell** 里启动（不要用 WSL bash 起它）：
+在 **Windows PowerShell** 里手工启动（不要用 WSL bash 起它）。令牌由启动器保存在 0600 的私有状态里，用 `./start-all.sh token` 取，不要写进命令行历史：
 
 ```powershell
 cd D:\LanRAG-Next
-$env:MODEL_SUPERVISOR_TOKEN='<自定义长随机串>'
-$env:MODEL_SUPERVISOR_WSL_DISTRO='Ubuntu'
-$env:MODEL_SUPERVISOR_ALLOWED_ORIGINS='http://127.0.0.1:18880,http://localhost:18880'
+$env:MODEL_SUPERVISOR_TOKEN = (wsl.exe -d Ubuntu -- bash /mnt/d/LanRAG-Next/start-all.sh token)
+$env:MODEL_SUPERVISOR_WSL_DISTRO = 'Ubuntu'
 .\data\bin\model-supervisor.exe
 ```
 
@@ -283,7 +352,14 @@ embedding 的 20s 是实测出来的：本机模型加载完成后第一次 `/v1
 
 ## 5. WSL 与 Windows 网络检查
 
-WSL2 有两种网络模式，决定了 WSL 里的 Core 能否访问 Windows 上的 MinerU 与模型服务。**先确认当前模式，再决定用哪种地址。**
+WSL2 有两种网络模式，决定了 WSL 里的 Core 能否访问 Windows 上的 MinerU 与模型服务。**一键启动会自动把模式改成 mirrored**：检测到 `nat` 就备份 `.wslconfig`、写入 `networkingMode=mirrored` 与 `autoProxy=false`，然后 `wsl --shutdown` 重启（`-NoNetworkFix` 可禁止）。手工排查时按本节确认；想回退就恢复 `C:\Users\<用户名>\.wslconfig.bak` 再执行 `wsl --shutdown`。
+
+启动完成后用下面这条命令一眼判断两侧是否通：
+
+```bash
+./start-all.sh status     # 七个服务 + 当前 networkingMode
+./start-all.sh doctor     # 全不可达时给出下一步
+```
 
 ### 5.1 镜像网络（推荐，已在本机验证）
 
@@ -395,6 +471,35 @@ c.commit()
 
 **验证通过的标准**：检索返回的 `meta.rerank.applied` 为 `true`、`candidate_count` 明显大于 0、`top_score` 接近 1。只有 `data` 非空还不够——候选数才是向量链路是否真的走通的证据。
 
+### 5.4 mirrored 启动失败：网页打不开的那种
+
+**现象**：`start.cmd` 说服务都起来了，浏览器却连 `http://localhost:18880` 都打不开。WSL 里 `ip -br addr` 只有 `lo`，`wslinfo --networking-mode` 返回 `none`。
+
+**当时怎么确认**：`wsl.exe --shutdown` 后重新进入，WSL 会打印真实原因：
+
+```
+wsl: 无法配置网络设置 (networkingMode Mirrored)，正在改用 networkingMode None。
+错误代码: CreateInstance/CreateVm/ConfigureNetworking/0x8007054f
+```
+
+**原因**：WSL 的 Hyper-V 网络层在启动期配置 mirrored 失败（0x8007054f），于是回退。`dnsTunneling=true` 时回退目标是 `none`——**WSL 完全没有网卡**，Windows 既进不来、WSL 也出不去；把它关掉后回退成 `nat`，至少网页可用。注册表里残留 `ProxyServer=127.0.0.1:7897`（即使 `ProxyEnable=0`）是已知诱因之一。
+
+**处理顺序**：
+
+1. 先重启一次 Windows——这是本机唯一确证有效的修复（`wsl --shutdown` 不够，HNS 状态卡在系统层）。
+2. 重启后运行 `start.cmd -FixNetwork` 一次，让它重新尝试 mirrored 并清掉失败标记。
+3. 还不行就退回 NAT（`networkingMode=nat`、`dnsTunneling=false`）：网页恢复，但见下面的取舍。
+
+**NAT 下的取舍**（`./start-all.sh status` 会如实显示）：
+
+| 服务 | NAT 下从 WSL 是否可达 | 说明 |
+|---|---|---|
+| Core :18880、Host :8090 | 可达 | 都跑在 WSL 里 |
+| docreader :50051 | 可达 | Docker Desktop 的端口转发在 WSL 内也可见 |
+| MinerU :8000、embedding :8081、rerank :8082 | **不可达** | 它们绑在 Windows 的 `127.0.0.1`，NAT 下 WSL 只能到网关 IP |
+
+要让本地模型在 NAT 下也能用，需要两步：把服务改绑到 WSL 网关地址（MinerU 的 `--host`、supervisor 的模型 `--host`——后者目前还没有绑定地址开关），再按 5.3 把 Core 里保存的模型 base URL 改成 `http://<网关IP>:8081/v1`。默认不自动做，因为这会改变原生模型配置并让服务对局域网可见。
+
 ## 6. 配置、目录和启动顺序
 
 | 项目 | 默认值 / 行为 |
@@ -402,7 +507,7 @@ c.commit()
 | `AGENTRAG_MODE` | 脚本固定 `worker`；实际变量名不是 `HOST_MODE` |
 | `AGENTRAG_EXT_DB` | 仓库根 `data/agentrag_ext.db`，脚本转换成绝对路径 |
 | `DB_PATH` | 原生数据库，默认 `data/weknora.db`；仍由 Core 使用 |
-| `AGENTRAG_WEKNORA_URL` | `http://127.0.0.1:$CORE_PORT`，默认 8080 |
+| `AGENTRAG_WEKNORA_URL` | `http://127.0.0.1:$CORE_PORT`，默认 8080，沿用已保存的端口（本机 18880） |
 | `AGENTRAG_TENANT_ID` / `AGENTRAG_KB_IDS` | 明确的空间和知识库范围；KB 逗号分隔 |
 | `MINERU_ENDPOINT` | Windows MinerU origin；脚本映射到 `AGENTRAG_PARSER_UPSTREAM_URL` |
 | `AGENTRAG_PARSER_PROXY_ADDR` | Core → Host，固定为 `http://127.0.0.1:8090` |
@@ -410,10 +515,14 @@ c.commit()
 | 生命周期扫描 | 启动先补扫，后续默认每 24 小时扫描 |
 | `ENV_FILE` | 显式指向仓库 `.env`；原生 Lite 默认自动加载的是 `.env.lite` |
 | `SSRF_DISABLE` | 本机脚本默认 `true`，沿用已批准的本地模型接入开关；可显式设 `false` 恢复原生检查 |
-| `CORE_PORT` | 一键脚本默认 8080，可覆盖；Host 的 8090 不可覆盖 |
+| `CORE_PORT` | 一键脚本默认 8080（本机保存的是 18880），可覆盖；Host 的 8090 不可覆盖 |
 | `CORE_BINARY` | 默认仓库根 `WeKnora-lite`，可指向另一份已编译 Linux 核心 |
 | `AGENTRAG_LAUNCHER_CONFIG` | 默认 `data/agentrag-launcher.json`，保存私有机器凭证及范围 |
 | `AGENTRAG_RUN_DIR` | 默认 `data/launcher-run-*`，保存本次日志、二进制和私有运行环境 |
+| `MODEL_SUPERVISOR_TOKEN` / `_ADDR` / `_BIN` / `_STATE` | 只存私有状态，**不写进 private.env**；令牌首次生成后固定，用 `./start-all.sh token` 取，`start.cmd` 负责注入 |
+| `MODEL_SERVICES` / `DOCKER_SERVICES` / `MCP_ENABLED` / `MCP_ADMIN_KEY` | 一键启动的计划：模型清单（JSON）、要拉起的容器、是否自动注册 MCP、专用注册 key；均可用同名环境变量覆盖 |
+| `DOCREADER_ADDR` / `DOCREADER_TRANSPORT` | 由启动器按 50051 是否真的可达决定（可达写 `127.0.0.1:50051` / `grpc`，否则留空）；显式设置时优先 |
+| `AGENTRAG_DOCREADER_IMAGE` | docreader 容器镜像；docker.io 不可达时用它固定本地已有镜像 |
 
 配置优先级为当前进程环境变量 → 已保存私有配置 → 默认值。更换已有实例的原生库路径或端口时，显式传入 `DB_PATH` / `CORE_PORT`；配置保存后下次继续沿用。若 `.env` 的 DB 路径使用复杂变量表达式，启动器会要求显式 `DB_PATH`，避免猜测后选错原生库。`AGENTRAG_RUN_DIR` 必须是空目录且不能是符号链接；每次启动使用独立目录，旧日志保留。
 
@@ -421,19 +530,23 @@ c.commit()
 
 上述忽略规则覆盖默认路径；自定义 `AGENTRAG_LAUNCHER_CONFIG` / `AGENTRAG_RUN_DIR` 时，选择仓库外的私有目录，或自行确认该路径已忽略。
 
-实际启动顺序：
+实际启动顺序（`start.cmd` 的完整链路）：
 
-1. 解析原生库路径、选择独立扩展库、确定授权范围、检查端口。
-2. 构建 Host，启动 `worker`，打开/迁移扩展库，完成首次生命周期过期扫描。
-3. 等待 Host `/health` 返回 HTTP 200 且 `status=ready`，再启动 Core。
-4. 等待 Core `/health`；验证机器 API Key 的知识库权限。首次登录签发新凭证时，优雅重启 Host 加载凭证，再等待就绪。
-5. 输出 `[READY] AgentRAG`，维持两个进程；任一进程退出时清理另一个。
+1. 读/生成私有状态（令牌、模型清单、容器清单、MCP 开关），解析原生库路径、独立扩展库、授权范围。
+2. 网络：非 mirrored 时改写 `.wslconfig` 并重启 WSL。
+3. Windows 侧：Docker Desktop 与 `docreader` → MinerU → supervisor → 按清单确保 embedding/rerank 处于 running 并做能力验真。
+4. WSL 侧从自己这边实测 `8092/8000/8081/8082`，缺失只降级告警（`AGENTRAG_STRICT=1` 才中止），检查 18880/8090 端口。
+5. 构建 Host，启动 `worker`，打开/迁移扩展库，完成首次生命周期过期扫描。
+6. 等待 Host `/health` 返回 HTTP 200 且 `status=ready`，再启动 Core。
+7. 等待 Core `/health`；验证机器 API Key 的知识库权限。首次登录签发新凭证时，优雅重启 Host 加载凭证，再等待就绪。
+8. MCP 幂等注册/刷新（有专用 key 时；失败只告警）。
+9. 输出 `[READY] AgentRAG`，维持 Host 与 Core；任一退出时清理另一个（Windows 侧服务保持运行）。
 
 Host 的本地就绪不依赖 Core 在线，避免相互等待。原生凭证验证是 Core 启动后的独立步骤；此前对账可能报告 `reconciliation_failed`，未知文档仍按非 active 排除。
 
 ## 7. 拆分启动（调试用）
 
-建议先完成一次一键初始化，再 Ctrl+C。之后每个 WSL 终端都加载相同的私有环境，避免 Core 和 Host 使用不同代理密钥。
+只在排查 Core/Host 本身时使用。Windows 侧（MinerU、supervisor、模型）仍需先由 `start.cmd` 或 4.1–4.6 的命令拉起，否则从 WSL 侧看不到模型，RAG 会缺少向量与重排能力。建议先完成一次一键初始化，再 Ctrl+C。之后每个 WSL 终端都加载相同的私有环境，避免 Core 和 Host 使用不同代理密钥。
 
 终端 A，Host：
 
@@ -471,12 +584,23 @@ ENV_FILE="$PWD/.env" WEKNORA_WEB_DIR="$PWD/web" SSRF_DISABLE=true ./WeKnora-lite
 
 ## 8. 健康检查和日志
 
+一条命令看全部（WSL 侧 + Windows 侧 + 当前网络模式）：
+
+```bash
+cd /mnt/d/LanRAG-Next && ./start-all.sh status
+```
+
+逐项探针：
+
 ```bash
 curl --fail http://127.0.0.1:8090/bridge/healthz
 curl --fail http://127.0.0.1:8090/health
 curl --fail http://127.0.0.1:8090/readyz
-curl --fail http://127.0.0.1:8080/health
+curl --fail http://127.0.0.1:18880/health      # 本机 Core 端口，见开头说明
+curl --fail http://127.0.0.1:8092/healthz      # 模型 supervisor
 ```
+
+`status` 里的 `MinerU/supervisor/embedding/rerank` 是从 **WSL 侧**发出的请求，正好等于 Core 实际使用的路径；Windows 侧能打开不代表 WSL 能打开。
 
 | 探针 | 成功含义 |
 |---|---|
@@ -534,6 +658,15 @@ AGENTRAG_EXT_DB="$HOME/.local/share/agentrag/agentrag_ext.db" bash start-all.sh
 | 原生模型新增/调用失败 | 从 Core 所在 WSL 检查 URL、服务监听、能力参数、维度；本机 SSRF 开关不解决网络不可达 |
 | PDF 长时间等待/下载 OCR 模型 | 先查预检/路由和 MinerU 实际档位；文本层 PDF 应走 txt/flash，扫描件才允许需要 OCR 的档位 |
 | 标签投影重试 | C-10 Baseline Limitation：原生标签未知时安全拒绝替换；生命周期 truth 不因此回滚，不能为同步误删用户标签 |
+| `[WARN] 从 WSL 不可达: supervisor/MinerU/embedding/rerank` | 多半是 WSL 仍是 nat 模式，或 Windows 侧服务没起。在 Windows 跑 `start.cmd`（自动切 mirrored 并拉起）；只想要 Core/Host 可忽略 |
+| `container docreader failed; local candidate image(s): ...` | 拉不到 Docker Hub。按提示 `docker tag <已有镜像> wechatopenai/weknora-docreader:latest` 后重跑，或 `-SkipDocker` / `AGENTRAG_DOCKER_SERVICES=` 关掉；不影响 Core/Host |
+| 模型控制台报 `missing or invalid credential` | 浏览器存的令牌与当前 supervisor 不一致。页面收到 401 会自动清空并要求重填；当前值用 `./start-all.sh token` 取（唯一会打印它的地方） |
+| `runtime ... is a Windows executable but this supervisor is a linux build` | supervisor 跑在 WSL 里了。用 `start.cmd` 拉起，或按 4.6 在 Windows 侧直接运行 |
+| `[READY] AgentRAG already running ... nothing to do` | 不是错误：Core/Host 已就绪，本次什么都没做（幂等） |
+| 浏览器打不开 `http://localhost:18880`，但启动器说服务都起来了 | WSL 很可能回退成 `networkingMode=none`（只有 `lo` 网卡）。`./start-all.sh status` 看 `wsl mode`；处理见 5.4：重启 Windows 后 `start.cmd -FixNetwork`，或退回 NAT |
+| 解析引擎页显示「未连接 gRPC」 | docreader 容器没起，或 Core 启动时 `DOCREADER_ADDR` 为空。`docker ps --filter name=WeKnora-docreader` 看容器；`./start-all.sh status` 看 `docreader :50051`；起来后需要重启 Core（`start.cmd`）地址才生效 |
+| `MinerU 服务不可用 … http://172.0.0.1:8000/v1/health` | 旧启动留下的网关地址（镜像模式下根本没有这个地址）。`prepare` 现在每次都会重校验 `MINERU_ENDPOINT`，不可达且本机 8000 可用时自动改回 `127.0.0.1` 并在 stderr 说明；**地址是启动时读入 Host 环境的，改完要重启一次**（`start.cmd`，或 Ctrl+C 后重跑） |
+| 端口占用：`Port 18880/8090 already in use` | 已有实例占着端口。先 `./start-all.sh status`；确认是旧实例后用 Ctrl+C 或 `./start-all.sh stop` 收尾，不要直接杀未知进程 |
 
 ## 11. 自动化自测与当前证据
 
