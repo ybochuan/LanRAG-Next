@@ -17,6 +17,22 @@ func SQLiteBusy(err error) bool {
 	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == 5
 }
 
+// SQLiteUnavailable reports the lock/open errors that permit a read-only
+// native view to degrade to extension-only data. Corruption, malformed SQL and
+// schema errors are deliberately not included.
+func SQLiteUnavailable(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() & 0xff {
+	case 5, 6, 14: // SQLITE_BUSY, SQLITE_LOCKED, SQLITE_CANTOPEN
+		return true
+	default:
+		return false
+	}
+}
+
 // ViewNative opens a separate read transaction with both files physically read-only.
 // The ATTACH belongs to this request and never enters the shared connection pool.
 func (db *DB) ViewNative(ctx context.Context, nativePath string, read func(*sql.Tx) error) error {

@@ -8,7 +8,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
-func (s *Server) overviewPage(ctx context.Context, r Request, tenant string) ([]document, int, error) {
+func (s *Server) overviewPage(ctx context.Context, r Request, tenant string) ([]document, int, bool, error) {
 	const scope = ` WHERE c.tenant_id=? AND c.knowledge_base_id=? AND (?='' OR c.state=?)`
 	args := []any{tenant, r.KnowledgeBaseID, r.State, r.State}
 	offset := (r.Page - 1) * r.PageSize
@@ -30,6 +30,7 @@ func (s *Server) overviewPage(ctx context.Context, r Request, tenant string) ([]
 	}
 	var docs []document
 	var total int
+	degraded := false
 	if s.nativeDB != "" {
 		err := s.db.ViewNative(ctx, s.nativeDB, func(tx *sql.Tx) error {
 			const from = ` FROM ext_lifecycle_current c LEFT JOIN weknora.knowledges k
@@ -42,9 +43,13 @@ ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.know
 			docs, err = read(tx, `SELECT c.document_id,c.state,c.last_event_id,coalesce(k.title,'')`+from+` ORDER BY c.document_id LIMIT ? OFFSET ?`, append(params, r.PageSize, offset)...)
 			return err
 		})
-		if !store.SQLiteBusy(err) {
-			return docs, total, err
+		if err == nil {
+			return docs, total, false, nil
 		}
+		if !store.SQLiteUnavailable(err) {
+			return docs, total, false, err
+		}
+		degraded = true
 	}
 	// Release the attached connection before calling Core. Fetch only the visible
 	// page unless a title filter requires matching the entire scoped list first.
@@ -64,13 +69,13 @@ ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.know
 		return err
 	})
 	if err != nil || len(docs) == 0 {
-		return docs, total, err
+		return docs, total, degraded, err
 	}
 	if s.titles == nil {
 		if r.Title != "" {
-			return nil, 0, errDatabase
+			return nil, 0, degraded, errDatabase
 		}
-		return docs, total, nil
+		return docs, total, degraded, nil
 	}
 	ids := make([]string, 0, len(docs))
 	for _, d := range docs {
@@ -78,7 +83,7 @@ ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.know
 	}
 	titles, err := s.titles(ctx, r.KnowledgeBaseID, ids)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, degraded, err
 	}
 	matched := docs[:0]
 	needle := sqliteLower(r.Title)
@@ -89,11 +94,11 @@ ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.know
 		}
 	}
 	if r.Title == "" {
-		return matched, total, nil
+		return matched, total, degraded, nil
 	}
 	total = len(matched)
 	offset = min(offset, total)
-	return matched[offset:min(offset+r.PageSize, total)], total, nil
+	return matched[offset:min(offset+r.PageSize, total)], total, degraded, nil
 }
 
 // Match SQLite's built-in lower() so results stay stable on the fallback path.

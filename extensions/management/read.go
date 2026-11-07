@@ -64,7 +64,7 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 	if err != nil {
 		return nil, errDatabase
 	}
-	ids, total, err := s.overviewPage(ctx, r, tenant)
+	ids, total, degraded, err := s.overviewPage(ctx, r, tenant)
 	if err != nil {
 		return nil, errDatabase
 	}
@@ -87,6 +87,10 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 	rules["page_size"] = r.PageSize
 	rules["documents"] = ids
 	rules["can_write"] = r.CanWrite
+	rules["degraded"] = degraded
+	if degraded {
+		rules["degraded_reason"] = "native_database_unavailable"
+	}
 	return rules, nil
 }
 func (s *Server) events(ctx context.Context, scope lifecycle.Scope) ([]lifecycle.Event, bool, error) {

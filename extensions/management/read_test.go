@@ -11,6 +11,40 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 )
 
+func TestOverviewCannotOpenNativeFallsBack(t *testing.T) {
+	s := fixture(t)
+	ctx := context.Background()
+	for _, id := range []string{"a", "b"} {
+		if _, err := lifecycle.NewStore(s.db).Append(ctx, lifecycle.Event{EventID: id, TenantID: 7, KnowledgeBaseID: "kb", DocumentID: id, ToState: lifecycle.Active, Reason: "test", OccurredAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.WithNativeSQLite(filepath.Join(t.TempDir(), "missing-native.db"), func(_ context.Context, _ string, _ []string) (map[string]string, error) {
+		return map[string]string{"a": "Alpha", "b": "Beta"}, nil
+	})
+	w := call(s, `{"action":"overview","tenant_id":7,"knowledge_base_id":"kb","page_size":20}`, s.key)
+	var out struct {
+		Data struct {
+			Total          int
+			Documents      []document
+			Degraded       bool   `json:"degraded"`
+			DegradedReason string `json:"degraded_reason"`
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != 200 {
+		t.Fatalf("unexpected overview: %d %s", w.Code, w.Body.String())
+	}
+	if !out.Data.Degraded || out.Data.DegradedReason != "native_database_unavailable" {
+		t.Fatalf("expected degraded fallback, got %+v", out.Data)
+	}
+	if out.Data.Total != 2 || len(out.Data.Documents) != 2 {
+		t.Fatalf("unexpected fallback page: %+v", out.Data)
+	}
+	if out.Data.Documents[0].Title != "Alpha" {
+		t.Fatalf("fallback title = %q", out.Data.Documents[0].Title)
+	}
+}
+
 func TestOverviewTitleFilterAndBusyFallback(t *testing.T) {
 	s := fixture(t)
 	ctx := context.Background()

@@ -7,6 +7,15 @@
 | ONEKEY-01／已接线并实测（主链，2026-11-07 复验） | Windows `start.cmd`＋`scripts/onekey.ps1`，WSL `start-all.sh`（status/doctor/logs/token/stop 子命令），`launcher_config.py` 的 `plan`/`token`/`mcp-key` 与 STATE_ONLY 状态键；WSL 网络自愈（nat→mirrored）、supervisor 令牌只生成一次、模型按 spec 逐台 ensure running 并做能力验真、Core/Host 幂等复用；8GB GPU 上 rerank 遇 `capacity_exceeded` 时自动以 `gpu_layers=0` CPU-only 重试。 | 用户 2026-11-05 要求一键启动，并选定“Windows 伞＋WSL 半壳、自动切 mirrored、docreader 纳入、签发专用 MCP key”。 | 2026-11-07 实测：WSL 3.0.3.0 恢复 mirrored；Docker/docreader 冷启动 healthy、MinerU 与 supervisor ready、embedding 2560 维、rerank 首次 GPU 启动成功；容量不足时自动 CPU 兜底（本次未触发，CPU-only 手工验证通过）；Core/Host ready、Windows 浏览器 `http://127.0.0.1:18880/` 200、`/bridge/healthz` ok；`start.cmd -Stop` 全停 exit 0，`status`/`doctor`/`token` 正常。mcp-key 仍未签发（需原生登录凭据）。 |
 | ONEKEY-02／部分完成（docreader 已验证） | docreader 自动拉起与配置已实测（host override 发布 50051、`AGENTRAG_DOCREADER_IMAGE` 固定镜像、`DOCREADER_ADDR` 按可达性写入）；`launcher_config.py mcp-key` 交互签发 + `register_related_mcp.py` 刷新目录仍待跑通一次。 | 同上 | 首次拉取超时/失败时重审镜像源与提示文案；mcp-key 跑通一次后在此补记结果。 |
 
+## SQLite 存储性能与 Management Overview 可用性整改（2026-11-07）
+
+| 任务／状态 | 期望结果＋文件 | 依据 | 验证及何时重新审视 |
+|---|---|---|---|
+| SQLITE-P0／已完成（2026-11-07 实机复验） | 管理页 `overview` 在 native `ATTACH` 遇到 `SQLITE_BUSY`/`SQLITE_LOCKED`/`SQLITE_CANTOPEN` 时降级为扩展库查询 + `titles()` 批量标题，响应标记 `degraded=true`、`degraded_reason=native_database_unavailable`；数据库损坏、SQL/Schema 错误仍返回错误。文件：`extensions/management/list.go`、`read.go`、`extensions/store/native_view.go`、`extensions/management/read_test.go`。 | 用户 2026-11-07 确认三层次根因：Core 9p+单连接、Host `ATTACH` 失败+回退过窄、前端放大；用户明确要求允许降级但不得伪装完整成功。 | `go test -mod=readonly ./management ./store -count=1` 通过；`TestOverviewCannotOpenNativeFallsBack` 覆盖 `SQLITE_CANTOPEN` 降级（`degraded=true`、批量标题）；重建 Host 后实机 `overview` HTTP 200、132ms、total=69、20 条首页，`degraded=false`（该次 native join 已恢复）；隔离测试（缺失 native path + fake Core 标题服务）`overview` HTTP 200、`degraded=true`、`degraded_reason=native_database_unavailable`、20 条首页且标题正常。扩展库损坏/SQL错误仍为 503。 |
+| SQLITE-P1／待开始 | 备份 `data/weknora.db` 与 `data/agentrag_ext.db`，停止 Core/Host 写入后迁移到 WSL ext4，修改 Core/Host 数据库路径；迁移前后 `PRAGMA integrity_check` 与记录数核对，复测知识库列表/文档列表接口。文件：启动配置与 `docs/operations/AgentRAG-启动与运维指南.md`。 | 用户 2026-11-07 采纳“数据库迁移到 WSL ext4”为首要基础设施调整，要求迁移前停写、备份、处理 WAL/SHM，不能直接复制运行中的数据库。 | 迁移前后同一数据量/负载复测：知识库列表 4.0s→目标<500ms、文档列表 2.9s→<1s；两库完整性检查通过。 |
+| SQLITE-P2／待开始 | 评估 Core `SetMaxOpenConns(1)`/WAL/读写连接池；前端 `documentTitle` 批量查询、合并重复 `api.list`、减少 5 秒轮询并将 Overview/业务数据独立加载；排查 `reconciliation_failed` 周期失败并确认退避/连接占用。文件：`frontend/src/api/*`、`frontend/src/views/business/*`、`frontend/src/views/lifecycle/*`、`extensions/host/*`。 | 用户 2026-11-07 同意第二阶段优化，并强调不能简单把连接池从 1 改成 10，需先做并发/事务测试。 | 前端全量测试/type-check/build；迁移后复测 Overview、Rules、Reviews、Business 列表；`reconciliation_failed` 找到根因并稳定。 |
+| SQLITE-ACCEPT／待开始 | 完成 P0–P2 后做一次完整回归；验收基线：知识库列表 <500ms、文档列表 <1s、Overview 200、Rules 16ms/Reviews 5ms/Business 0–12ms、后台对账稳定。 | 用户 2026-11-07 最终建议：先不要继续开发新的 M6 功能，先处理本专项再完整回归。 | 相同数据量和负载下采集迁移前后同一组数据；未达到目标如实报告，不把建议值当已测结果。 |
+
 ## 关联文件MCP（2026-11-03）
 
 - 状态：代码接线与组件验证完成，部署/真实模型自主调用待验。
