@@ -13,3 +13,5 @@ supervisor.log
 parser_artifacts/
 agentrag_ext*.db*
 /governance-runtime-*/
+backups/
+p1-*.json

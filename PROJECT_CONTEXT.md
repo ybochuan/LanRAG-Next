@@ -80,7 +80,7 @@
 ## 本机启动入口（2026-10-31）
 
 - 运维入口：`docs/operations/AgentRAG-启动与运维指南.md`；WSL仓库根执行`bash start-all.sh`。脚本管理Core+Host，Windows MinerU和模型服务单独启动。
-- 扩展默认独立库为仓库根`data/agentrag_ext.db`，原生仍使用`data/weknora.db`。相对路径受支持并规范化；Native/混合库继续拒绝接管。无迁移历史的完整已发布DDL前缀，经严格结构比对与FK检查后事务补齐历史；不一致时保留原库并拒绝认领。
+- 扩展默认独立库为仓库根`data/agentrag_ext.db`，原生仍使用`data/weknora.db`。相对路径受支持并规范化；Native/混合库继续拒绝接管。无迁移历史的完整已发布DDL前缀，经严格结构比对与FK检查后事务补齐历史；不一致时保留原库并拒绝认领。2026-11-07 P1 本机生产库已迁移到 WSL ext4 `/home/ybochuan/.local/share/agentrag/weknora.db` 与 `agentrag_ext.db`，由 `data/agentrag-launcher.json` 的 `DB_PATH`/`AGENTRAG_EXT_DB` 指向；迁移前备份在 `data/backups/p1-20261107-143930/`。实测 `/mnt/d` 9p 下简单查询约 200–700ms、知识库列表约 4.0s；ext4 下 knowledge_bases P50 4.2ms、knowledge_list P50 9.2ms、Host Overview P50 7.8ms。
 - Host worker的`/health`与`/readyz`表示本地DB/服务和首次生命周期扫描就绪，JSON`status=ready, scope=local`；它不依赖Core在线。`/bridge/healthz`仍只证明HTTP存活。一键脚本先等待本地就绪再启动Core，并随后校验原生机器凭证。
 - 私有启动配置默认`data/agentrag-launcher.json`；官方登录仅用于首次签发指定KB机器凭据，不保存密码。环境变量优先于已保存配置和默认值。默认私有运行数据由`data/.gitignore`排除。
 - WSL网络模式（2026-11-04实测，2026-11-07更新）：当前 `.wslconfig` 为 `networkingMode=mirrored`、`autoProxy=false`、`dnsTunneling=false`；Windows build 26340 / WSL 3.0.3.0 下 mirrored 正常（`eth1`、默认路由、`/etc/resolv.conf` 可用）。旧 WSL 2.7.13.0 配 `mirrored` 会以 `CreateInstance/CreateVm/ConfigureNetworking/0x8007054f` 失败并回退 `networkingMode=none`（只剩回环、无默认路由），升级 WSL 3.0.3.0 后已解决。NAT 下 `eth0` 取得 `172.26.x.x`、默认路由与 DNS 正常，但 WSL→Windows `127.0.0.1` 不再直通，跨侧调用需走网关或由 Host 绑定相应地址。另需注意 WSL 默认发行版是 `docker-desktop`（无 bash/curl），操作 `Ubuntu` 时必须显式指定发行版；Go 装在 `/usr/local/go/bin`，不在默认 PATH。

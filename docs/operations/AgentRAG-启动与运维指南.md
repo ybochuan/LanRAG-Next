@@ -635,7 +635,7 @@ AGENTRAG_EXT_DB="$PWD/data/agentrag_ext-fresh-test.db" bash start-all.sh
 
 这只是新建测试库，不是数据修复或迁移。对真实治理状态不使用该方法替代恢复。
 
-SQLite 接受相对路径，Host 会规范化绝对路径；没有“必须绝对路径”或“modernc 一律不支持 `/mnt/d` WAL”的结论。本轮 E2E 的扩展与原生测试库均实际放在 `/mnt/d/LanRAG-Next/tmp/`，已完成读写、关闭重启和外键检查。扩展仍使用 WAL、`busy_timeout=5000`、单写者；挂载模式、其他工具或跨系统同时写入仍可能引发锁问题。
+SQLite 接受相对路径，Host 会规范化绝对路径；测试库放在 `/mnt/d` 可以完成读写、关闭重启和外键检查，但性能受 9p 挂载影响。2026-11-07 P1 实测同一 190MB 原生库：`/mnt/d` 上简单 SQL 约 200–700ms、知识库列表约 4.0s；迁到 WSL ext4 后知识库列表 P50=4.2ms、文档列表 P50=9.2ms、Host Overview P50=7.8ms。当前本机生产部署的 `weknora.db` 与 `agentrag_ext.db` 均位于 `$HOME/.local/share/agentrag/`，由 `data/agentrag-launcher.json` 的 `DB_PATH`/`AGENTRAG_EXT_DB` 指向。迁移必须停机、用 SQLite backup API 做一致备份，核对 `PRAGMA integrity_check`、`foreign_key_check` 和关键表计数后再改配置，原库保留不得删除。扩展仍使用 WAL、`busy_timeout=5000`、单写者；挂载模式、其他工具或跨系统同时写入仍可能引发锁问题。
 
 如果 `/mnt/d` 持续出现 I/O/锁错误，可只把扩展库放到 WSL 的 Linux 文件系统：
 
@@ -644,7 +644,7 @@ mkdir -p "$HOME/.local/share/agentrag"
 AGENTRAG_EXT_DB="$HOME/.local/share/agentrag/agentrag_ext.db" bash start-all.sh
 ```
 
-上例选择的是新库位置；已有扩展事实需要停机后进行一致备份和单独恢复。不要让 Windows SQLite 工具与 WSL Host 同时写同一个扩展库。
+上例选择的是新库位置；已有扩展事实需要停机后进行一致备份和单独恢复。不要让 Windows SQLite 工具与 WSL Host 同时写同一个扩展库。2026-11-07 P1 的本机迁移证据与基线见 `data/p1-baseline-20261107.json`、`data/p1-after-20261107.json`、`data/p1-business-20261107.json`；备份保留在 `data/backups/p1-20261107-143930/`。
 
 ## 10. 常见错误
 
