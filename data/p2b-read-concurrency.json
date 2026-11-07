@@ -1,0 +1,161 @@
+{
+  "generated_at": "2026-11-07T17:33:26+0800",
+  "base": "http://127.0.0.1:18880",
+  "database": "/home/ybochuan/.local/share/agentrag/weknora.db",
+  "endpoints": {
+    "knowledge_bases": [
+      {
+        "path": "/api/v1/knowledge-bases",
+        "concurrency": 1,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 90.74,
+        "p50_ms": 4.23,
+        "p95_ms": 6.82,
+        "max_ms": 6.82,
+        "response_bytes": [
+          2853
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases",
+        "concurrency": 2,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 50.02,
+        "p50_ms": 4.44,
+        "p95_ms": 7.04,
+        "max_ms": 7.04,
+        "response_bytes": [
+          2853
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases",
+        "concurrency": 4,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 32.81,
+        "p50_ms": 5.54,
+        "p95_ms": 9.38,
+        "max_ms": 9.38,
+        "response_bytes": [
+          2853
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases",
+        "concurrency": 8,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 31.78,
+        "p50_ms": 8.84,
+        "p95_ms": 21.72,
+        "max_ms": 21.72,
+        "response_bytes": [
+          2853
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases",
+        "concurrency": 16,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 31.75,
+        "p50_ms": 9.89,
+        "p95_ms": 17.72,
+        "max_ms": 17.72,
+        "response_bytes": [
+          2853
+        ]
+      }
+    ],
+    "knowledge_list": [
+      {
+        "path": "/api/v1/knowledge-bases/164bfd73-d231-4d5c-994e-057ac0cdf48a/knowledge?page=1&page_size=20",
+        "concurrency": 1,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 191.95,
+        "p50_ms": 9.5,
+        "p95_ms": 10.81,
+        "max_ms": 10.81,
+        "response_bytes": [
+          54547
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases/164bfd73-d231-4d5c-994e-057ac0cdf48a/knowledge?page=1&page_size=20",
+        "concurrency": 2,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 112.96,
+        "p50_ms": 10.58,
+        "p95_ms": 16.43,
+        "max_ms": 16.43,
+        "response_bytes": [
+          54547
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases/164bfd73-d231-4d5c-994e-057ac0cdf48a/knowledge?page=1&page_size=20",
+        "concurrency": 4,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 93.43,
+        "p50_ms": 17.16,
+        "p95_ms": 24.18,
+        "max_ms": 24.18,
+        "response_bytes": [
+          54547
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases/164bfd73-d231-4d5c-994e-057ac0cdf48a/knowledge?page=1&page_size=20",
+        "concurrency": 8,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 95.7,
+        "p50_ms": 34.76,
+        "p95_ms": 51.71,
+        "max_ms": 51.71,
+        "response_bytes": [
+          54547
+        ]
+      },
+      {
+        "path": "/api/v1/knowledge-bases/164bfd73-d231-4d5c-994e-057ac0cdf48a/knowledge?page=1&page_size=20",
+        "concurrency": 16,
+        "n": 20,
+        "statuses": {
+          "200": 20
+        },
+        "wall_ms": 96.29,
+        "p50_ms": 60.8,
+        "p95_ms": 75.51,
+        "max_ms": 75.51,
+        "response_bytes": [
+          54547
+        ]
+      }
+    ]
+  }
+}

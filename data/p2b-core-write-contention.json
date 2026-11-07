@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-11-07T17:38:37+0800",
+  "db": "/home/ybochuan/.local/share/agentrag/p2b-core/weknora.db",
+  "base": "http://127.0.0.1:18881",
+  "rows": 20,
+  "blob_bytes": 8388608,
+  "writer_wall_ms": 3040.27,
+  "writer_ms_per_row": 152.01,
+  "baseline": [
+    {
+      "concurrency": 1,
+      "wall_ms": 43.88,
+      "runs": [
+        {
+          "n": 10,
+          "statuses": {
+            "200": 10
+          },
+          "p50_ms": 4.06,
+          "p95_ms": 5.32,
+          "max_ms": 5.32
+        }
+      ]
+    },
+    {
+      "concurrency": 4,
+      "wall_ms": 83.66,
+      "runs": [
+        {
+          "n": 10,
+          "statuses": {
+            "200": 10
+          },
+          "p50_ms": 7.32,
+          "p95_ms": 9.95,
+          "max_ms": 9.95
+        },
+        {
+          "n": 10,
+          "statuses": {
+            "200": 10
+          },
+          "p50_ms": 8.25,
+          "p95_ms": 10.2,
+          "max_ms": 10.2
+        },
+        {
+          "n": 10,
+          "statuses": {
+            "200": 10
+          },
+          "p50_ms": 7.68,
+          "p95_ms": 10.96,
+          "max_ms": 10.96
+        },
+        {
+          "n": 10,
+          "statuses": {
+            "200": 10
+          },
+          "p50_ms": 9.15,
+          "p95_ms": 10.97,
+          "max_ms": 10.97
+        }
+      ]
+    }
+  ],
+  "during_write": [
+    {
+      "n": 361,
+      "statuses": {
+        "200": 361
+      },
+      "p50_ms": 8.67,
+      "p95_ms": 13.49,
+      "max_ms": 21.92
+    },
+    {
+      "n": 357,
+      "statuses": {
+        "200": 357
+      },
+      "p50_ms": 8.63,
+      "p95_ms": 13.47,
+      "max_ms": 22.22
+    },
+    {
+      "n": 360,
+      "statuses": {
+        "200": 360
+      },
+      "p50_ms": 8.41,
+      "p95_ms": 14.24,
+      "max_ms": 25.97
+    },
+    {
+      "n": 361,
+      "statuses": {
+        "200": 361
+      },
+      "p50_ms": 8.46,
+      "p95_ms": 13.53,
+      "max_ms": 21.83
+    }
+  ],
+  "writer_errors": []
+}

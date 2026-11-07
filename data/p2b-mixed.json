@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-11-07T17:39:16+0800",
+  "duration_s": 15.0,
+  "tasks": {
+    "knowledge_search": {
+      "n": 8,
+      "statuses": {
+        "200": 8
+      },
+      "errors": [],
+      "p50_ms": 11831.21,
+      "p95_ms": 13659.53,
+      "max_ms": 13659.53
+    },
+    "host_overview": {
+      "n": 2231,
+      "statuses": {
+        "200": 2231
+      },
+      "errors": [],
+      "p50_ms": 25.24,
+      "p95_ms": 39.54,
+      "max_ms": 110.36
+    },
+    "knowledge_list": {
+      "n": 1844,
+      "statuses": {
+        "200": 1844
+      },
+      "errors": [],
+      "p50_ms": 19.37,
+      "p95_ms": 92.55,
+      "max_ms": 1308.97
+    }
+  }
+}

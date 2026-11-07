@@ -1,0 +1,14 @@
+{
+  "writer_rows": 12,
+  "blob_bytes": 8388608,
+  "writer_wall_ms": 613.5,
+  "writer_ms_per_row": 51.12,
+  "reader_threads": 4,
+  "reader_queries": 1627,
+  "reader_p50_ms": 1.87,
+  "reader_p95_ms": 4.13,
+  "reader_max_ms": 17.17,
+  "errors": [],
+  "wal_bytes_after": 0,
+  "copy_path": "/home/ybochuan/.local/share/agentrag/p2b-write-ef61nrv0/weknora.db"
+}
