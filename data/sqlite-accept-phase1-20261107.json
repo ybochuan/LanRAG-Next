@@ -1,0 +1,251 @@
+{
+  "timestamp": "2026-11-07T15:40:32+0800",
+  "service_status": "[STATUS] AgentRAG\n  wsl  network : via 192.168.1.1 dev eth1 proto kernel metric 50 onlink \n  wsl  mode    : mirrored\n  MinerU :8000     UP\n  supervisor :8092 UP\n  embedding :8081  UP\n  rerank :8082     UP\n  docreader :50051 UP\n  Host :8090       UP\n  Core :18880      UP\n",
+  "apis": {
+    "knowledge_bases": {
+      "samples": [
+        {
+          "status": 200,
+          "ms": 24.19,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 3.99,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 14.26,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 4.38,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 3.8,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 17.13,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 17.58,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 12.57,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 17.61,
+          "bytes": 2853
+        },
+        {
+          "status": 200,
+          "ms": 19.0,
+          "bytes": 2853
+        }
+      ],
+      "p50_ms": 15.7,
+      "p95_ms": 19.0,
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ]
+    },
+    "knowledge_list": {
+      "samples": [
+        {
+          "status": 200,
+          "ms": 22.76,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 9.88,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 18.9,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 17.12,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 10.26,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 9.11,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 16.71,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 19.71,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 17.88,
+          "bytes": 54547
+        },
+        {
+          "status": 200,
+          "ms": 18.39,
+          "bytes": 54547
+        }
+      ],
+      "p50_ms": 17.5,
+      "p95_ms": 19.71,
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ]
+    },
+    "host_overview": {
+      "samples": [
+        {
+          "status": 200,
+          "ms": 27.76,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 20.3,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 23.06,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 18.12,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 7.66,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 15.58,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 18.28,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 20.23,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 16.26,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        },
+        {
+          "status": 200,
+          "ms": 7.93,
+          "bytes": 5204,
+          "total": 67,
+          "degraded": false
+        }
+      ],
+      "p50_ms": 18.2,
+      "p95_ms": 23.06,
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "degraded": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  },
+  "latest_run": "launcher-run-XxwMNA",
+  "host_log": {
+    "path": "D:\\LanRAG-Next\\data\\launcher-run-XxwMNA\\host.log",
+    "reconciliation_failed_count": 1,
+    "tail": [
+      "2026/11/07 14:43:59 host_workers_started",
+      "2026/11/07 14:43:59 reconciliation_failed"
+    ]
+  }
+}

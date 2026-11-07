@@ -1,0 +1,14 @@
+[
+  {
+    "case": "knowledge_search_no_filter",
+    "status": 200,
+    "ms": 2207.2,
+    "rows": 6,
+    "e52_hits": 0
+  },
+  {
+    "case": "knowledge_search_docfilter",
+    "status": 403,
+    "error": "{\"error\":{\"code\":1002,\"details\":null,\"message\":\"API key scope does not allow knowledge_ids without a verified knowledge base\"},\"success\":false}"
+  }
+]

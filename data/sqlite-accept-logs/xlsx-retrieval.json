@@ -1,0 +1,50 @@
+[
+  {
+    "case": "keyword_only",
+    "status": 200,
+    "rows": 30,
+    "e52_hits": 0,
+    "match_types": {
+      "1": 30
+    }
+  },
+  {
+    "case": "vector_only",
+    "status": 200,
+    "rows": 30,
+    "e52_hits": 0,
+    "match_types": {
+      "0": 30
+    }
+  },
+  {
+    "case": "hybrid",
+    "status": 200,
+    "rows": 30,
+    "e52_hits": 0,
+    "match_types": {
+      "0": 30
+    }
+  },
+  {
+    "case": "keyword_only_docfilter",
+    "status": 200,
+    "rows": 0,
+    "e52_hits": 0,
+    "match_types": {}
+  },
+  {
+    "case": "vector_only_docfilter",
+    "status": 200,
+    "rows": 0,
+    "e52_hits": 0,
+    "match_types": {}
+  },
+  {
+    "case": "hybrid_docfilter",
+    "status": 200,
+    "rows": 0,
+    "e52_hits": 0,
+    "match_types": {}
+  }
+]

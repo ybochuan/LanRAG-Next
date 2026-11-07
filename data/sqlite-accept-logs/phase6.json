@@ -1,0 +1,104 @@
+{
+  "knowledge_bases": {
+    "name": "knowledge_bases",
+    "n": 30,
+    "statuses": {
+      "200": 30
+    },
+    "p50_ms": 3.98,
+    "p95_ms": 4.39,
+    "max_ms": 5.17
+  },
+  "knowledge_list": {
+    "name": "knowledge_list",
+    "n": 30,
+    "statuses": {
+      "200": 30
+    },
+    "p50_ms": 8.77,
+    "p95_ms": 9.37,
+    "max_ms": 11.32
+  },
+  "concurrent_knowledge_list": {
+    "n": 40,
+    "statuses": {
+      "200": 40
+    },
+    "wall_ms": 160.75,
+    "p50_ms": 26.43,
+    "p95_ms": 47.18
+  },
+  "host_overview": {
+    "name": "host_overview",
+    "n": 30,
+    "statuses": {
+      "200": 30
+    },
+    "p50_ms": 7.34,
+    "p95_ms": 8.65,
+    "max_ms": 9.77
+  },
+  "business_relation_list": {
+    "name": "business_relation_list",
+    "n": 10,
+    "statuses": {
+      "200": 10
+    },
+    "p50_ms": 1.42,
+    "p95_ms": 1.94,
+    "max_ms": 3.99
+  },
+  "business_feedback_list": {
+    "name": "business_feedback_list",
+    "n": 10,
+    "statuses": {
+      "200": 10
+    },
+    "p50_ms": 1.32,
+    "p95_ms": 2.25,
+    "max_ms": 2.26
+  },
+  "business_guidance_list": {
+    "name": "business_guidance_list",
+    "n": 10,
+    "statuses": {
+      "200": 10
+    },
+    "p50_ms": 1.78,
+    "p95_ms": 2.1,
+    "max_ms": 2.36
+  },
+  "business_revision_list": {
+    "name": "business_revision_list",
+    "n": 10,
+    "statuses": {
+      "200": 10
+    },
+    "p50_ms": 1.74,
+    "p95_ms": 1.98,
+    "max_ms": 2.1
+  },
+  "knowledge_search": {
+    "name": "knowledge_search",
+    "n": 5,
+    "statuses": {
+      "200": 5
+    },
+    "p50_ms": 2139.0,
+    "p95_ms": 2209.23,
+    "max_ms": 2911.73
+  },
+  "database": {
+    "path": "/home/ybochuan/.local/share/agentrag/weknora.db",
+    "journal_mode": "wal",
+    "page_count": 46440,
+    "page_size": 4096,
+    "wal_bytes": 45352,
+    "quick_check": "ok",
+    "tables": {
+      "knowledges": 79,
+      "chunks": 13565,
+      "lite_embeddings": 6095
+    }
+  }
+}
