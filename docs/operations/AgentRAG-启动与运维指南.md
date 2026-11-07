@@ -547,7 +547,7 @@ wsl: 无法配置网络设置 (networkingMode Mirrored)，正在改用 networkin
 8. MCP 幂等注册/刷新（有专用 key 时；失败只告警）。
 9. 输出 `[READY] AgentRAG`，维持 Host 与 Core；任一退出时清理另一个（Windows 侧服务保持运行）。
 
-Host 的本地就绪不依赖 Core 在线，避免相互等待。原生凭证验证是 Core 启动后的独立步骤；此前对账可能报告 `reconciliation_failed`，未知文档仍按非 active 排除。
+Host 的本地就绪不依赖 Core 在线，避免相互等待。原生凭证验证是 Core 启动后的独立步骤；Host 的 Reconciler 会独立等待 Core `/health` 就绪，等待期间记录 `reconciliation_waiting_for_core`，正常启动不应再出现 `reconciliation_failed`；未知文档仍按非 active 排除。Core 长时间不可用时 Host 保持运行，恢复后自动继续对账。
 
 ## 7. 拆分启动（调试用）
 
@@ -656,7 +656,8 @@ AGENTRAG_EXT_DB="$HOME/.local/share/agentrag/agentrag_ext.db" bash start-all.sh
 | `untracked schema ... differs` | 已有 DDL 无法严格匹配迁移，拒绝自动认领；保留库和日志再核对，不删表硬凑 |
 | `SQLite is busy` | 停止其他写者，确认进程退出，再重试；持续失败时评估 Linux 文件系统路径 |
 | Host 存活、就绪 503 | 可能是 probe 模式，或初始化未完成；检查 worker 配置和 Host 日志 |
-| `reconciliation_failed` | 查看原生是否已启动、机器凭证/KB 范围是否有效；初始 Core 尚未启动时允许暂时出现，持续出现需处理 |
+| `reconciliation_waiting_for_core` | 正常启动等待状态：Host 已启动而 Core 尚未就绪；Host 会保持运行并按 5→10→20→40→60 秒退避重试，不需要人工处理 |
+| `reconciliation_failed` | Core 已通过 readiness 后实际扫描/对账失败；查看机器凭证、KB 范围、Core 状态和错误码，持续出现需处理 |
 | `[Bridge] before_retrieve failed, blocking search to prevent policy bypass` | 正常 fail-closed 证据；检查同一 WSL 中的 Host 就绪、8090 监听和响应协议，不能绕过门卫 |
 | 文档解析完成但暂时搜不到 | Observer 周期对账后才有生命周期记录；脚本默认约 5 秒。未知文档仍被排除 |
 | 文档 stale 后仍有普通生成回复 | 原生允许无知识结果的生成回退；验收检查过期引用和实际模型上下文，不把“调用 LLM”直接认定为检索泄漏 |

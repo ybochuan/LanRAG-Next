@@ -34,6 +34,10 @@ func TestHostCompletedObservationDailyCatchupAndRealPolicy(t *testing.T) {
 	}
 	db.Close()
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			return
+		}
 		if r.URL.Path == "/api/v1/knowledge/batch" {
 			docs := []any{}
 			for _, id := range r.URL.Query()["ids"] {

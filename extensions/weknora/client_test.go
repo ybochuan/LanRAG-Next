@@ -2,6 +2,7 @@ package weknora
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +59,65 @@ func TestClientHeadersAndSafeErrors(t *testing.T) {
 				t.Fatalf("size guard not exercised: %v", err)
 			}
 		})
+	}
+}
+
+func TestClientHealthUsesReadinessEndpointAndClassifiesFailures(t *testing.T) {
+	for _, scenario := range []string{"ok", "http_error", "invalid"} {
+		t.Run(scenario, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/health" {
+					t.Errorf("health called path %s", r.URL.Path)
+				}
+				switch scenario {
+				case "ok":
+					fmt.Fprint(w, `{"status":"ok"}`)
+				case "http_error":
+					w.WriteHeader(http.StatusServiceUnavailable)
+					fmt.Fprint(w, "secret body")
+				default:
+					fmt.Fprint(w, `{"status":"starting"}`)
+				}
+			}))
+			defer server.Close()
+			client, err := NewClient(server.URL, "secret", 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = client.Health(context.Background())
+			if scenario == "ok" {
+				if err != nil {
+					t.Fatalf("health = %v", err)
+				}
+				return
+			}
+			var upstream *UpstreamError
+			if !errors.As(err, &upstream) {
+				t.Fatalf("error type = %T: %v", err, err)
+			}
+			want := UpstreamHTTPError
+			if scenario == "invalid" {
+				want = UpstreamInvalidResponse
+			}
+			if upstream.Code != want || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("code=%s err=%v", upstream.Code, err)
+			}
+		})
+	}
+}
+
+func TestClientHealthClassifiesUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := server.URL
+	server.Close()
+	client, err := NewClient(url, "secret", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.Health(context.Background())
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) || upstream.Code != UpstreamUnreachable {
+		t.Fatalf("health error = %T: %v", err, err)
 	}
 }
 

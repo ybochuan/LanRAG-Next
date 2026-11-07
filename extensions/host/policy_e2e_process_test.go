@@ -38,6 +38,10 @@ func TestM2PolicyHostProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/knowledge") {
 			w.WriteHeader(503)
 			return

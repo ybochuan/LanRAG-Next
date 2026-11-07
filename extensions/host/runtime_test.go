@@ -149,6 +149,11 @@ func TestRuntimeStartsScopedWorkersRetriesAndClosesDatabase(t *testing.T) {
 	firstFailure.Store(true)
 	var active, maximum atomic.Int32
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"status":"ok"}`)
+			return
+		}
 		if r.Header.Get("X-API-Key") != "test-secret" || r.Header.Get("X-Tenant-ID") != "7" {
 			t.Error("wrong runtime credentials/scope")
 		}
@@ -230,7 +235,7 @@ func TestRuntimeStartsScopedWorkersRetriesAndClosesDatabase(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(runCtx, cfg, l, func(code string) {
-			if code == "reconciliation_failed" {
+			if strings.HasPrefix(code, "reconciliation_failed") {
 				failureReported.Store(true)
 			}
 			codes <- code
@@ -242,7 +247,7 @@ func TestRuntimeStartsScopedWorkersRetriesAndClosesDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer monitor.Close()
-	deadline := time.NewTimer(5 * time.Second)
+	deadline := time.NewTimer(8 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()

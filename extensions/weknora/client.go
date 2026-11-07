@@ -16,6 +16,30 @@ import (
 	"time"
 )
 
+const (
+	UpstreamUnreachable     = "upstream_unreachable"
+	UpstreamTimeout         = "upstream_timeout"
+	UpstreamHTTPError       = "upstream_http_error"
+	UpstreamInvalidResponse = "upstream_invalid_response"
+)
+
+// UpstreamError classifies transport and response failures without exposing
+// credentials, request URLs, response bodies, or the underlying network error.
+type UpstreamError struct {
+	Code   string
+	detail string
+	cause  error
+}
+
+func (e *UpstreamError) Error() string {
+	if e.detail == "" {
+		return e.Code
+	}
+	return e.Code + ": " + e.detail
+}
+
+func (e *UpstreamError) Unwrap() error { return e.cause }
+
 // Client is bound to one configured origin and tenant. It never follows redirects.
 type Client struct {
 	base   string
@@ -43,6 +67,53 @@ func NewClient(baseURL, apiKey string, tenantID uint64) (*Client, error) {
 
 // TenantID is the configured execution tenant, checked again against every DTO.
 func (c *Client) TenantID() uint64 { return c.tenant }
+
+// Health checks the native Core readiness endpoint. It is intentionally
+// separate from JSON because /health is not part of the authenticated /api/v1
+// surface and uses a plain {"status":"ok"} response.
+func (c *Client) Health(ctx context.Context) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/health", nil)
+	if err != nil {
+		return errors.New("invalid upstream health request")
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return classifyTransportError(ctx, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return &UpstreamError{Code: UpstreamHTTPError, detail: fmt.Sprintf("upstream HTTP status %d", response.StatusCode)}
+	}
+	const limit = 64 * 1024
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return &UpstreamError{Code: UpstreamInvalidResponse, detail: "upstream health read failed"}
+	}
+	if len(data) > limit {
+		return &UpstreamError{Code: UpstreamInvalidResponse, detail: "upstream health response exceeds size limit"}
+	}
+	var status struct {
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(data, &status) != nil || status.Status != "ok" {
+		return &UpstreamError{Code: UpstreamInvalidResponse, detail: "invalid upstream health response"}
+	}
+	return nil
+}
+
+func classifyTransportError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return &UpstreamError{Code: UpstreamTimeout, cause: err}
+	}
+	return &UpstreamError{Code: UpstreamUnreachable, cause: err}
+}
 
 // ValidID restricts IDs to a single unambiguous URL path segment.
 func ValidID(id string) bool {
@@ -79,14 +150,11 @@ func (c *Client) JSON(ctx context.Context, method, path string, query url.Values
 	}
 	response, err := c.http.Do(r)
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return errors.New("upstream transport failed")
+		return classifyTransportError(ctx, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("upstream HTTP status %d", response.StatusCode)
+		return &UpstreamError{Code: UpstreamHTTPError, detail: fmt.Sprintf("upstream HTTP status %d", response.StatusCode)}
 	}
 	const limit = 4 * 1024 * 1024
 	data, err = io.ReadAll(io.LimitReader(response.Body, limit+1))
@@ -94,19 +162,19 @@ func (c *Client) JSON(ctx context.Context, method, path string, query url.Values
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return errors.New("upstream body read failed")
+		return &UpstreamError{Code: UpstreamInvalidResponse, detail: "upstream body read failed"}
 	}
 	if len(data) > limit {
-		return errors.New("upstream response exceeds size limit")
+		return &UpstreamError{Code: UpstreamInvalidResponse, detail: "upstream response exceeds size limit"}
 	}
 	var ack struct {
 		Success bool `json:"success"`
 	}
 	if json.Unmarshal(data, &ack) != nil || !ack.Success {
-		return errors.New("invalid upstream success envelope")
+		return &UpstreamError{Code: UpstreamInvalidResponse, detail: "invalid upstream success envelope"}
 	}
 	if err := json.Unmarshal(data, result); err != nil {
-		return errors.New("invalid upstream response data")
+		return &UpstreamError{Code: UpstreamInvalidResponse, detail: "invalid upstream response data"}
 	}
 	return nil
 }

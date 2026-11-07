@@ -132,7 +132,13 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			return errors.New("reconciliation source initialization failed")
 		}
 		machine = lifecycle.NewMachine(db, time.Now)
-		reconcile = &ingest.Reconciler{Source: source, Sink: ingest.NewLifecycleObserver(db, time.Now), Interval: cfg.ReconcileInterval, Report: func(error) { report("reconciliation_failed") }}
+		reconcile = &ingest.Reconciler{
+			Source:   source,
+			Sink:     ingest.NewLifecycleObserver(db, time.Now),
+			Interval: cfg.ReconcileInterval,
+			Ready:    client.Health,
+			Report:   func(err error) { report(err.Error()) },
+		}
 		projector := taggov.NewProjector(db, lifecycle.NewStore(db), taggov.NewMapping(db, apiStore), writer)
 		reviewService = review.NewService(db, time.Now)
 		alertHandler := reviewService.Handler(func(_ context.Context, _ review.Alert) error { report(review.SignalCode); return nil })

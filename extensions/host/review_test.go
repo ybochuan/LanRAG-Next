@@ -30,6 +30,10 @@ func TestHostDeliversReviewSignalWithoutNativeTagWriteOrStateChange(t *testing.T
 	db.Close()
 	var unexpected atomic.Int32
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/knowledge") {
 			unexpected.Add(1)
 			w.WriteHeader(503)
