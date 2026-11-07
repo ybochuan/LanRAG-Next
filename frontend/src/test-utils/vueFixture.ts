@@ -5,6 +5,7 @@ import type { TestContext } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
+import * as polling from '../utils/polling.ts'
 import ts from 'typescript'
 
 export function change(operation: string, ids: Record<string, string[]> = {}) {
@@ -22,11 +23,16 @@ export function fixture(
 ) {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const window = Object.assign(new EventTarget(), { innerHeight: 900, innerWidth: 1200, setTimeout, clearTimeout })
+  const document = Object.assign(new EventTarget(), {
+    documentElement: { clientHeight: 900 },
+    querySelector: () => null,
+    visibilityState: 'visible',
+  })
   const globals = {
     window, CustomEvent, setTimeout, clearTimeout, setInterval, clearInterval,
     localStorage: storage, sessionStorage: storage,
     requestAnimationFrame: (callback: () => void) => setTimeout(callback, 16),
-    document: { documentElement: { clientHeight: 900 }, querySelector: () => null },
+    document,
   }
   function evaluate(source: string, dependencies: Record<string, unknown>, fallback?: (name: string) => unknown) {
     const exports: any = {}
@@ -64,7 +70,7 @@ export function fixture(
       .replace('return __returned__', '__expose(__returned__); return __returned__')
     const require = createRequire(file)
     const compiled = evaluate(script, {
-      vue, '@/utils/assistantDataChange': dataChange, ...dependencies,
+      vue, '@/utils/assistantDataChange': dataChange, '@/utils/polling': polling, ...dependencies,
     }, name => {
       if (name.endsWith('.vue')) return { default: {} }
       if (name.startsWith('.')) return require(name)
@@ -72,5 +78,5 @@ export function fixture(
     })
     return mount(compiled.default, props)
   }
-  return { window, evaluate, mount, component, dataChange, emit: dataChange.emitAssistantDataChange }
+  return { window, document, evaluate, mount, component, dataChange, emit: dataChange.emitAssistantDataChange }
 }

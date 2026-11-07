@@ -289,6 +289,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { addPageVisibilityListener, isPageHidden } from '@/utils/polling';
 
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
@@ -323,6 +324,7 @@ const usemenuStore = useMenuStore();
 const sessionActivity = useSessionActivityStore();
 const { entries: sessionActivityEntries, unread: sessionUnread } = storeToRefs(sessionActivity);
 let sessionActivityTimer: ReturnType<typeof setInterval> | undefined;
+let removeSessionActivityVisibilityListener: (() => void) | null = null;
 const authStore = useAuthStore();
 const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const toolboxPreview = computed(() => TOOLBOX_ITEMS.filter((item) => canAccessToolboxSection(item.key, {
@@ -1064,10 +1066,33 @@ const handleSessionMutation = (event: Event) => {
     }
 };
 
+const startSessionActivityPolling = () => {
+    if (sessionActivityTimer || isPageHidden()) return;
+    void sessionActivity.refresh();
+    sessionActivityTimer = setInterval(() => {
+        if (!isPageHidden()) void sessionActivity.refresh();
+    }, 5000);
+};
+
+const stopSessionActivityPolling = () => {
+    if (sessionActivityTimer) {
+        clearInterval(sessionActivityTimer);
+        sessionActivityTimer = undefined;
+    }
+};
+
+const handleSessionActivityVisibilityChange = () => {
+    if (isPageHidden()) {
+        stopSessionActivityPolling();
+        return;
+    }
+    startSessionActivityPolling();
+};
+
 onMounted(async () => {
     sessionActivity.restore();
-    void sessionActivity.refresh();
-    sessionActivityTimer = setInterval(() => { void sessionActivity.refresh(); }, 5000);
+    startSessionActivityPolling();
+    removeSessionActivityVisibilityListener = addPageVisibilityListener(handleSessionActivityVisibilityChange);
     const routeName = typeof route.name === 'string' ? route.name : (route.name ? String(route.name) : '')
     currentpath.value = routeName;
     if (route.params.chatid) {
@@ -1100,7 +1125,9 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-    clearInterval(sessionActivityTimer);
+    removeSessionActivityVisibilityListener?.();
+    removeSessionActivityVisibilityListener = null;
+    stopSessionActivityPolling();
     clearTimeout(forkRevealTimer);
     sessionActivity.clear();
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);

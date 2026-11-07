@@ -818,6 +818,7 @@ import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTil
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
+import { addPageVisibilityListener, isPageHidden } from '@/utils/polling'
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
@@ -2958,11 +2959,38 @@ async function loadPages() {
   }
 }
 
-let statsTimer: ReturnType<typeof setInterval> | null = null
+let statsTimer: ReturnType<typeof setTimeout> | null = null
+let statsRequestInFlight = false
+let statsDisposed = false
+let statsResumePending = false
+let statsPollingActive = false
+
+const stopStatsPolling = () => {
+  if (statsTimer) {
+    clearTimeout(statsTimer)
+    statsTimer = null
+  }
+}
+
+const scheduleStatsPolling = (delay: number) => {
+  if (statsDisposed || isPageHidden()) return
+  stopStatsPolling()
+  statsPollingActive = true
+  statsTimer = setTimeout(() => {
+    statsTimer = null
+    void loadStats()
+  }, delay)
+}
 
 async function loadStats() {
+  if (statsDisposed || isPageHidden() || statsRequestInFlight) {
+    if (isPageHidden()) statsResumePending = true
+    return
+  }
+  statsRequestInFlight = true
   try {
     const res = await getWikiStats(props.knowledgeBaseId)
+    if (statsDisposed || isPageHidden()) return
     stats.value = (res as any).data || res as any
 
     // Notify parent so it can reflect wiki status (e.g. indexing badge in the breadcrumb)
@@ -2976,25 +3004,46 @@ async function loadStats() {
 
     // Poll if there are pending tasks or wiki ingest is active
     if (stats.value && (stats.value.pending_tasks > 0 || stats.value.is_active)) {
-      if (!statsTimer) {
-        statsTimer = setInterval(() => {
-          loadStats()
-        }, 5000)
-      }
-    } else if (statsTimer) {
-      // If completed, clear timer and reload pages once to get new content
-      clearInterval(statsTimer)
-      statsTimer = null
-      loadPages()
-      // Also refresh the currently opened page (right panel) so users see updated content
-      refreshSelectedPage()
-      // If currently viewing the graph, reload it as well so new nodes/edges show up
-      if (props.view === 'graph') {
-        loadGraph()
+      statsResumePending = false
+      scheduleStatsPolling(5000)
+    } else {
+      // Only a previously active polling cycle means indexing just finished;
+      // a quiet initial load must not reload the sidebar/right panel.
+      const wasPolling = statsPollingActive
+      statsPollingActive = false
+      stopStatsPolling()
+      statsResumePending = false
+      if (wasPolling) {
+        loadPages()
+        // Also refresh the currently opened page (right panel) so users see updated content
+        refreshSelectedPage()
+        // If currently viewing the graph, reload it as well so new nodes/edges show up
+        if (props.view === 'graph') {
+          loadGraph()
+        }
       }
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    if (isPageHidden()) statsResumePending = true
+  } finally {
+    statsRequestInFlight = false
+    if (statsResumePending && !statsDisposed && !isPageHidden()) {
+      statsResumePending = false
+      void loadStats()
+    }
+  }
 }
+
+const handleWikiVisibilityChange = () => {
+  if (isPageHidden()) {
+    stopStatsPolling()
+    statsResumePending = true
+    return
+  }
+  void loadStats()
+}
+
+let removeWikiVisibilityListener: (() => void) | null = null
 
 // --- Manual page editing / version management ---------------------------
 
@@ -5117,14 +5166,16 @@ useAssistantDataChange((changes) => {
 onMounted(() => {
   loadPages()
   loadStats()
+  removeWikiVisibilityListener = addPageVisibilityListener(handleWikiVisibilityChange)
   if (props.view === 'graph') loadGraph()
 })
 
 onUnmounted(() => {
   disposeGraphPanZoom()
-  if (statsTimer) {
-    clearInterval(statsTimer)
-  }
+  statsDisposed = true
+  removeWikiVisibilityListener?.()
+  removeWikiVisibilityListener = null
+  stopStatsPolling()
   if (graphHoverLeaveTimer) {
     clearTimeout(graphHoverLeaveTimer)
     graphHoverLeaveTimer = null

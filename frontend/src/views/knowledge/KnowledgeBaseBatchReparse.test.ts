@@ -302,7 +302,7 @@ test('状态查询失败时保留文档，通过现有轮询重试', async t => 
   await flush()
   assert.equal(f.hook.cardList.value.length, 1)
   assert.equal(f.hook.cardList.value[0].parse_status, 'processing')
-  await advance(t, 1500)
+  await advance(t, 3000)
   assert.equal(f.queries.length, 2)
   await f.respond(1, [row('doc', 'completed')])
   const count = f.queries.length
@@ -509,7 +509,7 @@ for (const failure of ['reject', 'unsuccessful'] as const) {
       assert.equal(f.hook.cardList.value.length, 199)
       assert.equal(f.hook.total.value, 199)
       assert.deepEqual(f.hook.cardList.value.filter(item => item.parse_status === 'processing').map(item => item.id), failedIds)
-      await advance(t, 1500)
+      await advance(t, 3000)
       assert.equal(f.queries.length, 3)
       assert.deepEqual(f.queries[2].ids, failedIds, '下一轮只重试仍待处理的文档')
       await f.respond(2, failedIds.map(id => row(id)))

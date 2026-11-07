@@ -2,10 +2,19 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
+import * as pollingUtils from '../../utils/polling.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
 async function setup(t: TestContext, translate = (key: string, _params?: unknown) => key) {
   const f = fixture(t)
+  const polling = {
+    ...pollingUtils,
+    isPageHidden: () => (f.document as any).visibilityState === 'hidden',
+    addPageVisibilityListener: (listener: () => void) => {
+      f.document.addEventListener('visibilitychange', listener)
+      return () => f.document.removeEventListener('visibilitychange', listener)
+    },
+  }
   const route = vue.reactive({ params: { kbId: 'kb' }, query: {} })
   const hook = {
     cardList: vue.ref([{ id: 'doc', parse_status: 'completed' }]), total: vue.ref(1), moreIndex: vue.ref(-1),
@@ -40,7 +49,7 @@ async function setup(t: TestContext, translate = (key: string, _params?: unknown
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': { permissionCanEditKB: () => true, permissionCanManageKB: () => true },
     '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
-    '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
+    '@/utils/knowledgeProcessingStall': stall, '@/utils/polling': polling, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': {
       listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }),
       batchReparseKnowledge: async () => ({ success: true }),
@@ -266,6 +275,22 @@ test('accepts a rebuild completed between polls after the bounded acknowledgemen
   await flush()
   assert.equal(f.hook.cardList.value[0].parse_status, 'completed')
   assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
+
+test('document status polling pauses while the page is hidden and resumes once', async t => {
+  const f = await setup(t)
+  f.document.visibilityState = 'hidden'
+  f.hook.cardList.value = [{ id: 'doc', parse_status: 'processing' }]
+  await flush()
+  t.mock.timers.tick(10_000)
+  await flush()
+  assert.equal(f.batchQueryKnowledge.mock.callCount(), 0, 'hidden page must not poll')
+
+  f.document.visibilityState = 'visible'
+  f.vm.handlePageVisibilityChange()
+  t.mock.timers.tick(1)
+  await flush()
+  assert.equal(f.batchQueryKnowledge.mock.callCount(), 1, 'resume should refresh once')
 })
 
 test('a pending rebuild does not reload another folder or KB after navigation or unmount', async t => {

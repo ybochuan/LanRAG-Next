@@ -64,6 +64,14 @@ import {
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
 import { stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall';
+import {
+  addPageVisibilityListener,
+  DOCUMENT_STATUS_POLL_BACKOFF_MS,
+  isPageHidden,
+  MOVE_PROGRESS_POLL_BACKOFF_MS,
+  pollingBackoffDelay,
+  WIKI_STATUS_POLL_BACKOFF_MS,
+} from '@/utils/polling';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import {
@@ -145,11 +153,15 @@ const onViewWikiInGraph = async (slug: string) => {
   activeKbTab.value = 'graph'
 }
 
-let wikiStatusTimer: ReturnType<typeof setInterval> | null = null
+let wikiStatusTimer: ReturnType<typeof setTimeout> | null = null
 let wikiStatusProbeTimers: Array<ReturnType<typeof setTimeout>> = []
+let wikiStatusFailureCount = 0
+let wikiStatusRequestInFlight = false
+let wikiStatusDisposed = false
+let wikiStatusResumePending = false
 const stopWikiStatusPolling = () => {
   if (wikiStatusTimer) {
-    clearInterval(wikiStatusTimer)
+    clearTimeout(wikiStatusTimer)
     wikiStatusTimer = null
   }
 }
@@ -157,49 +169,85 @@ const clearWikiStatusProbes = () => {
   wikiStatusProbeTimers.forEach(t => clearTimeout(t))
   wikiStatusProbeTimers = []
 }
+const scheduleWikiStatusPolling = (delay: number) => {
+  if (wikiStatusDisposed || isPageHidden() || !kbId.value || !isWiki.value || !wikiIsIndexing.value) return
+  stopWikiStatusPolling()
+  wikiStatusTimer = setTimeout(() => {
+    wikiStatusTimer = null
+    void fetchWikiStatusOnce()
+  }, delay)
+}
 const fetchWikiStatusOnce = async () => {
-  if (!kbId.value || !isWiki.value) return
+  if (wikiStatusDisposed || isPageHidden() || wikiStatusRequestInFlight || !kbId.value || !isWiki.value) return
+  wikiStatusRequestInFlight = true
   try {
     const res: any = await getWikiStats(kbId.value)
+    if (wikiStatusDisposed || isPageHidden()) return
     const data = res?.data || res
-    if (!data) return
+    if (!data) {
+      wikiStatusFailureCount = Math.min(wikiStatusFailureCount + 1, WIKI_STATUS_POLL_BACKOFF_MS.length - 1)
+      scheduleWikiStatusPolling(pollingBackoffDelay(wikiStatusFailureCount, WIKI_STATUS_POLL_BACKOFF_MS))
+      return
+    }
     wikiStatus.value = {
       pendingTasks: data.pending_tasks || 0,
       isActive: !!data.is_active,
       pendingIssues: data.pending_issues || 0,
     }
+    wikiStatusFailureCount = 0
     // 活跃时轮询，空闲时停掉定时器，避免无谓请求
     if (wikiIsIndexing.value) {
-      if (!wikiStatusTimer) {
-        wikiStatusTimer = setInterval(fetchWikiStatusOnce, 5000)
-      }
+      scheduleWikiStatusPolling(WIKI_STATUS_POLL_BACKOFF_MS[0])
     } else {
       stopWikiStatusPolling()
     }
-  } catch (_) { /* ignore */ }
+  } catch (_) {
+    if (wikiStatusDisposed || isPageHidden()) return
+    wikiStatusFailureCount = Math.min(wikiStatusFailureCount + 1, WIKI_STATUS_POLL_BACKOFF_MS.length - 1)
+    scheduleWikiStatusPolling(pollingBackoffDelay(wikiStatusFailureCount, WIKI_STATUS_POLL_BACKOFF_MS))
+  } finally {
+    wikiStatusRequestInFlight = false
+    if (wikiStatusResumePending && !wikiStatusDisposed && !isPageHidden()) {
+      wikiStatusResumePending = false
+      void fetchWikiStatusOnce()
+    }
+  }
 }
 // 用户刚触发了一个上传 / reparse / URL 导入之类的动作后，后台通常要过
 // 一小段时间才会把 wiki 任务真正塞进队列；如果这时空闲轮询刚好停了，
 // 面包屑的"索引中"会延迟很久才亮起。所以这里安排几次退避重试，
 // 主动把面包屑的 loading 尽快点亮，一旦探测到任务就会走正常的 5s 轮询。
 const scheduleWikiStatusProbes = () => {
-  if (!kbId.value || !isWiki.value) return
+  if (wikiStatusDisposed || isPageHidden() || !kbId.value || !isWiki.value) return
   clearWikiStatusProbes()
   const delays = [500, 2000, 5000, 10000]
   delays.forEach(delay => {
-    const timer = setTimeout(() => { fetchWikiStatusOnce() }, delay)
+    const timer = setTimeout(() => { void fetchWikiStatusOnce() }, delay)
     wikiStatusProbeTimers.push(timer)
   })
+}
+const resumeWikiStatusPolling = () => {
+  if (wikiStatusDisposed || isPageHidden() || !kbId.value || !isWiki.value || !wikiIsIndexing.value) return
+  if (wikiStatusRequestInFlight) {
+    wikiStatusResumePending = true
+    return
+  }
+  wikiStatusResumePending = false
+  stopWikiStatusPolling()
+  void fetchWikiStatusOnce()
 }
 watch([kbId, isWiki], ([newKbId, newIsWiki]) => {
   stopWikiStatusPolling()
   clearWikiStatusProbes()
+  wikiStatusFailureCount = 0
+  wikiStatusResumePending = false
   wikiStatus.value = { pendingTasks: 0, isActive: false, pendingIssues: 0 }
   if (newKbId && newIsWiki) {
-    fetchWikiStatusOnce()
+    void fetchWikiStatusOnce()
   }
 }, { immediate: true })
 onUnmounted(() => {
+  wikiStatusDisposed = true
   stopWikiStatusPolling()
   clearWikiStatusProbes()
 })
@@ -459,6 +507,8 @@ let timeout: ReturnType<typeof setTimeout> | null = null;
 let statusPollGeneration = 0;
 let statusPollRequest: object | null = null;
 let statusPollingDisposed = false;
+let statusPollFailureCount = 0;
+let statusPollResumePending = false;
 let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
@@ -474,7 +524,13 @@ const moveSelectedTargetId = ref('');
 const moveSelectedTargetName = ref('');
 const moveMode = ref<'reuse_vectors' | 'reparse'>('reuse_vectors');
 const moveSubmitting = ref(false);
-let movePollTimer: ReturnType<typeof setInterval> | null = null;
+let movePollTimer: ReturnType<typeof setTimeout> | null = null;
+let movePollTaskId = '';
+let movePollFailureCount = 0;
+let movePollGeneration = 0;
+let movePollRequestInFlight = false;
+let movePollDisposed = false;
+let movePollResumePending = false;
 
 // View mode (grid / list) — persisted per browser
 type DocViewMode = 'grid' | 'list';
@@ -625,6 +681,7 @@ const resetStatusPolling = () => {
   if (timeout !== null) clearTimeout(timeout);
   timeout = null;
   statusPollRequest = null;
+  statusPollFailureCount = 0;
   for (const id of pendingReparseAck.keys()) clearReparseAck(id);
   reparseVersionById.clear();
   batchReparsing.value = false;
@@ -1415,6 +1472,39 @@ const handleOpenKnowledgeEvent = (e: Event) => {
   tryAutoOpenDocument();
 };
 
+const pauseStatusPolling = () => {
+  statusPollGeneration++;
+  if (timeout !== null) clearTimeout(timeout);
+  timeout = null;
+  statusPollResumePending = true;
+};
+
+const resumeStatusPolling = () => {
+  if (statusPollingDisposed || isPageHidden()) return;
+  if (statusPollRequest) {
+    statusPollResumePending = true;
+    return;
+  }
+  statusPollResumePending = false;
+  const pending = cardList.value.filter(needsStatusPolling);
+  if (pending.length > 0) updateStatus(pending, 0);
+};
+
+let removePageVisibilityListener: (() => void) | null = null;
+const handlePageVisibilityChange = () => {
+  if (isPageHidden()) {
+    pauseStatusPolling();
+    pauseMovePoll();
+    stopWikiStatusPolling();
+    clearWikiStatusProbes();
+    wikiStatusResumePending = true;
+    return;
+  }
+  resumeWikiStatusPolling();
+  resumeMovePoll();
+  resumeStatusPolling();
+};
+
 onMounted(() => {
   loadKnowledgeList();
   editorResources.ensureParserEngines();
@@ -1423,13 +1513,17 @@ onMounted(() => {
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+  removePageVisibilityListener = addPageVisibilityListener(handlePageVisibilityChange);
 });
 
 onUnmounted(() => {
+  removePageVisibilityListener?.();
+  removePageVisibilityListener = null;
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+  movePollDisposed = true;
   stopMovePoll();
   statusPollingDisposed = true;
   resetStatusPolling();
@@ -1500,23 +1594,24 @@ const needsStatusPolling = (item: KnowledgeCard) => {
 
 // Back off once every in-flight row looks stuck: nothing is moving, and a
 // page left open on it should not keep hammering the batch endpoint.
-const pollDelayFor = (items: KnowledgeCard[]) =>
-  items.length > 0 && items.every(item => (item.stalled_minutes ?? 0) > 0)
-    ? STALLED_POLL_INTERVAL_MS
-    : STATUS_POLL_INTERVAL_MS;
+const pollDelayFor = (items: KnowledgeCard[], failureCount = statusPollFailureCount) => {
+  const stalled = items.length > 0 && items.every(item => (item.stalled_minutes ?? 0) > 0);
+  const baseDelay = stalled ? STALLED_POLL_INTERVAL_MS : STATUS_POLL_INTERVAL_MS;
+  return Math.max(baseDelay, pollingBackoffDelay(failureCount, DOCUMENT_STATUS_POLL_BACKOFF_MS));
+};
 
-const updateStatus = (analyzeList: KnowledgeCard[], delay = STATUS_POLL_INTERVAL_MS) => {
+const updateStatus = (analyzeList: KnowledgeCard[], delay = pollDelayFor(analyzeList)) => {
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
   }
-  if (statusPollingDisposed || statusPollRequest || !analyzeList.length) return;
+  if (statusPollingDisposed || isPageHidden() || statusPollRequest || !analyzeList.length) return;
 
   const generation = statusPollGeneration;
   const targetKbId = kbId.value;
   timeout = setTimeout(async () => {
     timeout = null;
-    if (statusPollingDisposed || generation !== statusPollGeneration) return;
+    if (statusPollingDisposed || isPageHidden() || generation !== statusPollGeneration) return;
     // 定时器等待期间可能又提交了一批；发请求时以当前列表为准。
     const requestedIds = cardList.value.filter(needsStatusPolling).map(item => item.id);
     if (!requestedIds.length) return;
@@ -1525,6 +1620,8 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = STATUS_POLL_INTERVAL
     const isCurrentRequest = () => !statusPollingDisposed
       && generation === statusPollGeneration && statusPollRequest === request;
 
+    let hadSuccess = false;
+    let hadFailure = false;
     try {
       let shouldRefreshWikiStatus = false;
       // 整轮串行查询共用一个请求锁，避免监听器或确认定时器插入重叠轮询。
@@ -1542,10 +1639,15 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = STATUS_POLL_INTERVAL
         } catch {
           if (!isCurrentRequest()) return;
           // 失败子批次保留待查状态；继续查询后续文档，下一轮再重试失败的部分。
+          hadFailure = true;
           continue;
         }
         if (!isCurrentRequest()) return;
-        if (!result?.success || !Array.isArray(result.data)) continue;
+        if (!result?.success || !Array.isArray(result.data)) {
+          hadFailure = true;
+          continue;
+        }
+        hadSuccess = true;
 
         (result.data as KnowledgeCard[]).forEach((item: KnowledgeCard) => {
           const index = cardList.value.findIndex(card => card.id == item.id);
@@ -1590,10 +1692,24 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = STATUS_POLL_INTERVAL
       }
       if (shouldRefreshWikiStatus) void fetchWikiStatusOnce();
     } finally {
-      if (isCurrentRequest()) {
-        statusPollRequest = null;
+      const current = isCurrentRequest();
+      if (statusPollRequest === request) statusPollRequest = null;
+      if (current) {
+        if (hadFailure) {
+          statusPollFailureCount = Math.min(
+            statusPollFailureCount + 1,
+            DOCUMENT_STATUS_POLL_BACKOFF_MS.length - 1,
+          );
+        } else if (hadSuccess) {
+          statusPollFailureCount = 0;
+        }
         const stillPending = cardList.value.filter(needsStatusPolling);
-        if (stillPending.length > 0) updateStatus(stillPending, pollDelayFor(stillPending));
+        if (stillPending.length > 0) {
+          updateStatus(stillPending, pollDelayFor(stillPending, statusPollFailureCount));
+        }
+      } else if (statusPollResumePending && !statusPollingDisposed && !isPageHidden()) {
+        statusPollResumePending = false;
+        resumeStatusPolling();
       }
     }
   }, delay);
@@ -1769,41 +1885,98 @@ const handleMoveConfirm = async () => {
   }
 };
 
-const startMovePoll = (taskId: string) => {
-  if (movePollTimer) clearInterval(movePollTimer);
-  movePollTimer = setInterval(async () => {
-    try {
-      const res: any = await getKnowledgeMoveProgress(taskId);
-      const data = res.data;
-      if (!data) return;
-      if (data.status === 'completed') {
-        stopMovePoll();
-        moveSubmitting.value = false;
-        const failed = data.failed || 0;
-        if (failed > 0) {
-          MessagePlugin.warning(t('knowledgeBase.moveCompletedWithErrors', { success: (data.processed || 0) - failed, failed }));
-        } else {
-          MessagePlugin.success(t('knowledgeBase.moveCompleted'));
-        }
-        resetPage(); // Reset page counter when reloading files after move completion
-        loadKnowledgeFiles(kbId.value);
-        void loadFolderTree(kbId.value);
-      } else if (data.status === 'failed') {
-        stopMovePoll();
-        moveSubmitting.value = false;
-        MessagePlugin.error(t('knowledgeBase.moveFailed'));
-      }
-    } catch {
-      // ignore poll errors
+const scheduleMovePoll = (taskId: string, generation: number, delay: number) => {
+  if (movePollDisposed || isPageHidden() || generation !== movePollGeneration || !taskId) return;
+  if (movePollTimer) clearTimeout(movePollTimer);
+  movePollTimer = setTimeout(() => {
+    movePollTimer = null;
+    void pollMoveProgress(taskId, generation);
+  }, delay);
+};
+
+const pollMoveProgress = async (taskId: string, generation: number) => {
+  if (movePollDisposed || isPageHidden() || generation !== movePollGeneration || movePollRequestInFlight) return;
+  movePollRequestInFlight = true;
+  try {
+    const res: any = await getKnowledgeMoveProgress(taskId);
+    if (movePollDisposed || isPageHidden() || generation !== movePollGeneration) return;
+    const data = res.data;
+    if (!data) {
+      movePollFailureCount = Math.min(movePollFailureCount + 1, MOVE_PROGRESS_POLL_BACKOFF_MS.length - 1);
+      scheduleMovePoll(taskId, generation, pollingBackoffDelay(movePollFailureCount, MOVE_PROGRESS_POLL_BACKOFF_MS));
+      return;
     }
-  }, 2000);
+    if (data.status === 'completed') {
+      stopMovePoll();
+      moveSubmitting.value = false;
+      const failed = data.failed || 0;
+      if (failed > 0) {
+        MessagePlugin.warning(t('knowledgeBase.moveCompletedWithErrors', { success: (data.processed || 0) - failed, failed }));
+      } else {
+        MessagePlugin.success(t('knowledgeBase.moveCompleted'));
+      }
+      resetPage(); // Reset page counter when reloading files after move completion
+      loadKnowledgeFiles(kbId.value);
+      void loadFolderTree(kbId.value);
+    } else if (data.status === 'failed') {
+      stopMovePoll();
+      moveSubmitting.value = false;
+      MessagePlugin.error(t('knowledgeBase.moveFailed'));
+    } else {
+      movePollFailureCount = 0;
+      scheduleMovePoll(taskId, generation, MOVE_PROGRESS_POLL_BACKOFF_MS[0]);
+    }
+  } catch {
+    if (movePollDisposed || isPageHidden() || generation !== movePollGeneration) return;
+    movePollFailureCount = Math.min(movePollFailureCount + 1, MOVE_PROGRESS_POLL_BACKOFF_MS.length - 1);
+    scheduleMovePoll(taskId, generation, pollingBackoffDelay(movePollFailureCount, MOVE_PROGRESS_POLL_BACKOFF_MS));
+  } finally {
+    movePollRequestInFlight = false;
+    if (movePollResumePending && !movePollDisposed && !isPageHidden() && movePollTaskId) {
+      movePollResumePending = false;
+      resumeMovePoll();
+    }
+  }
+};
+
+const startMovePoll = (taskId: string) => {
+  stopMovePoll();
+  movePollTaskId = taskId;
+  movePollFailureCount = 0;
+  movePollDisposed = false;
+  movePollResumePending = false;
+  const generation = ++movePollGeneration;
+  scheduleMovePoll(taskId, generation, MOVE_PROGRESS_POLL_BACKOFF_MS[0]);
 };
 
 const stopMovePoll = () => {
+  movePollGeneration++;
   if (movePollTimer) {
-    clearInterval(movePollTimer);
+    clearTimeout(movePollTimer);
     movePollTimer = null;
   }
+  movePollTaskId = '';
+};
+
+const resumeMovePoll = () => {
+  if (movePollDisposed || isPageHidden() || !movePollTaskId) return;
+  if (movePollRequestInFlight) {
+    movePollResumePending = true;
+    return;
+  }
+  movePollResumePending = false;
+  const taskId = movePollTaskId;
+  const generation = ++movePollGeneration;
+  scheduleMovePoll(taskId, generation, 0);
+};
+
+const pauseMovePoll = () => {
+  movePollGeneration++;
+  if (movePollTimer) {
+    clearTimeout(movePollTimer);
+    movePollTimer = null;
+  }
+  movePollResumePending = true;
 };
 
 const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => {

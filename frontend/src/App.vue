@@ -13,6 +13,7 @@ import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
+import { addPageVisibilityListener, isPageHidden } from '@/utils/polling'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -181,14 +182,16 @@ let updateCheckTimer: ReturnType<typeof setInterval> | null = null
 // dedicated SSE/WebSocket connection. Stopped on logout via the
 // computed below.
 let invitationPollTimer: ReturnType<typeof setInterval> | null = null
+let removeInvitationVisibilityListener: (() => void) | null = null
 const INVITATION_POLL_INTERVAL_MS = 2 * 60 * 1000
 
 const startInvitationPolling = () => {
-  if (invitationPollTimer || !authStore.isLoggedIn) return
+  if (!authStore.isLoggedIn || invitationPollTimer) return
+  if (isPageHidden()) return
   // Immediate fetch so the badge is correct before the first tick.
   authStore.fetchPendingInvitationCount()
   invitationPollTimer = setInterval(() => {
-    if (!authStore.isLoggedIn) return
+    if (!authStore.isLoggedIn || isPageHidden()) return
     authStore.fetchPendingInvitationCount()
   }, INVITATION_POLL_INTERVAL_MS)
 }
@@ -198,6 +201,14 @@ const stopInvitationPolling = () => {
     clearInterval(invitationPollTimer)
     invitationPollTimer = null
   }
+}
+
+const handleInvitationVisibilityChange = () => {
+  if (isPageHidden()) {
+    stopInvitationPolling()
+    return
+  }
+  startInvitationPolling()
 }
 
 // React to login/logout via the store's isLoggedIn computed. Watching
@@ -243,6 +254,7 @@ const showPendingTenantSwitchToast = () => {
 onMounted(() => {
   handleGlobalOIDCCallback()
   showPendingTenantSwitchToast()
+  removeInvitationVisibilityListener = addPageVisibilityListener(handleInvitationVisibilityChange)
 
   // Auto check for updates on startup
   setTimeout(() => {
@@ -271,6 +283,8 @@ onUnmounted(() => {
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer)
   }
+  removeInvitationVisibilityListener?.()
+  removeInvitationVisibilityListener = null
   stopInvitationPolling()
 })
 
