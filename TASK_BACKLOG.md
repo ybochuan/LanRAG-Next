@@ -4,8 +4,8 @@
 
 | 任务／状态 | 期望结果＋文件 | 依据 | 验证及何时重新审视 |
 |---|---|---|---|
-| ONEKEY-01／已接线并实测（主链） | Windows `start.cmd`＋`scripts/onekey.ps1`，WSL `start-all.sh`（status/doctor/logs/token/stop 子命令），`launcher_config.py` 的 `plan`/`token`/`mcp-key` 与 STATE_ONLY 状态键；WSL 网络自愈（nat→mirrored）、supervisor 令牌只生成一次、模型按 spec 逐台 ensure running 并做能力验真、Core/Host 幂等复用。 | 用户 2026-11-05 要求一键启动，并选定“Windows 伞＋WSL 半壳、自动切 mirrored、docreader 纳入、签发专用 MCP key”。 | 实测：nat→mirrored 自动切换并重启 WSL；embedding 2560 维、rerank 有分数；Core/Host 就绪、二次运行约 20s 幂等；`status`/`doctor`/`token` 正常；9 项 launcher 单测通过。Docker 拉取与 mcp-key 未完成验证。 |
-| ONEKEY-02／部分完成 | docreader 自动拉起与配置已实测（host override 发布 50051、`AGENTRAG_DOCREADER_IMAGE` 固定镜像、`DOCREADER_ADDR` 按可达性写入）；`launcher_config.py mcp-key` 交互签发 + `register_related_mcp.py` 刷新目录仍待跑通一次。 | 同上 | 首次拉取超时/失败时重审镜像源与提示文案；mcp-key 跑通一次后在此补记结果。 |
+| ONEKEY-01／已接线并实测（主链，2026-11-07 复验） | Windows `start.cmd`＋`scripts/onekey.ps1`，WSL `start-all.sh`（status/doctor/logs/token/stop 子命令），`launcher_config.py` 的 `plan`/`token`/`mcp-key` 与 STATE_ONLY 状态键；WSL 网络自愈（nat→mirrored）、supervisor 令牌只生成一次、模型按 spec 逐台 ensure running 并做能力验真、Core/Host 幂等复用；8GB GPU 上 rerank 遇 `capacity_exceeded` 时自动以 `gpu_layers=0` CPU-only 重试。 | 用户 2026-11-05 要求一键启动，并选定“Windows 伞＋WSL 半壳、自动切 mirrored、docreader 纳入、签发专用 MCP key”。 | 2026-11-07 实测：WSL 3.0.3.0 恢复 mirrored；Docker/docreader 冷启动 healthy、MinerU 与 supervisor ready、embedding 2560 维、rerank 首次 GPU 启动成功；容量不足时自动 CPU 兜底（本次未触发，CPU-only 手工验证通过）；Core/Host ready、Windows 浏览器 `http://127.0.0.1:18880/` 200、`/bridge/healthz` ok；`start.cmd -Stop` 全停 exit 0，`status`/`doctor`/`token` 正常。mcp-key 仍未签发（需原生登录凭据）。 |
+| ONEKEY-02／部分完成（docreader 已验证） | docreader 自动拉起与配置已实测（host override 发布 50051、`AGENTRAG_DOCREADER_IMAGE` 固定镜像、`DOCREADER_ADDR` 按可达性写入）；`launcher_config.py mcp-key` 交互签发 + `register_related_mcp.py` 刷新目录仍待跑通一次。 | 同上 | 首次拉取超时/失败时重审镜像源与提示文案；mcp-key 跑通一次后在此补记结果。 |
 
 ## 关联文件MCP（2026-11-03）
 

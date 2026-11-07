@@ -30,20 +30,65 @@ status_entry() {
     fi
 }
 state_value() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$ROOT/data/agentrag-launcher.json" "$1" 2>/dev/null || true; }
+# The model list is configuration, not a constant: status/doctor must follow
+# MODEL_SERVICES even when the operator changed ids or ports. A missing or
+# unreadable state file falls back to the historical defaults.
+model_ports() {
+    python3 - "$ROOT/data/agentrag-launcher.json" <<'PY'
+import json, sys
+fallback = [("embedding", 8081), ("rerank", 8082)]
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        state = json.load(handle)
+    models = json.loads(state.get("MODEL_SERVICES") or "[]")
+    pairs = [(str(item["id"]), int(item["port"])) for item in models]
+except (OSError, ValueError, KeyError, TypeError):
+    pairs = []
+if not pairs:
+    pairs = fallback
+for model_id, port in pairs:
+    print("%s\t%d" % (model_id, port))
+PY
+}
+latest_run_with_pids() {
+    local candidate
+    for candidate in $(ls -dt "$ROOT"/data/launcher-run-* 2>/dev/null); do
+        [[ -f "$candidate/pids" ]] && { printf '%s\n' "$candidate"; return 0; }
+    done
+    return 0
+}
+latest_run_with_logs() {
+    local candidate
+    for candidate in $(ls -dt "$ROOT"/data/launcher-run-* 2>/dev/null); do
+        if [[ -f "$candidate/pids" || -f "$candidate/host.log" || -f "$candidate/core.log" || -f "$candidate/auth-result" ]]; then
+            printf '%s\n' "$candidate"; return 0
+        fi
+    done
+    return 0
+}
 
 cmd_status() {
-    local core_port
+    local core_port supervisor_addr entry model_id model_port
     core_port="$(state_value CORE_PORT)"; core_port="${core_port:-8080}"
+    supervisor_addr="$(state_value MODEL_SUPERVISOR_ADDR)"; supervisor_addr="${supervisor_addr:-127.0.0.1:8092}"
     echo '[STATUS] AgentRAG'
     echo "  wsl  network : $(ip route show default 2>/dev/null | head -1 | sed 's/^default //')"
-    echo "  wsl  mode    : $(grep -is '^\s*networkingMode' /mnt/c/Users/*/.wslconfig 2>/dev/null | tail -1 || echo 'unknown')"
-    for entry in "MinerU :8000|http://127.0.0.1:8000/v1/health" \
-                 "supervisor :8092|http://127.0.0.1:8092/healthz" \
-                 "embedding :8081|http://127.0.0.1:8081/health" \
-                 "rerank :8082|http://127.0.0.1:8082/health" \
-                 "docreader :50051|tcp://127.0.0.1:50051" \
-                 "Host :8090|http://127.0.0.1:8090/health" \
-                 "Core :$core_port|http://127.0.0.1:$core_port/health"; do
+    # wslinfo reports the live mode; the config file only records what was requested.
+    echo "  wsl  mode    : $(wslinfo --networking-mode 2>/dev/null || echo unknown)"
+    local entries=(
+        "MinerU :8000|http://127.0.0.1:8000/v1/health"
+        "supervisor :${supervisor_addr##*:}|http://${supervisor_addr}/healthz"
+    )
+    while IFS=$'\t' read -r model_id model_port; do
+        [[ -n "$model_id" ]] || continue
+        entries+=("${model_id} :${model_port}|http://127.0.0.1:${model_port}/health")
+    done < <(model_ports)
+    entries+=(
+        "docreader :50051|tcp://127.0.0.1:50051"
+        "Host :8090|http://127.0.0.1:8090/health"
+        "Core :${core_port}|http://127.0.0.1:${core_port}/health"
+    )
+    for entry in "${entries[@]}"; do
         status_entry "${entry%%|*}" "${entry#*|}"
     done
 }
@@ -51,25 +96,30 @@ cmd_status() {
 cmd_doctor() {
     cmd_status
     echo
-    local down=0
-    probe http://127.0.0.1:8081/health || down=$((down + 1))
-    probe http://127.0.0.1:8082/health || down=$((down + 1))
-    probe http://127.0.0.1:8092/healthz || down=$((down + 1))
-    if (( down == 3 )); then
-        echo '[DIAG] 三个 Windows 侧服务从 WSL 全部不可达。'
-        echo '       1) 先看 .wslconfig 是否是 networkingMode=mirrored；'
+    local missing=() supervisor_addr model_id model_port total=2
+    supervisor_addr="$(state_value MODEL_SUPERVISOR_ADDR)"; supervisor_addr="${supervisor_addr:-127.0.0.1:8092}"
+    probe http://127.0.0.1:8000/v1/health || missing+=("MinerU")
+    probe "http://$supervisor_addr/healthz" || missing+=("supervisor")
+    while IFS=$'\t' read -r model_id model_port; do
+        [[ -n "$model_id" ]] || continue
+        total=$((total + 1))
+        probe "http://127.0.0.1:$model_port/health" || missing+=("$model_id")
+    done < <(model_ports)
+    if (( ${#missing[@]} == 0 )); then
+        echo '[DIAG] Windows 侧服务全部可达。'
+    elif (( ${#missing[@]} >= total )); then
+        echo "[DIAG] $total 个 Windows 侧服务从 WSL 全部不可达。"
+        echo '       1) 先看 .wslconfig 是否是 networkingMode=mirrored（以 wslinfo --networking-mode 为准）；'
         echo '       2) Windows 侧服务没起时运行 start.cmd（会自动切模式并拉起）；'
         echo '       3) 仅想启动 Core/Host 时可直接 ./start-all.sh。'
-    elif (( down > 0 )); then
-        echo "[DIAG] 有 $down 个 Windows 侧服务不可达；运行 start.cmd 补齐。"
     else
-        echo '[DIAG] Windows 侧服务全部可达。'
+        echo "[DIAG] 有 ${#missing[@]}/$total 个 Windows 侧服务不可达（${missing[*]}）；运行 start.cmd 补齐。"
     fi
 }
 
 cmd_logs() {
     local run
-    run="$(ls -dt "$ROOT"/data/launcher-run-* 2>/dev/null | head -1 || true)"
+    run="$(latest_run_with_logs)"
     [[ -n "$run" ]] || { echo '[LOGS] no launcher run found'; return 0; }
     echo "[LOGS] $run"
     for file in host.log core.log auth-result; do
@@ -78,12 +128,10 @@ cmd_logs() {
 }
 
 cmd_stop() {
-    local run="" candidate pids pid
+    local run="" pids pid
     # Newest run that actually owns processes: later idempotent runs create and
     # retire empty directories, and stopping the newest empty one would be a no-op.
-    for candidate in $(ls -dt "$ROOT"/data/launcher-run-* 2>/dev/null); do
-        if [[ -f "$candidate/pids" ]]; then run="$candidate"; break; fi
-    done
+    run="$(latest_run_with_pids)"
     if [[ -z "$run" ]]; then echo '[STOP] no launcher-owned run recorded'; return 0; fi
     pids="$(cat "$run/pids")"
     for pid in $pids; do kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true; done
@@ -118,11 +166,14 @@ HOST_PID= CORE_PID= AUTH_PID= STARTED=0
 # What this side can do is prove they are reachable *from WSL*, which is the only
 # path Core actually uses, and say what to do when they are not.
 preflight_windows() {
-    local missing=()
-    probe "http://127.0.0.1:8092/healthz" || missing+=("supervisor :8092")
+    local missing=() supervisor_addr model_id model_port
+    supervisor_addr="$(state_value MODEL_SUPERVISOR_ADDR)"; supervisor_addr="${supervisor_addr:-127.0.0.1:8092}"
+    probe "http://$supervisor_addr/healthz" || missing+=("supervisor :${supervisor_addr##*:}")
     probe "http://127.0.0.1:8000/v1/health" || missing+=("MinerU :8000")
-    probe "http://127.0.0.1:8081/health" || missing+=("embedding :8081")
-    probe "http://127.0.0.1:8082/health" || missing+=("rerank :8082")
+    while IFS=$'\t' read -r model_id model_port; do
+        [[ -n "$model_id" ]] || continue
+        probe "http://127.0.0.1:$model_port/health" || missing+=("$model_id :$model_port")
+    done < <(model_ports)
     if ((${#missing[@]} == 0)); then
         echo '[READY] Windows-side services reachable from WSL'
         return 0

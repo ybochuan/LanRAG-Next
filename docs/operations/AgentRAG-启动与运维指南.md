@@ -6,7 +6,7 @@
 
 Bridge 仍固定运行于 **WSL 的 127.0.0.1:8090**，原生 500ms 客户端不变；检查 Host 在 WSL 执行 `curl --fail http://127.0.0.1:8090/health`，或直接 `./start-all.sh status`。
 
-停止：启动窗口里按 Ctrl+C 只停 Core/Host；Windows 侧（MinerU、模型、supervisor、docreader）用 `start.cmd -Stop`。启动窗口丢失时，用 `./start-all.sh stop` 清理脚本自己拉起的 Core/Host——它只认最新运行时目录里的 `pids`，不匹配的进程一律不碰。
+停止：启动窗口里按 Ctrl+C 只停 Core/Host；`start.cmd -Stop` 会停 Core/Host、MinerU、模型、supervisor 和 docreader。启动窗口丢失时，用 `./start-all.sh stop` 清理脚本自己拉起的 Core/Host——它只认最新运行时目录里的 `pids`，不匹配的进程一律不碰。
 
 适用目录：Windows `D:\LanRAG-Next`，对应 WSL `/mnt/d/LanRAG-Next`。当前为 WeKnora Lite + 独立 Extension Host + Windows 侧模型进程管理器；一键入口 `start.cmd`，说明更新于 2026-11-05。
 
@@ -27,7 +27,9 @@ D:\LanRAG-Next\start.cmd
 5. 起 supervisor（注入令牌）→ 按计划确保 embedding/rerank 处于 running → **真实能力自检**（向量维度、rerank 分数），不只是端口通；
 6. 进入 WSL 执行 `start-all.sh`：Host ready → Core → 机器凭证校验 → MCP 幂等注册；前台运行，**Ctrl+C 只停 Core/Host**，Windows 侧服务保持运行。
 
-参数：`-DryRun` 只打印计划不动手；`-SkipDocker`、`-SkipMinerU` 跳层；`-NoNetworkFix` 不改系统网络；`-Strict` 让 Windows 侧缺失也中止；`-Stop` 停模型、supervisor 和 docreader 容器。
+参数：`-DryRun` 只打印计划不动手；`-SkipDocker`、`-SkipMinerU` 跳层；`-NoNetworkFix` 不改系统网络；`-Strict` 让 Windows 侧缺失也中止；`-Stop` 停 Core/Host、MinerU、模型、supervisor 和 docreader 容器（不依赖启动计划，WSL 异常时也能清理 Windows 侧）。
+
+`start.cmd status|doctor|logs|token|mcp-key` 直接转发到 WSL 半的对应子命令，不读取或改写启动计划。
 
 只想起 Core/Host（Windows 侧已就绪）时仍可直接：
 
@@ -86,6 +88,9 @@ MCP 首次需要一次登录来签发专用 key：
 之后每次启动都会幂等地创建/更新名为 `AgentRAG` 的连接并刷新工具目录；注册失败只告警，不影响系统启动。
 
 首次运行条件未变：已编译 Linux 版 `WeKnora-lite`，原生数据库中已有用户和知识库。没有有效机器 API Key 时会提示输入一次**原生登录邮箱和密码**（密码不保存），随后复用私有配置。
+
+环境前提：本机 Windows build 26340 / WSL 3.0.3.0 已实测 mirrored 正常；旧 WSL 2.7.13.0 启动 mirrored 会报 `CreateInstance/CreateVm/ConfigureNetworking/0x8007054f` 并回退 `networkingMode=none`，表现为 Core/Host 能起但 Windows 浏览器打不开、WSL 也访问不到 Windows 侧模型。升级 WSL 3.0.3.0 或更新版本后，执行一次 `start.cmd -FixNetwork` 验证。
+8GB GPU 上 embedding 4B 启动后，supervisor 可能以 `capacity_exceeded`（预留 1.5GB）拒绝 rerank；启动器会自动改用 `gpu_layers=0` 的 CPU-only 模式重试，成功则继续。若仍失败，才标记 degraded 并继续启动 Core；也可在模型进程管理页或 supervisor API 手动调整显存配置。
 
 已有私有配置中的范围会保留；新增知识库后应显式更新 `AGENTRAG_KB_IDS`，必要时重新登录签发覆盖新范围的机器凭证。不要把知识库名称当作 ID。
 

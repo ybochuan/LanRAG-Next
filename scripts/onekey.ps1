@@ -15,8 +15,8 @@ param(
     [switch]$FixNetwork,
     [switch]$Strict,
     [switch]$Stop,
-    [switch]$KeepOnExit,
-    [string]$WslDistro = 'Ubuntu'
+    [string]$WslDistro = 'Ubuntu',
+    [Parameter(Position = 0)][string]$Command = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +24,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 $LogDir = Join-Path $Root 'data\logs'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$MineruExe = 'D:\mineru-venv\Scripts\mineru-api.exe'
 $script:Problems = @()
 # A failed mirrored switch makes WSL worse (nat -> none) until Windows reboots,
 # so the failure is remembered and the switch is not retried every launch.
@@ -83,8 +84,123 @@ function Invoke-Native([scriptblock]$Action) {
 # WSL plumbing: the launcher state lives in the repo and is produced by the WSL
 # half, so prepare/plan run there and the result is read back here.
 # --------------------------------------------------------------------------
-$WslRoot = (Invoke-Wsl "wslpath -a '$Root'").Trim()
-if (-not $WslRoot) { Die "cannot resolve the WSL path for $Root" }
+# wsl.exe can print boot warnings on stderr even when wslpath succeeds; taking
+# the last absolute path keeps those warnings out of every later bash command.
+$WslRoot = ''
+try {
+    $wslPathOutput = Invoke-Wsl "wslpath -a '$Root'"
+    $WslRoot = (($wslPathOutput -split "`r?`n") | Where-Object { $_ -match '^/' } | Select-Object -Last 1)
+    if ($WslRoot) { $WslRoot = $WslRoot.Trim() }
+} catch {
+    if (-not $Stop) { throw }
+    Warn "WSL is unavailable: $($_.Exception.Message)"
+}
+if (-not $WslRoot -and -not $Stop) { Die "cannot resolve the WSL path for $Root" }
+if (-not $WslRoot) { Warn "cannot resolve the WSL path for $Root; WSL-side cleanup will be skipped" }
+
+# Quick subcommands run entirely in the WSL half; they do not need the plan and
+# must not prepare credentials just to print status.
+if ($Command) {
+    $name = $Command.ToLowerInvariant()
+    if ($name -notin @('status', 'logs', 'doctor', 'token', 'mcp-key')) {
+        Die "unknown command '$Command'; use status|logs|doctor|token|mcp-key"
+    }
+    if (-not $WslRoot) { Die "WSL is not available; cannot run '$name'" }
+    & wsl.exe -d $WslDistro -- bash "$WslRoot/start-all.sh" $name
+    exit $LASTEXITCODE
+}
+
+$Transcript = Join-Path $LogDir ("onekey-" + (Get-Date).ToString('yyyyMMdd-HHmmss') + ".log")
+try { Start-Transcript -Path $Transcript -Append | Out-Null } catch { }
+
+# --------------------------------------------------------------------------
+# Stop mode: deliberately does not read the plan or prepare credentials. It is
+# the escape hatch when WSL networking is broken and the normal path cannot run.
+# --------------------------------------------------------------------------
+if ($Stop) {
+    $StatePath = Join-Path $Root 'data\agentrag-launcher.json'
+    $Token = ''
+    $SupervisorAddr = '127.0.0.1:8092'
+    $Models = @()
+    if (Test-Path $StatePath) {
+        try {
+            $State = Get-Content $StatePath -Raw | ConvertFrom-Json
+            $Token = $State.MODEL_SUPERVISOR_TOKEN
+            if ($State.MODEL_SUPERVISOR_ADDR) { $SupervisorAddr = $State.MODEL_SUPERVISOR_ADDR }
+            if ($State.MODEL_SERVICES) {
+                $Models = if ($State.MODEL_SERVICES -is [string]) { @($State.MODEL_SERVICES | ConvertFrom-Json) } else { @($State.MODEL_SERVICES) }
+            }
+        } catch { Warn "cannot read $StatePath; model API stop will be skipped: $($_.Exception.Message)" }
+    }
+
+    if ($WslRoot) {
+        Step "Stopping Core and Extension Host in WSL"
+        try {
+            $wslStop = Invoke-Wsl "cd '$WslRoot' && bash ./start-all.sh stop"
+            if ($wslStop) { $wslStop -split "`n" | ForEach-Object { Write-Host "      $_" } }
+            Ok "WSL-side Core/Host stopped"
+        } catch { Warn "WSL stop failed: $($_.Exception.Message)" }
+    } else {
+        Warn "skipping WSL-side Core/Host cleanup (WSL unavailable)"
+    }
+
+    if (Test-Http "http://$SupervisorAddr/healthz" 2) {
+        Step "Stopping models through the supervisor"
+        foreach ($model in $Models) {
+            try {
+                Invoke-RestMethod -Method Post -Uri "http://$SupervisorAddr/extensions/models/stop" `
+                    -Headers (Get-SupervisorHeaders $Token) -ContentType 'application/json' `
+                    -Body (@{ id = $model.id } | ConvertTo-Json) -TimeoutSec 30 | Out-Null
+                Ok "stopped $($model.id)"
+            } catch { Warn "stop $($model.id) failed: $($_.Exception.Message)" }
+        }
+    } else {
+        Step "Supervisor not running; skipping model API stop"
+    }
+
+    Get-Process -Name 'model-supervisor' -ErrorAction SilentlyContinue | ForEach-Object {
+        Stop-Process -Id $_.Id -Force; Ok "supervisor $($_.Id) stopped"
+    }
+    # The supervisor normally owns llama-server, but a crashed supervisor leaves
+    # the children behind; sweep only the binary this repo started.
+    $llamaBin = Join-Path $Root 'data\bin\llama-server.exe'
+    Get-Process -Name 'llama-server' -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -and ($_.Path -ieq $llamaBin)
+    } | ForEach-Object { Stop-Process -Id $_.Id -Force; Ok "orphan llama-server $($_.Id) stopped" }
+
+    Step "Stopping MinerU"
+    Get-Process -Name 'mineru-api' -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.Path -and ($_.Path -ieq $MineruExe)) {
+            Stop-Process -Id $_.Id -Force; Ok "MinerU $($_.Id) stopped"
+        }
+    }
+
+    $dockerReady = $false
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        try {
+            # A stopped Docker Desktop makes `docker info` write to stderr; in
+            # Windows PowerShell 5.1 that can surface as a script error even
+            # though this is only a probe. Suppress both streams and inspect the
+            # exit code so -Stop always finishes its other cleanup steps.
+            $null = & cmd.exe /c 'docker info >NUL 2>&1'
+            $dockerReady = ($LASTEXITCODE -eq 0)
+        } catch { $dockerReady = $false }
+    }
+    if ($dockerReady) {
+        $stopCode = 1
+        $composePrevious = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & docker.exe compose -f (Join-Path $Root 'docker-compose.yml') -f (Join-Path $Root 'docker-compose.docreader-host.yml') stop docreader 2>&1 |
+                ForEach-Object { Write-Host "      $_" }
+            $stopCode = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $composePrevious }
+        if ($stopCode -eq 0) { Ok "docreader container stopped" } else { Warn "docreader stop failed" }
+    } else {
+        Warn "Docker is not running; skipping docreader stop (container state left unchanged)"
+    }
+    exit 0
+}
 
 Step "Reading launcher plan"
 $planJson = Invoke-Wsl "cd '$WslRoot' && python3 extensions/scripts/launcher_config.py prepare '$WslRoot/data/onekey-private.env' >/dev/null && python3 extensions/scripts/launcher_config.py plan"
@@ -110,29 +226,6 @@ if ($DryRun) {
 }
 
 # --------------------------------------------------------------------------
-# Stop mode
-# --------------------------------------------------------------------------
-if ($Stop) {
-    Step "Stopping models through the supervisor"
-    foreach ($model in $Models) {
-        try {
-            Invoke-RestMethod -Method Post -Uri "http://$SupervisorAddr/extensions/models/stop" `
-                -Headers (Get-SupervisorHeaders $Token) -ContentType 'application/json' `
-                -Body (@{ id = $model.id } | ConvertTo-Json) -TimeoutSec 30 | Out-Null
-            Ok "stopped $($model.id)"
-        } catch { Warn "stop $($model.id) failed: $($_.Exception.Message)" }
-    }
-    Get-Process -Name 'model-supervisor' -ErrorAction SilentlyContinue | ForEach-Object {
-        Stop-Process -Id $_.Id -Force; Ok "supervisor $($_.Id) stopped"
-    }
-    if (Test-Docker) {
-        $stop = Invoke-Native { docker compose -f (Join-Path $Root 'docker-compose.yml') stop docreader }
-        if ($stop.Code -eq 0) { Ok "docreader container stopped" } else { Warn "docreader stop failed" }
-    }
-    exit 0
-}
-
-# --------------------------------------------------------------------------
 # WSL networking: mirrored puts the Windows loopback on the WSL side too, which
 # is the only mode where Core can reach the model endpoints unchanged.
 # --------------------------------------------------------------------------
@@ -144,20 +237,48 @@ function Get-WslConfiguredMode {
     return 'nat'
 }
 
+function Get-WslModeValue([object[]]$Output) {
+    # `wsl.exe` can print a UTF-16 diagnostic before the actual mode; keep only
+    # the trailing mode token so warnings and status output stay compact.
+    $text = (($Output | ForEach-Object { "$_" }) -join '')
+    $compact = ($text -replace '[^\w]', '').ToLower()
+    foreach ($mode in @('mirrored', 'nat', 'none')) {
+        if ($compact.EndsWith($mode)) { return $mode }
+    }
+    return ''
+}
+
 function Get-WslNetworkingMode {
     # Ask the running distro first: the config file says what was requested, not
     # what WSL actually managed to set up. Mirrored can fail at boot and fall
     # back to nat or none, and reading the file would hide exactly that.
     $live = ''
-    try { $live = ((Invoke-Native { wsl.exe -d $WslDistro -- wslinfo --networking-mode }).Output -join '').Trim().ToLower() } catch { }
+    try {
+        $result = Invoke-Native { wsl.exe -d $WslDistro -- wslinfo --networking-mode }
+        if ($result.Code -eq 0) { $live = Get-WslModeValue $result.Output }
+    } catch { }
     if ($live) { return $live }
     return (Get-WslConfiguredMode)
+}
+
+function Wait-WslNetworkingMode([int]$Seconds = 60) {
+    # `wsl --shutdown` returns before the distro is usable again. Poll the live
+    # mode instead of sleeping a fixed three seconds, which is both too short on
+    # a cold boot and needlessly slow when WSL comes back immediately.
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        $result = Invoke-Native { wsl.exe -d $WslDistro -- wslinfo --networking-mode }
+        $value = Get-WslModeValue $result.Output
+        if ($result.Code -eq 0 -and $value) { return $value }
+        Start-Sleep -Milliseconds 500
+    }
+    return ''
 }
 
 function Set-WslMirrored {
     $file = Join-Path $env:USERPROFILE '.wslconfig'
     $lines = @()
-    if (Test-Path $file) { $lines = @(Get-Content $file) }
+    if (Test-Path $file) { $lines = @(Get-Content $file -Encoding UTF8) }
     Copy-Item $file "$file.bak" -Force -ErrorAction SilentlyContinue
     $inWsl2 = $false
     $sawSection = $false
@@ -182,7 +303,10 @@ function Set-WslMirrored {
     }
     if (-not ($out | Where-Object { $_ -match '^\s*networkingMode\s*=' })) { $out.Add('networkingMode=mirrored') }
     if (-not ($out | Where-Object { $_ -match '^\s*autoProxy\s*=' })) { $out.Add('autoProxy=false') }
-    Set-Content -Path $file -Value $out -Encoding ASCII
+    # ASCII mangled any non-English comment into question marks. Write UTF-8
+    # without a BOM so WSL's config parser sees the same file Windows editors do.
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($file, $out, $utf8)
     Ok "wrote mirrored networking to $file (backup: $file.bak)"
 }
 
@@ -201,8 +325,7 @@ if ($mode -ne 'mirrored') {
         Step "WSL networking is '$mode'; switching to mirrored (restarts WSL)"
         Set-WslMirrored
         Invoke-Native { wsl.exe --shutdown } | Out-Null
-        Start-Sleep -Seconds 3
-        $actual = Get-WslNetworkingMode
+        $actual = Wait-WslNetworkingMode 60
         if ($actual -eq 'mirrored') {
             Remove-Item $NetworkMarker -Force -ErrorAction SilentlyContinue
             Ok "WSL restarted in mirrored mode"
@@ -211,9 +334,13 @@ if ($mode -ne 'mirrored') {
             # (0x8007054f) and falls back, sometimes to none. Remember that so the
             # next launch does not repeat a switch that makes things worse.
             Set-Content -Path $NetworkMarker -Value ((Get-Date).ToString('o')) -Encoding ASCII
-            Warn "WSL mirrored networking failed (running mode=$actual). Models, MinerU and docreader are unreachable from Core until mirrored is restored; reboot Windows, then run start.cmd -FixNetwork."
-            if ($actual -ne 'nat') {
-                Warn "WSL has no usable network (mode=$actual): even the web UI will not be reachable."
+            if (-not $actual) {
+                Warn "WSL did not report a networking mode within 60s after the switch; run 'wsl --status', then reboot Windows and retry start.cmd -FixNetwork."
+            } else {
+                Warn "WSL mirrored networking failed (running mode=$actual). Models, MinerU and docreader are unreachable from Core until mirrored is restored; reboot Windows, then run start.cmd -FixNetwork."
+                if ($actual -ne 'nat') {
+                    Warn "WSL has no usable network (mode=$actual): even the web UI will not be reachable."
+                }
             }
         }
     }
@@ -224,7 +351,9 @@ if ($mode -ne 'mirrored') {
 # --------------------------------------------------------------------------
 # Docker Desktop + optional containers
 # --------------------------------------------------------------------------
-function Test-Docker { return ((Invoke-Native { docker info }).Code -eq 0) }
+function Test-Docker {
+    try { return ((Invoke-Native { docker info }).Code -eq 0) } catch { return $false }
+}
 
 $DockerWanted = (-not $SkipDocker) -and (@($Plan.docker_services).Count -gt 0)
 if ($DockerWanted) {
@@ -274,7 +403,6 @@ if ($DockerWanted) {
 # --------------------------------------------------------------------------
 # MinerU (Windows executable, PDF parsing)
 # --------------------------------------------------------------------------
-$MineruExe = 'D:\mineru-venv\Scripts\mineru-api.exe'
 if (-not $SkipMinerU) {
     if (Test-Http 'http://127.0.0.1:8000/v1/health' 2) {
         Ok "MinerU already serving on :8000"
@@ -295,7 +423,9 @@ if (-not $SkipMinerU) {
 # Model supervisor + the instances it owns
 # --------------------------------------------------------------------------
 $env:MODEL_SUPERVISOR_TOKEN = $Token
+$env:MODEL_SUPERVISOR_ADDR = $SupervisorAddr
 $env:MODEL_SUPERVISOR_WSL_DISTRO = $WslDistro
+if ($State.MODEL_SUPERVISOR_STATE) { $env:MODEL_SUPERVISOR_STATE = $State.MODEL_SUPERVISOR_STATE }
 
 if (Test-Http "http://$SupervisorAddr/healthz" 2) {
     Ok "supervisor already running on $SupervisorAddr"
@@ -319,13 +449,26 @@ foreach ($model in $Models) {
     $body = @{
         id = $model.id; model = $model.model; task_type = $model.task_type; port = $port
         ctx_size = $model.ctx_size; threads = $model.threads
-    } | ConvertTo-Json
+    }
     try {
         Invoke-RestMethod -Method Post -Uri "http://$SupervisorAddr/extensions/models/start" `
-            -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 60 | Out-Null
+            -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json) -TimeoutSec 60 | Out-Null
     } catch {
-        Warn "supervisor refused $($model.id): $($_.Exception.Message)"
-        continue
+        $errText = "$($_.Exception.Message) $($_.ErrorDetails.Message)"
+        if ($model.task_type -eq 'rerank' -and $errText -match 'capacity_exceeded|Precondition Required|428') {
+            Warn "rerank GPU capacity refused; retrying CPU-only (gpu_layers=0)"
+            $body.gpu_layers = 0
+            try {
+                Invoke-RestMethod -Method Post -Uri "http://$SupervisorAddr/extensions/models/start" `
+                    -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json) -TimeoutSec 60 | Out-Null
+            } catch {
+                Warn "supervisor refused $($model.id) on CPU: $($_.Exception.Message)"
+                continue
+            }
+        } else {
+            Warn "supervisor refused $($model.id): $($_.Exception.Message)"
+            continue
+        }
     }
     if (Wait-Http "http://127.0.0.1:$port/health" 120 "model $($model.id)") {
         if ($model.task_type -eq 'embedding') {
