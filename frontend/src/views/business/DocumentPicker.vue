@@ -12,14 +12,16 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { overview, type DocumentRow } from '@/api/lifecycle'
+import { cached, cacheKey } from '@/api/requestCache'
 import { requestFence } from '../lifecycle/model'
 const props=defineProps<{kb:string;modelValue:string;label:string;disabled?:boolean;exclude?:string}>()
 const emit=defineEmits<{'update:modelValue':[id:string]}>()
 const items=ref<DocumentRow[]>([]),page=ref(1),total=ref(0),loading=ref(false),error=ref(''),selectedName=ref('')
 const fence=requestFence()
+function cacheTenant(){try{return localStorage.getItem('weknora_selected_tenant_id')||localStorage.getItem('weknora_tenant')||''}catch{return ''}}
 async function load(){
   const token=fence.begin(),kb=props.kb;loading.value=true;error.value=''
-  try{const data=await overview(kb,page.value,'active');if(!fence.current(token))return;items.value=data.documents.filter(v=>v.document_id!==props.exclude);total.value=data.total}
+  try{const data=await cached(cacheKey('document-picker-active',cacheTenant(),kb,page.value),()=>overview(kb,page.value,'active'),5_000);if(!fence.current(token))return;items.value=data.documents.filter(v=>v.document_id!==props.exclude);total.value=data.total}
   catch{if(fence.current(token)){items.value=[];error.value='无法载入生效文档。'}}finally{if(fence.current(token))loading.value=false}
 }
 function choose(event:Event){const id=(event.target as HTMLSelectElement).value;selectedName.value=items.value.find(v=>v.document_id===id)?.title||id;emit('update:modelValue',id)}

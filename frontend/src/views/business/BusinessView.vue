@@ -4,6 +4,7 @@
     <nav class="business-tabs" aria-label="业务治理"><RouterLink v-for="item in sections" :key="item.key" :to="{path:'/platform/'+item.key,query:kb?{kb}:{}}" :aria-current="section===item.key?'page':undefined">{{ item.label }}</RouterLink></nav>
     <section class="scope-bar"><label>知识库<select v-model="kb" :disabled="loadingKB||running||!!pending"><option value="">请选择知识库</option><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option></select></label><span v-if="kb" class="access-badge">{{ canWrite?'可管理':'只读' }}</span></section>
     <p v-if="error" class="notice error" role="alert">{{ error }}</p>
+    <p v-if="authorityError" class="notice" role="status">{{ authorityError }}</p>
     <p v-if="success" class="notice success" role="status">{{ success }}</p>
     <section v-if="pending&&!running&&!confirmationOpen" class="notice pending" aria-label="待核对操作"><strong>{{ actionLabels[pending.intent.action] }} · 结果待核对</strong><p>已保留本次请求。重试会使用相同操作编号和内容。<template v-if="pending.intent.body.business.id">记录 {{ shortID(pending.intent.body.business.id) }}</template></p><button :disabled="!canWrite||loading" @click="perform">重试原请求</button><button @click="refresh">刷新核对</button><button class="text-button" @click="pending=undefined">我已核对，结束重试</button></section>
     <p v-if="loadingKB" role="status" class="empty">正在载入知识库…</p><p v-else-if="!knowledgeBases.length" class="empty">还没有可访问的知识库。</p>
@@ -57,11 +58,11 @@ const feedbackTab=ref<'feedback'|'guidance'>('feedback')
 const kind=computed<api.BusinessKind>(()=>props.section==='associations'?'relation':props.section==='revisions'?'revision':feedbackTab.value)
 const initialGuidance=computed(()=>typeof route.query.guidance==='string'?route.query.guidance:undefined)
 const knowledgeBases=ref<{id:string;name:string}[]>([]),kb=ref(''),loadingKB=ref(true),canWrite=ref(false)
-const records=ref<api.BusinessRecord[]>([]),detail=ref<api.BusinessRecord>(),detailLoading=ref(false),page=ref(1),loading=ref(false),running=ref(false),error=ref(''),success=ref(''),formVersion=ref(0)
+const records=ref<api.BusinessRecord[]>([]),detail=ref<api.BusinessRecord>(),detailLoading=ref(false),page=ref(1),loading=ref(false),running=ref(false),error=ref(''),authorityError=ref(''),success=ref(''),formVersion=ref(0)
 const titles=ref(new Map<string,string>()),detailHeading=ref<HTMLElement>(),dialog=ref<HTMLDialogElement>(),confirmationOpen=ref(false),secondConfirmation=ref(false),highRisk=ref(false)
 const pending=ref<{kb:string;intent:WriteIntent}>(),confirmationText=ref(''),now=ref(Date.now())
 const queryDocument=ref(''),queryResult=ref<api.RelatedDocument[]>(),queryError=ref(''),querying=ref(false)
-const listFence=requestFence(),detailFence=requestFence(),kbFence=requestFence(),queryFence=requestFence(),catalogFence=requestFence()
+const listFence=requestFence(),detailFence=requestFence(),kbFence=requestFence(),queryFence=requestFence(),catalogFence=requestFence(),titleFence=requestFence()
 let generation=0
 const timer=setInterval(()=>{now.value=Date.now()},30_000)
 const docName=(id?:string)=>id?(titles.value.get(id)||`文档 ${shortID(id)}`):'—'
@@ -69,23 +70,33 @@ const stateLabel=(row:api.BusinessRecord)=>kind.value==='relation'&&row.status==
 const recordTitle=(row:api.BusinessRecord)=>kind.value==='relation'?edgeLabels[row.edge_type||'']||'文档关联':kind.value==='revision'?`修订 · ${docName(row.source_document_id)}`:row.topic||'未命名主题'
 const publicationError=(code:string)=>code==='binary_source_upload_required'?'源文档是上传文件：请上传修订后的正式源文件。本条目保留为修订建议。':code==='remote_identity_mismatch'?'已找到的远端文档与本次发布不匹配，请先核对发布记录。':'上次发布尚未确认完成，可核对并继续发布；不会直接重复创建文档。'
 
+function recordDocumentIDs(row:api.BusinessRecord):string[]{
+  return [row.document_id,row.source_document_id,row.target_document_id].filter((value):value is string=>!!value)
+}
+async function loadTitles(ids:string[]){
+  const scope=kb.value
+  const missing=[...new Set(ids.filter(id=>!!id&&!titles.value.has(id)))]
+  if(!scope||!missing.length)return
+  const token=titleFence.begin()
+  try{const values=await api.documentTitles(scope,missing);if(!titleFence.current(token)||kb.value!==scope)return;for(const [id,title] of Object.entries(values))titles.value.set(id,title)}catch{}
+}
 async function loadRecords(){
   const token=listFence.begin(),scope=kb.value,recordKind=kind.value;if(!scope)return;loading.value=true;error.value=''
-  try{const rows=await api.list(scope,recordKind,page.value);if(listFence.current(token))records.value=rows}
+  try{const rows=await api.list(scope,recordKind,page.value);if(listFence.current(token)){records.value=rows;void loadTitles(rows.flatMap(recordDocumentIDs))}}
   catch(e){if(listFence.current(token)){records.value=[];detail.value=undefined;error.value=businessError(e);if(httpStatus(e)===403)canWrite.value=false}}
   finally{if(listFence.current(token))loading.value=false}
 }
 async function loadAuthority(){
-  const token=kbFence.begin(),scope=kb.value;canWrite.value=false
+  const token=kbFence.begin(),scope=kb.value;canWrite.value=false;authorityError.value=''
   try{const value=await overview(scope,1,'');if(!kbFence.current(token))return;canWrite.value=value.can_write;for(const row of value.documents)if(row.title)titles.value.set(row.document_id,row.title)}
-  catch(e){if(kbFence.current(token))error.value=businessError(e)}
+  catch(e){if(kbFence.current(token))authorityError.value=`权限信息暂不可用：${businessError(e)}。记录列表仍可查看。`}
 }
 function refresh(){if(!kb.value){void loadKBs();return}const selected=detail.value;void loadAuthority();void loadRecords();if(selected)void openRecord(selected)}
 function movePage(delta:number){page.value+=delta;void loadRecords()}
 async function openRecord(row:api.BusinessRecord){
   const token=detailFence.begin(),scope=kb.value,recordKind=kind.value;error.value='';detailLoading.value=true
   try{const found=(await api.list(scope,recordKind,1,row.id))[0];if(!detailFence.current(token))return;if(!found){detail.value=undefined;error.value='该记录已不可访问，请刷新列表。';return}detail.value=found;await nextTick();detailHeading.value?.focus()
-    for(const id of new Set([found.document_id,found.source_document_id,found.target_document_id].filter((v):v is string=>!!v))){void api.documentTitle(scope,id).then(title=>{if(detailFence.current(token))titles.value.set(id,title)}).catch(()=>{})}
+    void loadTitles(recordDocumentIDs(found))
   }catch(e){if(detailFence.current(token)){detail.value=undefined;error.value=businessError(e)}}finally{if(detailFence.current(token))detailLoading.value=false}
 }
 async function beginWrite(action:api.BusinessAction,payload:api.BusinessPayload,row?:api.BusinessRecord){
@@ -113,13 +124,14 @@ async function perform(){
   finally{if(version===generation)running.value=false}
 }
 async function queryRelated(){const token=queryFence.begin(),scope=kb.value,id=queryDocument.value;querying.value=true;queryError.value='';queryResult.value=undefined;try{const value=await api.related(scope,id);if(queryFence.current(token))queryResult.value=value}catch(e){if(queryFence.current(token))queryError.value=businessError(e)}finally{if(queryFence.current(token))querying.value=false}}
-function resetScope(){generation++;listFence.invalidate();detailFence.invalidate();kbFence.invalidate();queryFence.invalidate();records.value=[];detail.value=undefined;detailLoading.value=false;pending.value=undefined;running.value=false;page.value=1;canWrite.value=false;titles.value.clear();error.value='';success.value='';queryDocument.value='';queryResult.value=undefined;queryError.value='';querying.value=false;dialog.value?.close();confirmationOpen.value=false;if(kb.value)refresh()}
+function resetScope(){generation++;listFence.invalidate();detailFence.invalidate();kbFence.invalidate();queryFence.invalidate();titleFence.invalidate();records.value=[];detail.value=undefined;detailLoading.value=false;pending.value=undefined;running.value=false;page.value=1;canWrite.value=false;titles.value.clear();error.value='';authorityError.value='';success.value='';queryDocument.value='';queryResult.value=undefined;queryError.value='';querying.value=false;dialog.value?.close();confirmationOpen.value=false}
 async function loadKBs(){
   const token=catalogFence.begin();kb.value='';resetScope();knowledgeBases.value=[];loadingKB.value=true
   try{const response=await listKnowledgeBases();if(!catalogFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];const requested=typeof route.query.kb==='string'?route.query.kb:'';kb.value=knowledgeBases.value.find(v=>v.id===requested)?.id||knowledgeBases.value[0]?.id||''}
   catch{if(catalogFence.current(token))error.value='无法载入可访问的知识库，请检查登录状态后重试。'}finally{if(catalogFence.current(token))loadingKB.value=false}
 }
-watch(()=>[kb.value,kind.value],resetScope)
+watch(kb,()=>{resetScope();if(kb.value){void loadAuthority();void loadRecords()}})
+watch(kind,()=>{if(!kb.value)return;listFence.invalidate();detailFence.invalidate();titleFence.invalidate();records.value=[];detail.value=undefined;page.value=1;error.value='';loading.value=false;void loadRecords()})
 watch(()=>auth.effectiveTenantId,()=>void loadKBs())
 watch(()=>route.query.kb,value=>{if(typeof value==='string'&&knowledgeBases.value.some(v=>v.id===value))kb.value=value})
 function allowNavigation(){if(running.value||pending.value){error.value='本次操作仍待核对，请先重试原请求，或核对后选择“结束重试”。';return false}return true}
@@ -127,6 +139,6 @@ function beforeUnload(event:BeforeUnloadEvent){if(running.value||pending.value){
 onBeforeRouteLeave(allowNavigation)
 onBeforeRouteUpdate(allowNavigation)
 onMounted(()=>{window.addEventListener('beforeunload',beforeUnload);void loadKBs()})
-onBeforeUnmount(()=>{generation++;catalogFence.invalidate();listFence.invalidate();detailFence.invalidate();kbFence.invalidate();queryFence.invalidate();clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload)})
+onBeforeUnmount(()=>{generation++;catalogFence.invalidate();listFence.invalidate();detailFence.invalidate();kbFence.invalidate();queryFence.invalidate();titleFence.invalidate();clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload)})
 </script>
 <style src="./business.css"></style>

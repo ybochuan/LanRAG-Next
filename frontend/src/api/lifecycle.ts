@@ -1,4 +1,5 @@
 import { get, put } from '@/utils/request'
+import { invalidateCache } from './requestCache'
 
 export type LifecycleState = 'pending'|'scheduled'|'active'|'stale'|'archived'|'superseded'|'failed'
 export interface Annotations { revision:number; effective_from?:string|null; effective_until?:string|null; review_due?:string|null; labels:Record<string,string> }
@@ -21,8 +22,8 @@ async function unwrap<T>(request:Promise<unknown>):Promise<T>{
 }
 export const overview=(kb:string,page:number,state:string,title='')=>unwrap<Overview>(get(`${base(kb)}?${new URLSearchParams({page:String(page),page_size:'20',state,title})}`))
 export const documentDetail=(kb:string,id:string)=>unwrap<Detail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}`))
-export const saveAnnotations=(kb:string,id:string,expected_revision:number,annotations:Annotations)=>unwrap<Detail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}`,{expected_revision,annotations}))
-export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules}))
+export const saveAnnotations=(kb:string,id:string,expected_revision:number,annotations:Annotations)=>unwrap<Detail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}`,{expected_revision,annotations})).then(value=>{invalidateCache('document-picker-active');return value})
+export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules})).then(value=>{invalidateCache('document-picker-active');return value})
 export const reviews=(kb:string)=>unwrap<{alerts:ReviewAlert[];truncated:boolean}>(get(`${base(kb)}/reviews`))
 export const supplements=(kb:string,id:string)=>unwrap<SupplementDetail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`))
-export const saveSupplements=(kb:string,id:string,body:{expected_revision:number;operation_id:string;parents:string[]})=>unwrap<SupplementDetail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`,body))
+export const saveSupplements=(kb:string,id:string,body:{expected_revision:number;operation_id:string;parents:string[]})=>unwrap<SupplementDetail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`,body)).then(value=>{invalidateCache('document-picker-active');return value})

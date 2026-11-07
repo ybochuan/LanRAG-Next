@@ -1,4 +1,5 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
+import { invalidateCache } from "../requestCache";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
 import { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
@@ -29,6 +30,48 @@ export async function listKnowledgeBaseActivity(
   return (await get(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`)) as unknown as ListAuditLogResponse;
 }
 
+const kbListCache = new Map<string, { expiresAt: number; value: unknown }>();
+const kbListInflight = new Map<string, Promise<unknown>>();
+let kbListGeneration = 0;
+
+function knowledgeBaseCacheTenant(): string {
+  try {
+    return localStorage.getItem('weknora_selected_tenant_id')
+      || localStorage.getItem('weknora_tenant')
+      || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Invalidate the short-lived KB list cache after a KB mutation. */
+export function invalidateKnowledgeBaseListCache(): void {
+  kbListGeneration += 1;
+  kbListCache.clear();
+  kbListInflight.clear();
+}
+
+async function cachedKnowledgeBaseList<T>(key: string, loader: () => Promise<T>, ttlMs = 10_000): Promise<T> {
+  const hit = kbListCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value as T;
+  if (hit) kbListCache.delete(key);
+  const pending = kbListInflight.get(key);
+  if (pending) return pending as Promise<T>;
+  const requestGeneration = kbListGeneration;
+  const request = loader()
+    .then((value) => {
+      if (requestGeneration === kbListGeneration) {
+        kbListCache.set(key, { expiresAt: Date.now() + ttlMs, value });
+      }
+      return value;
+    })
+    .finally(() => {
+      if (kbListInflight.get(key) === request) kbListInflight.delete(key);
+    });
+  kbListInflight.set(key, request);
+  return request;
+}
+
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
   agent_id?: string;
@@ -48,7 +91,9 @@ export function listKnowledgeBases(params?: {
   if (params?.agent_source_tenant_id) query.set('agent_source_tenant_id', params.agent_source_tenant_id);
   if (params?.creator && params.creator !== 'all') query.set('creator', params.creator);
   const qs = query.toString();
-  return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
+  const url = qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases';
+  const key = `kb-list|${knowledgeBaseCacheTenant()}|${params?.agent_id || ''}|${params?.agent_source_tenant_id || ''}|${params?.creator || 'all'}`;
+  return cachedKnowledgeBaseList(key, () => get(url), 10_000);
 }
 
 // Read-only vector-store binding metadata enriched onto every KB
@@ -365,7 +410,10 @@ export function createKnowledgeBase(data: {
     graph_enabled: boolean;
   };
 }) {
-  return post(`/api/v1/knowledge-bases`, data);
+  return post(`/api/v1/knowledge-bases`, data).then((value) => {
+    invalidateKnowledgeBaseListCache();
+    return value;
+  });
 }
 
 export function getKnowledgeBaseById(id: string, options?: { agent_id?: string; agent_source_tenant_id?: string }) {
@@ -400,7 +448,10 @@ export function updateKnowledgeBase(id: string, data: {
     };
   }
 }) {
-  return put(`/api/v1/knowledge-bases/${id}`, data);
+  return put(`/api/v1/knowledge-bases/${id}`, data).then((value) => {
+    invalidateKnowledgeBaseListCache();
+    return value;
+  });
 }
 
 /** Opt-in automatic generation of the knowledge-base description. */
@@ -451,15 +502,25 @@ export function rebuildKBIndex(kbId: string) {
 }
 
 export function deleteKnowledgeBase(id: string) {
-  return del(`/api/v1/knowledge-bases/${id}`);
+  return del(`/api/v1/knowledge-bases/${id}`).then((value) => {
+    invalidateKnowledgeBaseListCache();
+    invalidateCache('doc-titles');
+    return value;
+  });
 }
 
 export function copyKnowledgeBase(data: { source_id: string; target_id?: string }) {
-  return post(`/api/v1/knowledge-bases/copy`, data);
+  return post(`/api/v1/knowledge-bases/copy`, data).then((value) => {
+    invalidateKnowledgeBaseListCache();
+    return value;
+  });
 }
 
 export function duplicateKnowledgeBase(id: string) {
-  return post(`/api/v1/knowledge-bases/${id}/duplicate`);
+  return post(`/api/v1/knowledge-bases/${id}/duplicate`).then((value) => {
+    invalidateKnowledgeBaseListCache();
+    return value;
+  });
 }
 
 // 获取可移动目标知识库列表（同类型、同Embedding模型）
@@ -483,7 +544,10 @@ export function getKnowledgeMoveProgress(taskId: string) {
 }
 
 export function togglePinKnowledgeBase(id: string) {
-  return put(`/api/v1/knowledge-bases/${id}/pin`);
+  return put(`/api/v1/knowledge-bases/${id}/pin`).then((value) => {
+    invalidateKnowledgeBaseListCache();
+    return value;
+  });
 }
 
 // 知识文件 API（基于具体知识库）
@@ -621,7 +685,11 @@ export function updateManualKnowledge(
   id: string,
   data: { title: string; content: string; status: string; process_config?: KnowledgeProcessOverrides },
 ) {
-  return put(`/api/v1/knowledge/manual/${id}`, data);
+  return put(`/api/v1/knowledge/manual/${id}`, data).then((value) => {
+    invalidateCache('doc-titles');
+    invalidateCache('document-picker-active');
+    return value;
+  });
 }
 
 export function reparseKnowledge(id: string, data?: { process_config?: KnowledgeProcessOverrides }) {
@@ -638,12 +706,20 @@ export function getKnowledgeSpans(id: string, attempt?: number) {
 }
 
 export function delKnowledgeDetails(id: string) {
-  return del(`/api/v1/knowledge/${id}`);
+  return del(`/api/v1/knowledge/${id}`).then((value) => {
+    invalidateCache('doc-titles');
+    invalidateCache('document-picker-active');
+    return value;
+  });
 }
 
 // 批量删除（同一知识库内）。后端会校验所有 id 隶属于 kb_id 且具有编辑权限。
 export function batchDeleteKnowledge(kbId: string, ids: string[]) {
-  return post(`/api/v1/knowledge/batch-delete`, { kb_id: kbId, ids });
+  return post(`/api/v1/knowledge/batch-delete`, { kb_id: kbId, ids }).then((value) => {
+    invalidateCache('doc-titles');
+    invalidateCache('document-picker-active');
+    return value;
+  });
 }
 
 export function downKnowledgeDetails(id: string) {

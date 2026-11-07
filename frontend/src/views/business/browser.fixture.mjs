@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 export async function createBusinessFixture(port=0) {
   const root=fileURLToPath(new URL('../../../',import.meta.url))
-  const calls=[],receipts=new Map(),records=new Map()
+  const calls=[],requests=[],receipts=new Map(),records=new Map()
   const kbs=[{id:'kb-a',name:'研发规范库'},{id:'kb-b',name:'产品说明库'}]
   const docs=new Map(kbs.map(k=>[k.id,[{document_id:k.id+'-doc-1',title:k.id==='kb-a'?'研发协作规范':'产品术语表',state:'active'},{document_id:k.id+'-doc-2',title:k.id==='kb-a'?'开发流程说明':'版本发布说明',state:'active'}]]))
   for(const kb of kbs) records.set(kb.id,{
@@ -14,34 +14,44 @@ export async function createBusinessFixture(port=0) {
     guidance:[{id:'guidance-effective',revision:1,status:'active',topic:'优先使用有效版本',text:'涉及日期的回答，先核对文档有效期和适用范围。',confidence:0.75,source:'seed'}],
     revision:[{id:'proposal-review',revision:1,status:'pending_review',source_document_id:kb.id+'-doc-1',guidance_ids:['guidance-effective'],proposed_patch:'# 研发协作规范（修订建议）\n\n## 评审要求\n每次发布前完成两名评审人的确认，并核对生效日期。'},{id:'proposal-publish',revision:3,status:'approved',source_document_id:kb.id+'-doc-1',guidance_ids:['guidance-effective'],proposed_patch:'# 研发协作规范\n\n## 修订条款\n发布时明确版本、生效日期和适用范围。',publication_key:'fixture-publication-key'}],
   })
-  const entry=`import {createApp,h} from 'vue';import {createRouter,createWebHistory,RouterView} from 'vue-router';import BusinessView from '/src/views/business/BusinessView.vue';import '/src/assets/theme/theme.css';
-    const routes=['associations','feedback-governance','revisions'].map(section=>({path:'/platform/'+section,component:BusinessView,props:{section}}));
+  const entry=`import {createApp,h} from 'vue';import {createRouter,createWebHistory,RouterView} from 'vue-router';import BusinessView from '/src/views/business/BusinessView.vue';import LifecycleView from '/src/views/lifecycle/LifecycleView.vue';import '/src/assets/theme/theme.css';
+    if(new URLSearchParams(location.search).get('failOverview')==='1')document.cookie='fixture-fail-overview=1; path=/';
+    const routes=[...['associations','feedback-governance','revisions'].map(section=>({path:'/platform/'+section,component:BusinessView,props:{section}})),{path:'/platform/lifecycle',component:LifecycleView}];
     createApp({render:()=>h(RouterView)}).use(createRouter({history:createWebHistory(),routes})).mount('#app');`
   const request=`import {auth} from '/fixture-auth.js';const viewer=new URLSearchParams(location.search).get('viewer')==='1';async function call(method,url,body){const r=await fetch('/fixture-api'+url,{method,headers:{'Content-Type':'application/json','X-Fixture-Viewer':viewer?'1':'0','X-Fixture-Tenant':String(auth.effectiveTenantId)},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw {$httpStatus:r.status};return data}export const get=(u)=>call('GET',u);export const put=(u,b)=>call('PUT',u,b);`
   const modules={
     '/fixture-entry.js':entry,
     '/fixture-request.js':request,
     '/fixture-auth.js':`import {reactive} from 'vue';export const auth=reactive({effectiveTenantId:7});window.fixtureAuth=auth;export const useAuthStore=()=>auth;`,
-    '/fixture-kb.js':`import {get} from '/fixture-request.js';export const listKnowledgeBases=()=>get('/api/v1/knowledge-bases');`,
+    '/fixture-kb.js':`import {get} from '/fixture-request.js';export const listKnowledgeBases=()=>get('/api/v1/knowledge-bases');export const batchQueryKnowledge=(ids,kb)=>get('/api/v1/knowledge/batch?'+ids+(kb?'&kb_id='+encodeURIComponent(kb):''));`,
   }
   const reply=(res,status,data)=>{res.statusCode=status;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data))}
   const server=await createServer({root,configFile:false,cacheDir:root+'/node_modules/.vite-business-fixture',plugins:[vue(),{
     name:'business-component-fixture',enforce:'pre',
-    transform(code,id){if(id.includes('/views/business/')||id.endsWith('/api/business.ts')||id.endsWith('/api/lifecycle.ts'))return code.replaceAll("'@/api/knowledge-base'","'/fixture-kb.js'").replaceAll("'@/stores/auth'","'/fixture-auth.js'").replaceAll("'@/utils/request'","'/fixture-request.js'")},
+    transform(code,id){if(id.includes('/views/business/')||id.includes('/views/lifecycle/')||id.endsWith('/api/business.ts')||id.endsWith('/api/lifecycle.ts'))return code.replaceAll("'@/api/knowledge-base'","'/fixture-kb.js'").replaceAll("'@/stores/auth'","'/fixture-auth.js'").replaceAll("'@/utils/request'","'/fixture-request.js'")},
     resolveId(id){if(modules[id])return '\0'+id},load(id){if(id.startsWith('\0'))return modules[id.slice(1)]},
     configureServer(server){server.middlewares.use(async(req,res,next)=>{
       const url=new URL(req.url,'http://localhost')
-      if(url.pathname==='/__fixture/state'){reply(res,200,{calls,records:Object.fromEntries(records)});return}
+      if(url.pathname==='/__fixture/state'){reply(res,200,{calls,requests,records:Object.fromEntries(records)});return}
       if(url.pathname.startsWith('/platform/')){res.setHeader('Content-Type','text/html');res.end('<!DOCTYPE html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AgentRAG 业务界面验收</title><style>html,body,#app{margin:0;height:100%;font-family:Arial,"Microsoft YaHei",sans-serif}body{background:var(--td-bg-color-page)}</style><div id="app"></div><script type="module" src="/fixture-entry.js"></script></html>');return}
       if(!url.pathname.startsWith('/fixture-api/')){next();return}
       const path=url.pathname.slice('/fixture-api'.length),readOnly=req.headers['x-fixture-viewer']==='1'
+      requests.push({method:req.method,path,query:url.search})
       if(path==='/api/v1/knowledge-bases'){reply(res,200,{success:true,data:kbs});return}
+      if(path==='/api/v1/knowledge/batch'){
+        const ids=url.searchParams.getAll('ids')
+        const rows=[]
+        for(const [kb,list] of docs)for(const doc of list)if(ids.includes(doc.document_id))rows.push({id:doc.document_id,title:doc.title,knowledge_base_id:kb})
+        reply(res,200,{success:true,data:rows});return
+      }
       const nativeDoc=path.match(/^\/api\/v1\/knowledge\/(.+)$/)
       if(nativeDoc){for(const[kb,list]of docs){const d=list.find(v=>v.document_id===nativeDoc[1]);if(d){reply(res,200,{success:true,data:{title:d.title,knowledge_base_id:kb}});return}}reply(res,404,{success:false});return}
+      if(/^\/api\/v1\/knowledge-bases\/[^/]+\/lifecycle\/reviews$/.test(path)){reply(res,200,{success:true,data:{alerts:[],truncated:false}});return}
       const match=path.match(/^\/api\/v1\/knowledge-bases\/([^/]+)\/lifecycle(?:\/business\/(.+))?$/)
       if(!match||!records.has(match[1])){reply(res,404,{success:false});return}
       const kb=match[1],action=match[2],data=records.get(kb)
-      if(!action){reply(res,200,{success:true,data:{can_write:!readOnly,documents:docs.get(kb),total:2,page:1,page_size:20}});return}
+      if(!action){if((req.headers.cookie||'').includes('fixture-fail-overview=1')){reply(res,503,{success:false,error:{code:'fixture_unavailable'}});return}const rows=docs.get(kb).map(d=>({document_id:d.document_id,title:d.title,state:d.state,last_event_id:'fixture-'+d.document_id,annotations:{revision:1,labels:{}}}));reply(res,200,{success:true,data:{counts:{pending:0,scheduled:0,active:2,stale:0,archived:0,superseded:0,failed:0},total:rows.length,page:1,page_size:20,documents:rows.slice(0,1),rules:{rules:{effective_delay_days:0,valid_days:0,review_days:0},source:{tenant_id:7,knowledge_base_id:kb},revision:1,token:'fixture'},rule_revision:1,can_write:!readOnly}});return}
+      if(action==='reviews'){reply(res,200,{success:true,data:{alerts:[],truncated:false}});return}
       if(req.method==='GET'){
         if(action==='related'){reply(res,200,{success:true,data:data.relation.filter(v=>v.status==='active').map(v=>({document_id:v.target_document_id,edge_type:v.edge_type,confidence:v.confidence,direction:'outgoing'}))});return}
         const kind=action.replace('_list',''),id=url.searchParams.get('id'),page=Number(url.searchParams.get('page')||1)
@@ -75,7 +85,7 @@ export async function createBusinessFixture(port=0) {
       reply(res,200,{success:true,data:receipt})
     })},
   }],resolve:{alias:{'@':root+'/src'}},server:{host:'127.0.0.1',port,strictPort:port!==0}})
-  await server.listen();const address=server.httpServer.address();return{server,url:'http://127.0.0.1:'+address.port,calls,records}
+  await server.listen();const address=server.httpServer.address();return{server,url:'http://127.0.0.1:'+address.port,calls,requests,records}
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===process.argv[1]){
   const fixture=await createBusinessFixture(Number(process.env.BUSINESS_FIXTURE_PORT||18991));process.stdout.write(fixture.url+'\n')
