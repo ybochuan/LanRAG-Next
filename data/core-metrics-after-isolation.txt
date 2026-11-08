@@ -1,0 +1,162 @@
+# HELP core_http_requests_total Total completed Core HTTP requests.
+# TYPE core_http_requests_total counter
+core_http_requests_total{method="GET",route="/api/v1/knowledge-bases/:id",status_class="2xx"} 1
+core_http_requests_total{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",status_class="2xx"} 3050
+core_http_requests_total{method="GET",route="/health",status_class="2xx"} 30
+core_http_requests_total{method="POST",route="/api/v1/knowledge-search",status_class="2xx"} 31
+# HELP core_http_request_duration_seconds Core HTTP request duration in seconds.
+# TYPE core_http_request_duration_seconds histogram
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.05"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.1"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.25"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.5"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="1"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="2.5"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="5"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="10"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="30"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="60"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="+Inf"} 1
+core_http_request_duration_seconds_sum{method="GET",route="/api/v1/knowledge-bases/:id"} 0.021349192
+core_http_request_duration_seconds_count{method="GET",route="/api/v1/knowledge-bases/:id"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.05"} 3015
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.1"} 3020
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.25"} 3045
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.5"} 3049
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="1"} 3050
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="2.5"} 3050
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="5"} 3050
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="10"} 3050
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="30"} 3050
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="60"} 3050
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="+Inf"} 3050
+core_http_request_duration_seconds_sum{method="GET",route="/api/v1/knowledge-bases/:id/knowledge"} 46.426436813999985
+core_http_request_duration_seconds_count{method="GET",route="/api/v1/knowledge-bases/:id/knowledge"} 3050
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.05"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.1"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.25"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.5"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="1"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="2.5"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="5"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="10"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="30"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="60"} 30
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="+Inf"} 30
+core_http_request_duration_seconds_sum{method="GET",route="/health"} 0.0023006209999999997
+core_http_request_duration_seconds_count{method="GET",route="/health"} 30
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="0.05"} 0
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="0.1"} 0
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="0.25"} 0
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="0.5"} 0
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="1"} 0
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="2.5"} 1
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="5"} 16
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="10"} 27
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="30"} 31
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="60"} 31
+core_http_request_duration_seconds_bucket{method="POST",route="/api/v1/knowledge-search",le="+Inf"} 31
+core_http_request_duration_seconds_sum{method="POST",route="/api/v1/knowledge-search"} 214.12808538500005
+core_http_request_duration_seconds_count{method="POST",route="/api/v1/knowledge-search"} 31
+# HELP rag_stage_duration_seconds Knowledge-search pipeline stage duration in seconds.
+# TYPE rag_stage_duration_seconds histogram
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="0.05"} 20
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="0.1"} 29
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="0.25"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="0.5"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="1"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="2.5"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="5"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="10"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="30"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="60"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_merge",le="+Inf"} 31
+rag_stage_duration_seconds_sum{stage="chunk_merge"} 1.5995911299999999
+rag_stage_duration_seconds_count{stage="chunk_merge"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="0.05"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="0.1"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="0.25"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="0.5"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="1"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="2.5"} 2
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="5"} 22
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="10"} 27
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="30"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="60"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="+Inf"} 31
+rag_stage_duration_seconds_sum{stage="chunk_rerank"} 177.2696086640001
+rag_stage_duration_seconds_count{stage="chunk_rerank"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="0.05"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="0.1"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="0.25"} 0
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="0.5"} 7
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="1"} 17
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="2.5"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="5"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="10"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="30"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="60"} 31
+rag_stage_duration_seconds_bucket{stage="chunk_search",le="+Inf"} 31
+rag_stage_duration_seconds_sum{stage="chunk_search"} 33.99924406900001
+rag_stage_duration_seconds_count{stage="chunk_search"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="0.05"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="0.1"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="0.25"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="0.5"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="1"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="2.5"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="5"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="10"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="30"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="60"} 31
+rag_stage_duration_seconds_bucket{stage="filter_top_k",le="+Inf"} 31
+rag_stage_duration_seconds_sum{stage="filter_top_k"} 0.074349517
+rag_stage_duration_seconds_count{stage="filter_top_k"} 31
+# HELP rag_stage_errors_total Knowledge-search pipeline stage errors.
+# TYPE rag_stage_errors_total counter
+rag_stage_errors_total{stage="chunk_merge"} 0
+rag_stage_errors_total{stage="chunk_rerank"} 0
+rag_stage_errors_total{stage="chunk_search"} 0
+rag_stage_errors_total{stage="filter_top_k"} 0
+# HELP rag_stage_empty_total Knowledge-search pipeline stages that ended with no results.
+# TYPE rag_stage_empty_total counter
+rag_stage_empty_total{stage="chunk_merge"} 0
+rag_stage_empty_total{stage="chunk_rerank"} 0
+rag_stage_empty_total{stage="chunk_search"} 0
+rag_stage_empty_total{stage="filter_top_k"} 0
+# HELP sqlite_slow_queries_total Slow SQLite queries (>= 200ms).
+# TYPE sqlite_slow_queries_total counter
+sqlite_slow_queries_total{operation="select"} 16
+# HELP sqlite_busy_total SQLite SQLITE_BUSY/database-is-locked errors.
+# TYPE sqlite_busy_total counter
+sqlite_busy_total{operation="select"} 0
+# HELP sqlite_locked_total SQLite SQLITE_LOCKED/table-is-locked errors.
+# TYPE sqlite_locked_total counter
+sqlite_locked_total{operation="select"} 0
+# HELP sqlite_conn_stats_available Whether sql.DB pool statistics are available.
+# TYPE sqlite_conn_stats_available gauge
+sqlite_conn_stats_available 1
+# HELP sqlite_conn_open_total Current open SQL connections.
+# TYPE sqlite_conn_open_total gauge
+sqlite_conn_open_total 1
+# HELP sqlite_conn_in_use Current SQL connections in use.
+# TYPE sqlite_conn_in_use gauge
+sqlite_conn_in_use 0
+# HELP sqlite_conn_idle Current idle SQL connections.
+# TYPE sqlite_conn_idle gauge
+sqlite_conn_idle 1
+# HELP sqlite_conn_wait_total Cumulative SQL connection wait count.
+# TYPE sqlite_conn_wait_total counter
+sqlite_conn_wait_total 8648
+# HELP sqlite_conn_wait_duration_seconds Cumulative SQL connection wait duration.
+# TYPE sqlite_conn_wait_duration_seconds gauge
+sqlite_conn_wait_duration_seconds 14.636741447
+# HELP sqlite_conn_max_idle_closed_total Connections closed because of SetMaxIdleConns.
+# TYPE sqlite_conn_max_idle_closed_total counter
+sqlite_conn_max_idle_closed_total 0
+# HELP sqlite_conn_max_idle_time_closed_total Connections closed because of SetConnMaxIdleTime.
+# TYPE sqlite_conn_max_idle_time_closed_total counter
+sqlite_conn_max_idle_time_closed_total 0
+# HELP sqlite_conn_max_lifetime_closed_total Connections closed because of SetConnMaxLifetime.
+# TYPE sqlite_conn_max_lifetime_closed_total counter
+sqlite_conn_max_lifetime_closed_total 0

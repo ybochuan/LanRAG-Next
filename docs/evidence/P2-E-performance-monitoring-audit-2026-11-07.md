@@ -71,7 +71,7 @@
 
 ## 3. 建议的最小指标契约
 
-以下契约已在 P2-E-02 实现 P0 部分（Core API、SQLite、Host）；RAG/Agent 仍属 P1，优先固定字段和基数，不先引入完整监控平台。
+以下契约已在 P2-E-02 实现 P0 部分（Core API、SQLite、Host）；RAG 阶段指标已作为 P2-E P1 扩展实现（见第 9 节）；Agent 仍属 P1，优先固定字段和基数，不先引入完整监控平台。
 
 | 维度 | 建议指标 | 类型/标签 | 建议采集点 |
 |---|---|---|---|
@@ -81,8 +81,8 @@
 | SQLite | `sqlite_busy_total` / `sqlite_locked_total` | counter `{operation}` | GORM/驱动错误分类；不要把 SQL 文本作为标签 |
 | SQLite | `sqlite_transaction_duration_seconds` | histogram `{operation}` | 事务包装层；当前没有现成事务计时 |
 | SQLite | `sqlite_conn_open_total`、`sqlite_conn_in_use`、`sqlite_conn_wait_total`、`sqlite_conn_wait_duration_seconds` | gauge/counter/histogram | `sql.DB.Stats()`；当前未暴露 |
-| RAG | `rag_stage_duration_seconds` | histogram `{stage}` | chat pipeline 的 `stage_complete`；`knowledge-search` 需要单独补 stage 计时 |
-| RAG | `rag_stage_failures_total` | counter `{stage,error_type}` | `stage_failed`/fallback 分支；error_type 固定枚举 |
+| RAG | `rag_stage_duration_seconds` | histogram `{stage}` | `knowledge-search` 的 `runKnowledgeSearchPipeline` 已接入四阶段计时；chat pipeline 阶段日志仍可并行使用 |
+| RAG | `rag_stage_errors_total` / `rag_stage_empty_total` | counter `{stage}` | 同一调用点；`empty` 单独计数，不把空结果伪装成失败 |
 | Agent | `agent_tool_calls_total` | counter `{tool,success}` | `handleToolCall`/`handleToolResult`；tool 名白名单，其他归 `other` |
 | Agent | `agent_tool_duration_seconds` | histogram `{tool}` | 工具结果事件 |
 | Agent | `agent_turn_duration_seconds` | histogram | 完成事件 `total_duration_ms` |
@@ -145,3 +145,7 @@ P2-E-01 已完成，脚本为 `extensions/scripts/p2e_offline_baseline.py`，测
 ## 8. P2-E-02 执行结果（2026-11-08）
 
 P2-E-02 已实现 P0 最小埋点：`internal/metrics` 提供进程内 HTTP RED、SQLite slow/busy/locked、DBStats 与 Prometheus 文本输出；`internal/middleware/metrics.go` 负责 Core 路由模板和 loopback 访问限制；`internal/container/gorm_logger.go`/`container.go` 接入 SQLite 与连接池；`extensions/host/metrics.go` 与 `extensions/bridge/server.go` 提供 Host reconciliation 事件和 Outbox 快照。独立测试结果：`internal/metrics` 通过，`internal/middleware` 文件级测试通过，`extensions/host`/`extensions/bridge` 及 `cd extensions && go test -mod=readonly ./...` 全部通过；Core 全包测试受本机 `CGO_ENABLED=0`、缺少 gcc、sqlite-vec/duckdb Windows build constraints 阻断，已记录为基线环境问题。实现细节、指标/标签安全边界和完整测试命令见 [P2-E-02 最小埋点与本地指标端点](P2-E-02-minimal-metrics-2026-11-08.md)。
+
+## 9. P2-E P1 RAG 阶段指标执行结果（2026-11-08）
+
+已实现 `knowledge-search` 四阶段指标 `rag_stage_duration_seconds`、`rag_stage_errors_total`、`rag_stage_empty_total`；阶段固定为 `chunk_search`、`chunk_rerank`、`chunk_merge`、`filter_top_k`，不采集 query/tenant/KB/session 标签。`internal/metrics` 测试通过，`internal/application/service` 的完整测试仍受本机既有 CGO/`pg_query` 与测试依赖网络阻断。实现与边界见 [P2-E P1：RAG 阶段指标](P2-E-P1-rag-stage-metrics-2026-11-08.md)。

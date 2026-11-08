@@ -15,6 +15,10 @@ func TestRegistryRendersCoreAndSQLiteMetrics(t *testing.T) {
 	registry.ObserveSQLite("SELECT", 250*time.Millisecond, nil)
 	registry.ObserveSQLite("select", 10*time.Millisecond, errors.New("SQLITE_BUSY: database is locked"))
 	registry.ObserveSQLite("update", 5*time.Millisecond, errors.New("SQLITE_LOCKED: table is locked"))
+	registry.ObserveRAGStage("chunk_rerank", 2500*time.Millisecond, "success")
+	registry.ObserveRAGStage("chunk_search", 10*time.Millisecond, "empty")
+	registry.ObserveRAGStage("chunk_merge", 15*time.Millisecond, "error")
+	registry.ObserveRAGStage("unknown-stage", time.Second, "other")
 	registry.SetDBStatsProvider(func() DBStats {
 		return DBStats{
 			OpenConnections: 1,
@@ -36,6 +40,11 @@ func TestRegistryRendersCoreAndSQLiteMetrics(t *testing.T) {
 		`sqlite_slow_queries_total{operation="select"} 1`,
 		`sqlite_busy_total{operation="select"} 1`,
 		`sqlite_locked_total{operation="update"} 1`,
+		`rag_stage_duration_seconds_count{stage="chunk_rerank"} 1`,
+		`rag_stage_duration_seconds_bucket{stage="chunk_rerank",le="2.5"} 1`,
+		`rag_stage_errors_total{stage="chunk_merge"} 1`,
+		`rag_stage_empty_total{stage="chunk_search"} 1`,
+		`rag_stage_duration_seconds_count{stage="other"} 1`,
 		`sqlite_conn_stats_available 1`,
 		`sqlite_conn_open_total 1`,
 		`sqlite_conn_wait_total 3`,

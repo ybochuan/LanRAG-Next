@@ -1,0 +1,71 @@
+{
+  "generated_at": "2026-11-08T21:47:25+0800",
+  "run_dir": "/mnt/d/LanRAG-Next/data/launcher-run-mkZb0T",
+  "groups": {
+    "search_only": {
+      "duration_s": 15.0,
+      "tasks": {
+        "knowledge_search": {
+          "n": 9,
+          "statuses": {
+            "200": 9
+          },
+          "errors": [],
+          "p50_ms": 3513.67,
+          "p95_ms": 17035.69,
+          "max_ms": 17035.69
+        }
+      }
+    },
+    "search_list": {
+      "duration_s": 15.0,
+      "tasks": {
+        "knowledge_search": {
+          "n": 10,
+          "statuses": {
+            "200": 10
+          },
+          "errors": [],
+          "p50_ms": 4962.21,
+          "p95_ms": 18867.74,
+          "max_ms": 18867.74
+        },
+        "knowledge_list": {
+          "n": 2994,
+          "statuses": {
+            "200": 2994
+          },
+          "errors": [],
+          "p50_ms": 15.48,
+          "p95_ms": 40.69,
+          "max_ms": 439.31
+        }
+      }
+    },
+    "search_host_overview": {
+      "duration_s": 15.0,
+      "tasks": {
+        "knowledge_search": {
+          "n": 10,
+          "statuses": {
+            "200": 10
+          },
+          "errors": [],
+          "p50_ms": 5111.34,
+          "p95_ms": 18517.34,
+          "max_ms": 18517.34
+        },
+        "host_overview": {
+          "n": 3344,
+          "statuses": {
+            "200": 3344
+          },
+          "errors": [],
+          "p50_ms": 17.74,
+          "p95_ms": 21.72,
+          "max_ms": 32.55
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 // Package metrics provides a deliberately small, process-local metrics
-// registry for the P2-E-02 baseline. It is not a replacement for a full
-// metrics backend: labels are fixed, values are numeric, and no request body,
-// query, tenant, or knowledge-base identifier is accepted.
+// registry for the P2-E baseline and the RAG stage extension. It is not a
+// replacement for a full metrics backend: labels are fixed, values are numeric,
+// and no request body, query, tenant, or knowledge-base identifier is accepted.
 package metrics
 
 import (
@@ -38,6 +38,14 @@ type sqliteObservation struct {
 	Locked uint64
 }
 
+type ragStageObservation struct {
+	Count   uint64
+	Errors  uint64
+	Empty   uint64
+	Buckets []uint64
+	Sum     float64
+}
+
 // DBStats is the subset of database/sql.DBStats exposed as gauges. It avoids
 // exposing driver-specific state and keeps the metrics package independent of
 // the container.
@@ -57,6 +65,7 @@ type Registry struct {
 	mu             sync.RWMutex
 	http           map[httpKey]*httpObservation
 	sqlite         map[string]*sqliteObservation
+	rag            map[string]*ragStageObservation
 	dbStats        func() DBStats
 	dbStatsPresent bool
 }
@@ -66,6 +75,7 @@ func New() *Registry {
 	return &Registry{
 		http:   make(map[httpKey]*httpObservation),
 		sqlite: make(map[string]*sqliteObservation),
+		rag:    make(map[string]*ragStageObservation),
 	}
 }
 
@@ -80,6 +90,7 @@ func (r *Registry) Reset() {
 	defer r.mu.Unlock()
 	r.http = make(map[httpKey]*httpObservation)
 	r.sqlite = make(map[string]*sqliteObservation)
+	r.rag = make(map[string]*ragStageObservation)
 	r.dbStats = nil
 	r.dbStatsPresent = false
 }
@@ -141,6 +152,38 @@ func (r *Registry) ObserveSQLite(operation string, duration time.Duration, err e
 	}
 	if strings.Contains(message, "sqlite_locked") || strings.Contains(message, "table is locked") {
 		observation.Locked++
+	}
+}
+
+// ObserveRAGStage records one completed knowledge-search pipeline stage.
+// Status is a fixed success/empty/error value; callers must not pass request
+// identifiers or free-form error text as labels.
+func (r *Registry) ObserveRAGStage(stage string, duration time.Duration, status string) {
+	stage = normalizeRAGStage(stage)
+	status = normalizeRAGStatus(status)
+	seconds := duration.Seconds()
+	if seconds < 0 {
+		seconds = 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	observation := r.rag[stage]
+	if observation == nil {
+		observation = &ragStageObservation{Buckets: make([]uint64, len(durationBuckets))}
+		r.rag[stage] = observation
+	}
+	observation.Count++
+	observation.Sum += seconds
+	if status == "error" {
+		observation.Errors++
+	}
+	if status == "empty" {
+		observation.Empty++
+	}
+	for i, bucket := range durationBuckets {
+		if seconds <= bucket {
+			observation.Buckets[i]++
+		}
 	}
 }
 
@@ -215,6 +258,39 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 			quoteLabel(key.Method), quoteLabel(key.Route), formatFloat(observation.Sum))
 		fmt.Fprintf(w, "core_http_request_duration_seconds_count{method=%s,route=%s} %d\n",
 			quoteLabel(key.Method), quoteLabel(key.Route), observation.Count)
+	}
+
+	ragKeys := make([]string, 0, len(r.rag))
+	for stage := range r.rag {
+		ragKeys = append(ragKeys, stage)
+	}
+	sort.Strings(ragKeys)
+	fmt.Fprintln(w, "# HELP rag_stage_duration_seconds Knowledge-search pipeline stage duration in seconds.")
+	fmt.Fprintln(w, "# TYPE rag_stage_duration_seconds histogram")
+	for _, stage := range ragKeys {
+		observation := r.rag[stage]
+		for i, bucket := range durationBuckets {
+			fmt.Fprintf(w, "rag_stage_duration_seconds_bucket{stage=%s,le=%s} %d\n",
+				quoteLabel(stage), quoteLabel(formatBucket(bucket)), observation.Buckets[i])
+		}
+		fmt.Fprintf(w, "rag_stage_duration_seconds_bucket{stage=%s,le=\"+Inf\"} %d\n",
+			quoteLabel(stage), observation.Count)
+		fmt.Fprintf(w, "rag_stage_duration_seconds_sum{stage=%s} %s\n",
+			quoteLabel(stage), formatFloat(observation.Sum))
+		fmt.Fprintf(w, "rag_stage_duration_seconds_count{stage=%s} %d\n",
+			quoteLabel(stage), observation.Count)
+	}
+	fmt.Fprintln(w, "# HELP rag_stage_errors_total Knowledge-search pipeline stage errors.")
+	fmt.Fprintln(w, "# TYPE rag_stage_errors_total counter")
+	for _, stage := range ragKeys {
+		fmt.Fprintf(w, "rag_stage_errors_total{stage=%s} %d\n",
+			quoteLabel(stage), r.rag[stage].Errors)
+	}
+	fmt.Fprintln(w, "# HELP rag_stage_empty_total Knowledge-search pipeline stages that ended with no results.")
+	fmt.Fprintln(w, "# TYPE rag_stage_empty_total counter")
+	for _, stage := range ragKeys {
+		fmt.Fprintf(w, "rag_stage_empty_total{stage=%s} %d\n",
+			quoteLabel(stage), r.rag[stage].Empty)
 	}
 
 	sqliteKeys := make([]string, 0, len(r.sqlite))
@@ -305,6 +381,24 @@ func normalizeOperation(operation string) string {
 	switch strings.ToLower(strings.TrimSpace(operation)) {
 	case "select", "insert", "update", "delete":
 		return strings.ToLower(strings.TrimSpace(operation))
+	default:
+		return "other"
+	}
+}
+
+func normalizeRAGStage(stage string) string {
+	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "chunk_search", "chunk_rerank", "chunk_merge", "filter_top_k":
+		return strings.ToLower(strings.TrimSpace(stage))
+	default:
+		return "other"
+	}
+}
+
+func normalizeRAGStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "success", "empty", "error":
+		return strings.ToLower(strings.TrimSpace(status))
 	default:
 		return "other"
 	}

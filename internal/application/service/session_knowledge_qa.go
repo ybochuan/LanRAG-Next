@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/metrics"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -1015,7 +1016,15 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 				"flow":       "search_knowledge",
 			},
 		})
+		stageStart := time.Now()
 		err := s.eventManager.Trigger(stageCtx, event, chatManage)
+		stageStatus := "success"
+		if err == chatpipeline.ErrSearchNothing {
+			stageStatus = "empty"
+		} else if err != nil {
+			stageStatus = "error"
+		}
+		metrics.Default.ObserveRAGStage(string(event), time.Since(stageStart), stageStatus)
 		var spanErr error
 		if err != nil && err != chatpipeline.ErrSearchNothing {
 			spanErr = err.Err

@@ -1,0 +1,88 @@
+# HELP core_http_requests_total Total completed Core HTTP requests.
+# TYPE core_http_requests_total counter
+core_http_requests_total{method="GET",route="/api/v1/knowledge-bases/:id",status_class="2xx"} 1
+core_http_requests_total{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",status_class="2xx"} 4
+core_http_requests_total{method="GET",route="/health",status_class="2xx"} 4
+# HELP core_http_request_duration_seconds Core HTTP request duration in seconds.
+# TYPE core_http_request_duration_seconds histogram
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.05"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.1"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.25"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="0.5"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="1"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="2.5"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="5"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="10"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="30"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="60"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id",le="+Inf"} 1
+core_http_request_duration_seconds_sum{method="GET",route="/api/v1/knowledge-bases/:id"} 0.021349192
+core_http_request_duration_seconds_count{method="GET",route="/api/v1/knowledge-bases/:id"} 1
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.05"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.1"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.25"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="0.5"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="1"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="2.5"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="5"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="10"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="30"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="60"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/api/v1/knowledge-bases/:id/knowledge",le="+Inf"} 4
+core_http_request_duration_seconds_sum{method="GET",route="/api/v1/knowledge-bases/:id/knowledge"} 0.054498462
+core_http_request_duration_seconds_count{method="GET",route="/api/v1/knowledge-bases/:id/knowledge"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.05"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.1"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.25"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="0.5"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="1"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="2.5"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="5"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="10"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="30"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="60"} 4
+core_http_request_duration_seconds_bucket{method="GET",route="/health",le="+Inf"} 4
+core_http_request_duration_seconds_sum{method="GET",route="/health"} 0.001740447
+core_http_request_duration_seconds_count{method="GET",route="/health"} 4
+# HELP rag_stage_duration_seconds Knowledge-search pipeline stage duration in seconds.
+# TYPE rag_stage_duration_seconds histogram
+# HELP rag_stage_errors_total Knowledge-search pipeline stage errors.
+# TYPE rag_stage_errors_total counter
+# HELP rag_stage_empty_total Knowledge-search pipeline stages that ended with no results.
+# TYPE rag_stage_empty_total counter
+# HELP sqlite_slow_queries_total Slow SQLite queries (>= 200ms).
+# TYPE sqlite_slow_queries_total counter
+sqlite_slow_queries_total{operation="select"} 1
+# HELP sqlite_busy_total SQLite SQLITE_BUSY/database-is-locked errors.
+# TYPE sqlite_busy_total counter
+sqlite_busy_total{operation="select"} 0
+# HELP sqlite_locked_total SQLite SQLITE_LOCKED/table-is-locked errors.
+# TYPE sqlite_locked_total counter
+sqlite_locked_total{operation="select"} 0
+# HELP sqlite_conn_stats_available Whether sql.DB pool statistics are available.
+# TYPE sqlite_conn_stats_available gauge
+sqlite_conn_stats_available 1
+# HELP sqlite_conn_open_total Current open SQL connections.
+# TYPE sqlite_conn_open_total gauge
+sqlite_conn_open_total 1
+# HELP sqlite_conn_in_use Current SQL connections in use.
+# TYPE sqlite_conn_in_use gauge
+sqlite_conn_in_use 0
+# HELP sqlite_conn_idle Current idle SQL connections.
+# TYPE sqlite_conn_idle gauge
+sqlite_conn_idle 1
+# HELP sqlite_conn_wait_total Cumulative SQL connection wait count.
+# TYPE sqlite_conn_wait_total counter
+sqlite_conn_wait_total 6
+# HELP sqlite_conn_wait_duration_seconds Cumulative SQL connection wait duration.
+# TYPE sqlite_conn_wait_duration_seconds gauge
+sqlite_conn_wait_duration_seconds 0.003065983
+# HELP sqlite_conn_max_idle_closed_total Connections closed because of SetMaxIdleConns.
+# TYPE sqlite_conn_max_idle_closed_total counter
+sqlite_conn_max_idle_closed_total 0
+# HELP sqlite_conn_max_idle_time_closed_total Connections closed because of SetConnMaxIdleTime.
+# TYPE sqlite_conn_max_idle_time_closed_total counter
+sqlite_conn_max_idle_time_closed_total 0
+# HELP sqlite_conn_max_lifetime_closed_total Connections closed because of SetConnMaxLifetime.
+# TYPE sqlite_conn_max_lifetime_closed_total counter
+sqlite_conn_max_lifetime_closed_total 0
