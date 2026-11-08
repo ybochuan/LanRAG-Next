@@ -91,6 +91,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
+	"github.com/Tencent/WeKnora/internal/metrics"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
@@ -1146,6 +1147,19 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqlDB.SetMaxIdleConns(10)
 	}
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
+	metrics.Default.SetDBStatsProvider(func() metrics.DBStats {
+		stats := sqlDB.Stats()
+		return metrics.DBStats{
+			OpenConnections:   stats.OpenConnections,
+			InUse:             stats.InUse,
+			Idle:              stats.Idle,
+			WaitCount:         stats.WaitCount,
+			WaitDuration:      stats.WaitDuration,
+			MaxIdleClosed:     stats.MaxIdleClosed,
+			MaxIdleTimeClosed: stats.MaxIdleTimeClosed,
+			MaxLifetimeClosed: stats.MaxLifetimeClosed,
+		}
+	})
 
 	return db, nil
 }

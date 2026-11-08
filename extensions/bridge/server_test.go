@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,29 @@ func TestParserSlowUploadDoesNotInheritBridgeFiveSecondDeadline(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != 204 {
 		t.Fatalf("slow parser upload HTTP %d", response.StatusCode)
+	}
+}
+
+func TestBridgeMetricsRouteWhenConfigured(t *testing.T) {
+	server := httptest.NewServer(bridge.NewServerWithServices(bridge.Services{
+		Metrics: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("host_outbox_available 0\n"))
+		}),
+	}).Handler)
+	t.Cleanup(server.Close)
+
+	response, err := server.Client().Get(server.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "host_outbox_available") {
+		t.Fatalf("metrics status=%d body=%s", response.StatusCode, body)
 	}
 }
 

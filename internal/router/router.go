@@ -142,6 +142,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Language())
 	r.Use(middleware.Logger())
+	r.Use(middleware.Metrics())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
 
@@ -149,6 +150,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	// 本机运维指标端点，仅接受回环地址访问。
+	r.GET("/metrics", middleware.MetricsEndpoint())
 
 	// Swagger API 文档（仅在非生产环境下启用）
 	// 通过 GIN_MODE 环境变量判断：release 模式下禁用 Swagger

@@ -18,6 +18,7 @@ type Services struct {
 	BeforeRetrieve    *RetrieveHandler
 	AfterRetrieve     *AttachmentHandler
 	MCP               http.Handler
+	Metrics           http.Handler  // Optional loopback-only operational metrics endpoint.
 	Parser            http.Handler  // Optional identity-bearing V1 parser; disabled unless configured.
 	ParserReadTimeout time.Duration // Zero uses 1000s; applies only to the parser body.
 }
@@ -52,6 +53,9 @@ func NewServerWithServices(services Services) *http.Server {
 	}
 	mux.HandleFunc("GET /bridge/healthz", health)
 	mux.HandleFunc("GET /healthz", health)
+	if services.Metrics != nil {
+		mux.Handle("GET /metrics", services.Metrics)
+	}
 	ready := func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 200*time.Millisecond)
 		defer cancel()

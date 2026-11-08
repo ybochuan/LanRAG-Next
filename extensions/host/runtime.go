@@ -69,9 +69,16 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	if report == nil {
 		return errors.New("host event reporter required")
 	}
+	metricsCollector := newHostMetrics()
+	originalReport := report
+	report = func(code string) {
+		metricsCollector.record(code)
+		originalReport(code)
+	}
 	cfg.KnowledgeBaseIDs = append([]string(nil), cfg.KnowledgeBaseIDs...)
 	var db *store.DB
 	var writer *taggov.Writer
+	var metricsHandler http.Handler
 	started := false
 	defer func() {
 		if writer != nil {
@@ -148,6 +155,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			allowed = append(allowed, outbox.Scope{TenantID: cfg.TenantID, KnowledgeBaseID: kb})
 		}
 		worker = &outbox.Worker{Store: outbox.NewStore(db), Handler: projectionDispatcher(projector.Handle, alertHandler), Lease: cfg.Lease, RetryDelay: cfg.RetryDelay, MaxAttempts: cfg.MaxAttempts, PollInterval: cfg.PollInterval, Scopes: allowed, Report: func(error) { report("projection_failed") }}
+		metricsHandler = metricsCollector.handler(newHostOutboxSnapshot(worker.Store, allowed, time.Now))
 	}
 	var native *parser.NativeHandler
 	var err error
@@ -173,7 +181,10 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		}
 		defer native.Close()
 	}
-	services := bridge.Services{}
+	if metricsHandler == nil {
+		metricsHandler = metricsCollector.handler(nil)
+	}
+	services := bridge.Services{Metrics: metricsHandler}
 	var localReady atomic.Bool
 	defer localReady.Store(false)
 	services.Ready = func(ctx context.Context) bool {
