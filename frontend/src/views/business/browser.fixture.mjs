@@ -8,6 +8,7 @@ export async function createBusinessFixture(port=0) {
   const calls=[],requests=[],receipts=new Map(),records=new Map()
   const kbs=[{id:'kb-a',name:'研发规范库'},{id:'kb-b',name:'产品说明库'}]
   const docs=new Map(kbs.map(k=>[k.id,[{document_id:k.id+'-doc-1',title:k.id==='kb-a'?'研发协作规范':'产品术语表',state:'active'},{document_id:k.id+'-doc-2',title:k.id==='kb-a'?'开发流程说明':'版本发布说明',state:'active'}]]))
+  const clauseChunks=[...docs].flatMap(([kb,list])=>list.map(d=>({id:d.document_id+'-chunk',knowledge_id:d.document_id,knowledge_base_id:kb,chunk_index:0,content:d.title+'：发布前核对审批记录。'})))
   for(const kb of kbs) records.set(kb.id,{
     relation:[{id:'relation-'+kb.id,revision:1,status:'candidate',document_id:kb.id+'-doc-1',target_document_id:kb.id+'-doc-2',edge_type:'related_to',confidence:0.86}],
     feedback:[{id:'feedback-review',revision:1,status:'pending_review',topic:'生效日期的核对',text:'涉及条款时，请明确依据的生效日期，并引用当前有效版本。',risk:'medium',ready_at:null},{id:'feedback-high',revision:2,status:'approved',topic:'高风险条款适用范围',text:'只在适用范围明确匹配的情况下引用该条款，不扩大解释。',risk:'high',ready_at:'2020-01-01T00:00:00Z'},{id:'feedback-cooling',revision:2,status:'approved',topic:'待冷静期结束的反馈',text:'核对定义与术语的一致性。',risk:'medium',ready_at:'2099-01-01T00:00:00Z'}],
@@ -23,7 +24,7 @@ export async function createBusinessFixture(port=0) {
     '/fixture-entry.js':entry,
     '/fixture-request.js':request,
     '/fixture-auth.js':`import {reactive} from 'vue';export const auth=reactive({effectiveTenantId:7});window.fixtureAuth=auth;export const useAuthStore=()=>auth;`,
-    '/fixture-kb.js':`import {get} from '/fixture-request.js';export const listKnowledgeBases=()=>get('/api/v1/knowledge-bases');export const batchQueryKnowledge=(ids,kb)=>get('/api/v1/knowledge/batch?'+ids+(kb?'&kb_id='+encodeURIComponent(kb):''));`,
+    '/fixture-kb.js':`import {get} from '/fixture-request.js';export const listKnowledgeBases=()=>get('/api/v1/knowledge-bases');export const batchQueryKnowledge=(ids,kb)=>get('/api/v1/knowledge/batch?'+ids+(kb?'&kb_id='+encodeURIComponent(kb):''));export const getKnowledgeDetailsCon=(id,page)=>get('/api/v1/chunks/'+id+'?page='+page);`,
   }
   const reply=(res,status,data)=>{res.statusCode=status;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data))}
   const server=await createServer({root,configFile:false,cacheDir:root+'/node_modules/.vite-business-fixture',plugins:[vue(),{
@@ -46,11 +47,15 @@ export async function createBusinessFixture(port=0) {
       }
       const nativeDoc=path.match(/^\/api\/v1\/knowledge\/(.+)$/)
       if(nativeDoc){for(const[kb,list]of docs){const d=list.find(v=>v.document_id===nativeDoc[1]);if(d){reply(res,200,{success:true,data:{title:d.title,knowledge_base_id:kb}});return}}reply(res,404,{success:false});return}
+      const chunkByID=path.match(/^\/api\/v1\/chunks\/by-id\/([^/]+)$/)
+      if(chunkByID){const row=clauseChunks.find(v=>v.id===chunkByID[1]);reply(res,row?200:404,{success:!!row,data:row});return}
+      const chunkList=path.match(/^\/api\/v1\/chunks\/([^/]+)$/)
+      if(chunkList){const rows=clauseChunks.filter(v=>v.knowledge_id===chunkList[1]);reply(res,200,{success:true,data:rows,total:rows.length,page_size:20});return}
       if(/^\/api\/v1\/knowledge-bases\/[^/]+\/lifecycle\/reviews$/.test(path)){reply(res,200,{success:true,data:{alerts:[],truncated:false}});return}
       const match=path.match(/^\/api\/v1\/knowledge-bases\/([^/]+)\/lifecycle(?:\/business\/(.+))?$/)
       if(!match||!records.has(match[1])){reply(res,404,{success:false});return}
       const kb=match[1],action=match[2],data=records.get(kb)
-      if(!action){if((req.headers.cookie||'').includes('fixture-fail-overview=1')){reply(res,503,{success:false,error:{code:'fixture_unavailable'}});return}const rows=docs.get(kb).map(d=>({document_id:d.document_id,title:d.title,state:d.state,last_event_id:'fixture-'+d.document_id,annotations:{revision:1,labels:{}}}));reply(res,200,{success:true,data:{counts:{pending:0,scheduled:0,active:2,stale:0,archived:0,superseded:0,failed:0},total:rows.length,page:1,page_size:20,documents:rows.slice(0,1),rules:{rules:{effective_delay_days:0,valid_days:0,review_days:0},source:{tenant_id:7,knowledge_base_id:kb},revision:1,token:'fixture'},rule_revision:1,can_write:!readOnly}});return}
+      if(!action){if((req.headers.cookie||'').includes('fixture-fail-overview=1')){reply(res,503,{success:false,error:{code:'fixture_unavailable'}});return}const rows=docs.get(kb).map(d=>({document_id:d.document_id,title:d.title,state:d.state,last_event_id:'fixture-'+d.document_id,annotations:{revision:1,labels:{}}}));const documents=url.searchParams.get('state')==='active'?rows.filter(d=>d.title.includes(url.searchParams.get('title')||'')):rows.slice(0,1);reply(res,200,{success:true,data:{counts:{pending:0,scheduled:0,active:2,stale:0,archived:0,superseded:0,failed:0},total:rows.length,page:1,page_size:20,documents,rules:{rules:{effective_delay_days:0,valid_days:0,review_days:0},source:{tenant_id:7,knowledge_base_id:kb},revision:1,token:'fixture'},rule_revision:1,can_write:!readOnly}});return}
       if(action==='reviews'){reply(res,200,{success:true,data:{alerts:[],truncated:false}});return}
       if(req.method==='GET'){
         if(action==='related'){reply(res,200,{success:true,data:data.relation.filter(v=>v.status==='active').map(v=>({document_id:v.target_document_id,edge_type:v.edge_type,confidence:v.confidence,direction:'outgoing'}))});return}
@@ -63,16 +68,19 @@ export async function createBusinessFixture(port=0) {
       const body=JSON.parse(Buffer.concat(chunks).toString());calls.push({kb,action,body})
       const receiptKey=kb+':'+body.operation_id
       if(receipts.has(receiptKey)){reply(res,200,{success:true,data:receipts.get(receiptKey)});return}
-      const kind=action.split('_')[0]==='guidance'?'guidance':action.split('_')[0]
+      const kind=action.startsWith('clause_')?'relation':action.split('_')[0]
       let row=data[kind]?.find(v=>v.id===body.business.id)
       if(action.endsWith('_create')||action==='relation_declare'||action==='guidance_seed'){
         row={...body.business.payload,id:'created-'+calls.length,revision:1,status:action==='guidance_seed'?'active':action==='relation_declare'?(body.business.payload.edge_type==='related_to'?'candidate':'active'):'pending_review'}
+        if(action==='clause_create')Object.assign(row,{pins_current:true,source_version_id:'fixture-source-version',target_version_id:'fixture-target-version'})
         data[kind].unshift(row)
       }else{
         if(!row||body.expected_revision!==row.revision){reply(res,409,{success:false});return}
         if(action==='feedback_activate'&&row.risk==='high'&&!body.business.payload.second_confirmation){reply(res,409,{success:false});return}
         row.revision++
         if(action.endsWith('_approve')){row.status='approved';if(kind==='feedback')row.ready_at='2099-01-01T00:00:00Z'}
+        else if(action==='clause_confirm')row.status=row.edge_type==='conflicts_with'?'awaiting_resolution':'active'
+        else if(action==='clause_resolve')Object.assign(row,{status:'resolved',resolution:body.business.payload.resolution,decision_note:body.business.payload.text,resolved_by:'fixture-admin',resolved_at:new Date().toISOString()})
         else if(action.endsWith('_confirm')||action.endsWith('_activate'))row.status='active'
         else if(action.endsWith('_revoke'))row.status='revoked'
         else if(action.endsWith('_reject'))row.status='rejected'

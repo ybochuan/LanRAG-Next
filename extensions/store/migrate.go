@@ -61,8 +61,17 @@ var attachmentRevisionsMigration string
 //go:embed migrations/019_revision_splits.sql
 var revisionSplitsMigration string
 
+//go:embed migrations/020_repeal_notices.sql
+var repealNoticesMigration string
+
+//go:embed migrations/021_clause_relations.sql
+var clauseRelationsMigration string
+
+//go:embed migrations/022_parser_renditions.sql
+var parserRenditionsMigration string
+
 // LatestSchemaVersion is the last published migration supported by this Host.
-const LatestSchemaVersion = 19
+const LatestSchemaVersion = 22
 
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
@@ -237,6 +246,30 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(19)"); err != nil {
+				return err
+			}
+		}
+		if version < 20 {
+			if _, err := tx.ExecContext(ctx, repealNoticesMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(20)"); err != nil {
+				return err
+			}
+		}
+		if version < 21 {
+			if _, err := tx.ExecContext(ctx, clauseRelationsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(21)"); err != nil {
+				return err
+			}
+		}
+		if version < 22 {
+			if _, err := tx.ExecContext(ctx, parserRenditionsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(22)"); err != nil {
 				return err
 			}
 		}

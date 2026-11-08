@@ -119,6 +119,39 @@ func TestParentInvalidationAndVersionChangesRefuseChild(t *testing.T) {
 		t.Fatal("changed parent version allowed")
 	}
 }
+
+func TestDueRepealHoldDoesNotPersistDependencyInvalidation(t *testing.T) {
+	db := fixture(t)
+	ctx := t.Context()
+	now := time.Now().UTC()
+	scope := lifecycle.Scope{TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "child"}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO ext_repeal_notices VALUES
+			('7','kb','fixture-notice','child','parent','child-v','parent-v',?,'scheduled',2,NULL,NULL)`, now.Add(-time.Hour).UnixMilli())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lifecycle.NewMachine(db, time.Now).Reevaluate(ctx, scope); err != nil {
+		t.Fatal(err)
+	}
+	current, err := lifecycle.NewStore(db).Current(ctx, scope)
+	if err != nil || current.State != lifecycle.Active {
+		t.Fatalf("temporary read hold persisted as a lifecycle transition: %+v, %v", current, err)
+	}
+	if a := assess(t, db); a.Invalid(now) || !a.ReadBlocked(now) {
+		t.Fatalf("the pending repeal must block only reading: %+v", a)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE ext_repeal_notices SET status='revoked' WHERE notice_id='fixture-notice'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if a := assess(t, db); a.ReadBlocked(now) {
+		t.Fatalf("cancelling the repeal did not release reading: %+v", a)
+	}
+}
 func TestDependencyCycleAndForeignScopeNeverPermit(t *testing.T) {
 	db := fixture(t)
 	declare(t, db, "decl-parent", "parent", "child")

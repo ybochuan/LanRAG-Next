@@ -53,7 +53,7 @@ func attachmentParentActive(ctx context.Context, tx *sql.Tx, tenant uint64, d we
 		return false, nil
 	}
 	var state string
-	e := tx.QueryRowContext(ctx, `SELECT CASE WHEN `+store.LifecycleCurrentVerifiedSQL+` THEN c.state ELSE '' END FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
+	e := tx.QueryRowContext(ctx, `SELECT CASE WHEN `+store.LifecycleReadableSQL+` THEN c.state ELSE '' END FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
 	WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?
 	AND NOT EXISTS (SELECT 1 FROM ext_attachment_delete_intents d WHERE d.tenant_id=c.tenant_id
 	AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id)`, fmt.Sprint(tenant), d.KnowledgeBaseID, d.ParentDocumentID).Scan(&state)

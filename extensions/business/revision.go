@@ -170,7 +170,7 @@ func (s *Service) Publish(ctx context.Context, scope provenance.Scope, id string
 	}
 	verifySource := s.verify
 	if p.SplitID != "" {
-		verifySource = s.observeSplitVersion
+		verifySource = s.observeVersion
 	}
 	source, e := verifySource(ctx, scope, p.SourceDocumentID)
 	if e != nil || source != p.SourceVersionID {

@@ -35,7 +35,9 @@ func (s *Server) lineageGraph(ctx context.Context, r Request, root string) (any,
 			graph.TitlesUnavailable = true
 		} else {
 			for i := range graph.Nodes {
-				graph.Nodes[i].Title = titles[graph.Nodes[i].DocumentID]
+				if title := titles[graph.Nodes[i].DocumentID]; title != "" {
+					graph.Nodes[i].Title = title
+				}
 			}
 		}
 	}

@@ -26,7 +26,10 @@ def main():
     parser.add_argument("--live-models",action="store_true",help="Use Windows8081 embeddings,8082 rerank and DeepSeek; key from AGENTRAG_E2E_DEEPSEEK_KEY")
     parser.add_argument("--deepseek-model",default="deepseek-flash")
     parser.add_argument("--joint-m0",action="store_true",help="Also verify M0 offline/online using the same parser-enabled Host (local model fixture only)")
+    parser.add_argument("--renditions",action="store_true",help="Verify real MinerU rendition binding, guarded download and version drift in a private network namespace")
     args=parser.parse_args();root=Path(__file__).resolve().parents[2]
+    if args.renditions and (args.joint_m0 or args.live_models):
+        parser.error("--renditions uses its own worker Host and local model fixture")
     report=args.report or root/"docs/evidence"/("m1-native-e2e-"+datetime.now().strftime("%Y%m%d-%H%M%S")+".log")
     lines=[];backend=driver=private=log=None;code=1
     core_key,backend_key=secrets.token_urlsafe(32),secrets.token_urlsafe(32)
@@ -56,9 +59,13 @@ def main():
             if time.monotonic()>deadline:raise RuntimeError("MinerU readiness deadline")
             time.sleep(.1)
         cfg={"core":args.core,"work":wslpath(work),"windows_python":wslpath(args.mineru_python.resolve()),"mineru_port":json.loads(ready.read_text())["port"],"core_key":core_key,"backend_key":backend_key}
-        cfg.update(live_models=args.live_models,embedding_dimension=dimension,generation_key=generation_key,generation_model=args.deepseek_model,joint_m0=args.joint_m0)
+        cfg.update(live_models=args.live_models,embedding_dimension=dimension,generation_key=generation_key,generation_model=args.deepseek_model,joint_m0=args.joint_m0,renditions=args.renditions)
         emit("[TOPOLOGY] Actual WSL CGO core + actual WSL Host + installed Windows MinerU4.0.1; owned loopback HTTP/interop relay, no WSL/firewall/listener configuration changes")
-        driver=subprocess.Popen(["wsl.exe","-d","Ubuntu","--exec","/usr/bin/env","PATH=/usr/local/go/bin:/usr/bin:/bin","/usr/bin/python3","-B",wslpath(Path(__file__).with_name("m1_native_e2e_linux.py"))],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+        command=["wsl.exe","-d","Ubuntu","--exec"]
+        if args.renditions:
+            command.extend(["unshare","-Urn","bash","-c",'ip link set lo up && exec "$@"',"rendition-e2e"])
+        command.extend(["/usr/bin/env","PATH=/usr/local/go/bin:/usr/bin:/bin","/usr/bin/python3","-B",wslpath(Path(__file__).with_name("m1_native_e2e_linux.py"))])
+        driver=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
         output,_=driver.communicate(json.dumps(cfg),timeout=360 if args.live_models else 240);emit(output.rstrip());code=driver.returncode
     except (Exception,KeyboardInterrupt) as error:emit("[ERROR] "+type(error).__name__+": "+str(error))
     finally:

@@ -5,8 +5,8 @@
     </label>
     <label>{{ label }}<select :value="modelValue" :disabled="disabled || loading" required @change="choose">
       <option value="">请选择生效文档</option>
-      <option v-if="modelValue && !items.some(v=>v.document_id===modelValue)" :value="modelValue">{{ selectedTitle || selectedName || modelValue }}</option>
-      <option v-for="item in items" :key="item.document_id" :value="item.document_id">{{ item.title || item.document_id }}</option>
+      <option v-if="modelValue && !items.some(v=>v.document_id===modelValue)" :value="modelValue">{{ displayTitle(selectedTitle || selectedName, modelValue) }}</option>
+      <option v-for="item in items" :key="item.document_id" :value="item.document_id">{{ displayTitle(item.title, item.document_id) }}</option>
     </select></label>
     <p v-if="error" role="alert" class="notice error">{{ error }} <button type="button" @click="load">重试</button></p>
     <p v-else-if="searchable && !loading && !items.length" class="subtle">没有匹配的生效文档。</p>
@@ -18,11 +18,15 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { overview, type DocumentRow } from '@/api/lifecycle'
 import { cached, cacheKey } from '@/api/requestCache'
 import { requestFence } from '../lifecycle/model'
-const props=defineProps<{kb:string;modelValue:string;label:string;disabled?:boolean;exclude?:string;searchable?:boolean;selectedTitle?:string}>()
+const props=defineProps<{kb:string;modelValue:string;label:string;disabled?:boolean;exclude?:string;searchable?:boolean;selectedTitle?:string;showIdentity?:boolean}>()
 const emit=defineEmits<{'update:modelValue':[id:string]}>()
 const items=ref<DocumentRow[]>([]),page=ref(1),total=ref(0),loading=ref(false),error=ref(''),selectedName=ref('')
 const title=ref('')
 const fence=requestFence()
+function displayTitle(title: string | undefined, id: string) {
+  if (!title || title === id) return id
+  return props.showIdentity ? `${title} · ${id.slice(0, 8)}` : title
+}
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 function cacheTenant(){try{return localStorage.getItem('weknora_selected_tenant_id')||localStorage.getItem('weknora_tenant')||''}catch{return ''}}
 async function load(){

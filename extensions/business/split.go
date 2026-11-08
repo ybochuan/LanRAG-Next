@@ -65,25 +65,8 @@ func (s *Service) split(ctx context.Context, c Command) (Result, error) {
 	if c.Scope.TenantID == 0 || !validID(c.Scope.KnowledgeBaseID) || !validID(c.ActorID) || !validID(c.OperationID) || c.ExpectedRevision < 0 {
 		return Result{}, ErrInvalid
 	}
-	// Check the receipt before observing a source that may already be superseded.
-	var result Result
-	var previousHash string
-	var previousBody []byte
-	err := s.db.View(ctx, func(tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT payload_hash,result_json FROM ext_business_receipts
-			WHERE tenant_id=? AND knowledge_base_id=? AND operation_id=?`, args(c.Scope, c.OperationID)...).Scan(&previousHash, &previousBody)
-	})
-	if err == nil {
-		if previousHash != digest(c) {
-			return Result{}, ErrConflict
-		}
-		if json.Unmarshal(previousBody, &result) != nil {
-			return Result{}, ErrUnavailable
-		}
-		return result, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return Result{}, err
+	if result, replayed, err := s.replay(ctx, c); replayed || err != nil {
+		return result, err
 	}
 
 	if c.Action == "split_create" {
@@ -274,7 +257,7 @@ func (s *Service) publicationSource(ctx context.Context, tx *sql.Tx, p Publicati
 	return false, nil
 }
 
-func (s *Service) observeSplitVersion(ctx context.Context, scope provenance.Scope, doc string) (string, error) {
+func (s *Service) observeVersion(ctx context.Context, scope provenance.Scope, doc string) (string, error) {
 	if s.registry == nil {
 		return s.verify(ctx, scope, doc)
 	}
@@ -328,11 +311,11 @@ func (s *Service) publishSplit(ctx, remoteCtx context.Context, p Publication, r 
 	if err != nil {
 		return Result{}, err
 	}
-	version, err := s.observeSplitVersion(ctx, p.Scope, target.ID)
+	version, err := s.observeVersion(ctx, p.Scope, target.ID)
 	if err != nil {
 		return r, nil // The observer may not have initialized the target yet.
 	}
-	if head, err := s.observeSplitVersion(ctx, p.Scope, p.SourceDocumentID); err != nil || head != p.SourceVersionID {
+	if head, err := s.observeVersion(ctx, p.Scope, p.SourceDocumentID); err != nil || head != p.SourceVersionID {
 		return Result{}, ErrConflict
 	}
 	p.TargetMetadataHash = target.MetadataHash

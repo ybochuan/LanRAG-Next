@@ -202,16 +202,22 @@ def main():
         startup.until(lambda: state() == "active", 20)
         model.doc_id, model.kb_id = doc["id"], kb["id"]
         sessions = {}
-        def ask(phase, agent):
+        def ask(phase, agent, document_id=None):
             model.phase = phase; model.tool_step = 0
             kind = "agent" if agent else "rag"
+            target = document_id or doc["id"]
+            model.doc_id = target
+            if document_id:
+                kind += "-" + document_id
             if kind not in sessions:
                 sessions[kind] = http.api("POST", "/sessions", {"title": "Private governance validation"})["data"]["id"]
             offset = len(model.prompts)
             generation_offset=model.base.generation_calls
             endpoint="/agent-chat/" if agent else "/knowledge-chat/"
-            payload={"query": "Retrieve AGENTRAG_E2E_MARKER: how many reviewers are required?", "knowledge_base_ids": [kb["id"]], "knowledge_ids": [doc["id"]], "agent_enabled": agent, "agent_id": "builtin-smart-reasoning" if agent else "builtin-quick-answer", "web_search_enabled": False, "summary_model_id": models[0], "disable_title": True}
-            if phase == "agent-archive-history":
+            payload={"query": "Retrieve AGENTRAG_E2E_MARKER: how many reviewers are required?", "knowledge_base_ids": [kb["id"]], "knowledge_ids": [target], "agent_enabled": agent, "agent_id": "builtin-smart-reasoning" if agent else "builtin-quick-answer", "web_search_enabled": False, "summary_model_id": models[0], "disable_title": True}
+            if phase.startswith("rag-repeal-"):
+                payload["query"] = "RETENTIONDEADLINE"
+            if phase.startswith("agent-archive-"):
                 payload["query"] = "仅查阅已经失效的历史条款 AGENTRAG_E2E_MARKER，提醒我它是否仍有效。"
             request=urllib.request.Request(http.base_url+"/api/v1"+endpoint+sessions[kind],data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+http.token,"Content-Type":"application/json","X-Request-ID":"gov-e2e-"+phase+"-"+nonce},method="POST")
             fragments=[];status=0
@@ -373,6 +379,7 @@ def main():
             if db.execute("PRAGMA foreign_key_check").fetchone():
                 raise RuntimeError("provenance foreign key violation")
         emit("[PROVENANCE-AGENT] PASS: actual native execution sealed; real fields verified against native source snapshots; unsupported composition remains unattributed; FK check clean")
+        repeal = None
         if os.environ.get("AGENTRAG_BUSINESS_E2E") == "1":
             import business_e2e
             business_guidance = business_e2e.run(http, kb, doc, emit, work / "ext.db")
@@ -386,6 +393,10 @@ def main():
             emit("[M5-FACTS] PASS: source superseded, single published proposal, two family projection intents and FK integrity")
             if os.environ.get("AGENTRAG_SPLIT_E2E") == "1":
                 business_e2e.run_split(http, kb, emit, work / "ext.db", business_guidance)
+            if os.environ.get("AGENTRAG_REPEAL_E2E") == "1":
+                repeal = business_e2e.run_repeal(http, kb, emit, ask)
+            if os.environ.get("AGENTRAG_CLAUSE_E2E") == "1":
+                business_e2e.run_clause(http, kb, emit)
         helpers.stop_owned(host); host = None
         with sqlite3.connect(work / "ext.db") as db:
             db.execute("UPDATE ext_document_annotations SET effective_until='2000-01-01T00:00:00Z', revision=revision+1 WHERE document_id=?", (doc["id"],))
@@ -418,6 +429,12 @@ def main():
         if status != 200 or model.tool_step != 2 or warning not in captured or body_canary not in captured or desc_canary in captured or model.old_answer in captured:
             raise RuntimeError("native on-demand MCP archive discovery or follow-up prompt failed")
         emit("[AGENT-ARCHIVE] PASS: native discovery and MCP call delivered only the authorized stale excerpt with the warning")
+        if repeal:
+            old, canary = repeal
+            status, _, captured = ask("agent-archive-repeal", True, old)
+            if status != 200 or model.tool_step != 2 or warning not in captured or canary not in captured:
+                raise RuntimeError("archived repeal was not available through authorized historical search")
+            emit("[REL-06-HISTORY] PASS: native MCP found the archived policy with the historical warning")
         helpers.stop_owned(host); host = None
         for phase, agent in (("rag-offline", False), ("agent-search-offline", True)):
             status, response, captured = ask(phase, agent)

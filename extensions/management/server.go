@@ -22,13 +22,14 @@ import (
 
 // Server serves only server-authorized scopes; its credential never reaches a browser.
 type Server struct {
-	db       *store.DB
-	key      string
-	scopes   map[lifecycle.PolicyScope]bool
-	sources  *lineage.Registry
-	business *business.Service
-	nativeDB string
-	titles   func(context.Context, string, []string) (map[string]string, error)
+	db         *store.DB
+	key        string
+	scopes     map[lifecycle.PolicyScope]bool
+	sources    *lineage.Registry
+	business   *business.Service
+	renditions *lineage.Renditions
+	nativeDB   string
+	titles     func(context.Context, string, []string) (map[string]string, error)
 }
 
 // WithNativeSQLite supplies the read-only join and its scoped API fallback.
@@ -42,6 +43,9 @@ func (s *Server) WithBusiness(b *business.Service) *Server { s.business = b; ret
 
 // WithSources enables explicit declarations using the real native snapshot reader.
 func (s *Server) WithSources(r *lineage.Registry) *Server { s.sources = r; return s }
+
+// WithRenditions supplies the worker's scoped conversion binding and reader.
+func (s *Server) WithRenditions(r *lineage.Renditions) *Server { s.renditions = r; return s }
 
 // New creates a disabled (503) management adapter when no strong key is configured.
 func New(db *store.DB, key string, scopes []lifecycle.PolicyScope) *Server {
@@ -58,6 +62,7 @@ type Request struct {
 	TenantID         uint64                `json:"tenant_id"`
 	KnowledgeBaseID  string                `json:"knowledge_base_id"`
 	DocumentID       string                `json:"document_id,omitempty"`
+	ArtifactID       string                `json:"artifact_id,omitempty"`
 	Page             int                   `json:"page,omitempty"`
 	PageSize         int                   `json:"page_size,omitempty"`
 	State            string                `json:"state,omitempty"`
@@ -107,6 +112,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.scopes[lifecycle.PolicyScope{TenantID: req.TenantID, KnowledgeBaseID: req.KnowledgeBaseID}] {
 		writeError(w, 403, "scope_not_configured")
+		return
+	}
+	if req.Action == "rendition_bind" || req.Action == "rendition_download" {
+		s.serveRendition(w, r, req)
 		return
 	}
 	mutation := req.Action == "put_annotations" || req.Action == "put_rules" || req.Action == "put_supplements" || strings.HasPrefix(req.Action, "business_") && !businessRead(req.Action)

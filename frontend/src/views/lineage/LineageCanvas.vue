@@ -34,8 +34,8 @@ function draw() {
   const edges = props.data.edges.map(edge => ({
     id: 'edge:' + edge.id, shape: 'edge', source: edge.from, target: edge.to,
     router: { name: 'manhattan', args: { padding: 22 } }, connector: { name: 'rounded' },
-    attrs: { line: { stroke: '#91a3b4', strokeWidth: 1.5, strokeDasharray: edge.type === 'related_to' ? '5 4' : '', targetMarker: { name: 'block', width: 7, height: 6 } } },
-    labels: [{ attrs: { label: { text: edgeLabels[edge.type] || edge.type, fill: '#526779', fontSize: 11 }, body: { fill: '#f8fafb', stroke: '#e6ebef', rx: 3, ry: 3 } } }],
+    attrs: { line: { stroke: '#91a3b4', strokeWidth: 1.5, strokeDasharray: edge.type === 'related_to' || edge.status === 'awaiting_resolution' ? '5 4' : '', targetMarker: { name: 'block', width: 7, height: 6 } } },
+    labels: [{ attrs: { label: { text: edge.status === 'awaiting_resolution' ? '条款冲突 · 待裁决' : edge.status === 'resolved' ? '条款冲突 · 已裁决' : edgeLabels[edge.type] || edge.type, fill: '#526779', fontSize: 11 }, body: { fill: '#f8fafb', stroke: '#e6ebef', rx: 3, ry: 3 } } }],
   }))
   graph.fromJSON({ nodes, edges })
   highlight()

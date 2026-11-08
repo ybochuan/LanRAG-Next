@@ -246,6 +246,22 @@ SELECT tenant_id,knowledge_base_id,relation_id,status,revision,
 json_object('document_id',document_id,'target_document_id',target_document_id,'edge_type',edge_type,'confidence',confidence,'source_version_id',source_version_id,'target_version_id',target_version_id) AS details
 FROM ext_document_relations
 UNION ALL
+SELECT tenant_id,knowledge_base_id,notice_id,status,revision,
+json_object('document_id',document_id,'target_document_id',target_document_id,'edge_type','repeals',
+ 'source_version_id',source_version_id,'target_version_id',target_version_id,
+ 'effective_at',strftime('%Y-%m-%dT%H:%M:%fZ',effective_at_ms/1000.0,'unixepoch'),'applied_at',applied_at)
+FROM ext_repeal_notices
+UNION ALL
+SELECT r.tenant_id,r.knowledge_base_id,r.relation_id,r.status,r.revision,
+json_object('document_id',r.document_id,'target_document_id',r.target_document_id,'edge_type',r.edge_type,
+ 'source_version_id',r.source_version_id,'target_version_id',r.target_version_id,
+ 'source_clause',json_object('chunk_id',r.source_chunk_id,'content_hash',r.source_content_hash),
+ 'target_clause',json_object('chunk_id',r.target_chunk_id,'content_hash',r.target_content_hash),
+ 'applies_when',r.applies_when,'resolution',r.resolution,'decision_note',r.decision_note,
+ 'resolved_by',r.resolved_by,'resolved_at',r.resolved_at,
+ 'pins_current',json(CASE WHEN v.relation_id IS NULL THEN 'false' ELSE 'true' END))
+FROM ext_clause_relations r LEFT JOIN ext_clause_current v USING(tenant_id,knowledge_base_id,relation_id)
+UNION ALL
 SELECT a.tenant_id,a.knowledge_base_id,'attachment:'||a.attachment_id,
 CASE WHEN a.removed_at IS NOT NULL THEN 'attachment_removed'
      WHEN d.document_id IS NULL AND a.retired_at IS NOT NULL THEN 'attachment_retired'

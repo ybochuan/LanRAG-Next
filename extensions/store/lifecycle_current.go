@@ -17,6 +17,15 @@ const LifecycleEventJoinSQL = ` LEFT JOIN ext_lifecycle_events e ON e.tenant_id=
 // by schema7. It must be evaluated in the same snapshot as the permission decision.
 const LifecycleCurrentVerifiedSQL = `c.state=e.to_state AND NOT EXISTS (SELECT 1 FROM ext_lifecycle_events newer WHERE newer.tenant_id=c.tenant_id AND newer.knowledge_base_id=c.knowledge_base_id AND newer.document_id=c.document_id AND newer.sequence>e.sequence)`
 
+// RepealDueSQL identifies an approved target awaiting its due transition.
+// The alias c is the scoped lifecycle-current row.
+const RepealDueSQL = `EXISTS(SELECT 1 FROM ext_repeal_notices r
+	WHERE r.tenant_id=c.tenant_id AND r.knowledge_base_id=c.knowledge_base_id AND r.target_document_id=c.document_id
+	AND r.status='scheduled' AND r.effective_at_ms<=CAST(unixepoch('subsec')*1000 AS INTEGER))`
+
+// LifecycleReadableSQL preserves the current fact while a due repeal is verified.
+const LifecycleReadableSQL = "(" + LifecycleCurrentVerifiedSQL + ") AND NOT " + RepealDueSQL
+
 // ReadLifecycleCurrentTx distinguishes an absent document from an invalid stored
 // projection. Callers must never initialize or revive the latter automatically.
 func ReadLifecycleCurrentTx(ctx context.Context, tx *sql.Tx, tenant uint64, kb, doc string) (state, event string, err error) {

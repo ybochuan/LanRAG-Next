@@ -25,10 +25,11 @@ type GraphNode struct {
 
 // GraphEdge preserves the stored direction, including derived node to source.
 type GraphEdge struct {
-	ID   string `json:"id"`
-	From string `json:"from"`
-	To   string `json:"to"`
-	Type string `json:"type"`
+	ID     string `json:"id"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Type   string `json:"type"`
+	Status string `json:"status,omitempty"`
 }
 
 // GraphSnapshot is a bounded, same-KB snapshot. Truncation is always explicit.
@@ -45,18 +46,28 @@ type GraphSnapshot struct {
 // provenance or version ancestry using the existing cycle-guarded traversal.
 func (r *Registry) Graph(ctx context.Context, s provenance.Scope, mode, root string) (GraphSnapshot, error) {
 	out := GraphSnapshot{Mode: mode, RootID: root, Nodes: []GraphNode{}, Edges: []GraphEdge{}}
-	edges, condition := "ext_lineage_edge", ""
+	if r == nil || r.db == nil || s.TenantID == 0 || !validID(s.KnowledgeBaseID) || root != "" && (!validID(root) || mode == "relations") {
+		return out, ErrEvidence
+	}
+	edges, condition, edgeStatus := "ext_lineage_edge", "", "''"
 	switch mode {
+	case "renditions":
+		return r.renditionGraph(ctx, s, out)
 	case "provenance":
 		condition = " AND e.edge_type='derived_from'"
 	case "version-ancestry":
 		edges = versionAncestryEdges
 	case "relations":
-		condition = " AND e.edge_type IN ('supplements','amends','interprets','related_to')"
+		edgeStatus = "e.status"
+		edges = `(
+			SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at,'' AS status
+			FROM ext_lineage_edge WHERE edge_type IN ('supplements','amends','interprets','related_to')
+			UNION ALL
+			SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at,'' FROM ext_repeal_edges
+			UNION ALL
+			SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at,status FROM ext_clause_edges
+		)`
 	default:
-		return out, ErrEvidence
-	}
-	if r == nil || r.db == nil || s.TenantID == 0 || !validID(s.KnowledgeBaseID) || root != "" && (!validID(root) || mode == "relations") {
 		return out, ErrEvidence
 	}
 	err := r.db.View(ctx, func(tx *sql.Tx) error {
@@ -119,7 +130,7 @@ WHERE n.tenant_id=? AND n.knowledge_base_id=?`+where+" ORDER BY n.created_at DES
 		}
 		body, _ := json.Marshal(ids)
 		params = scopeArgs(s, string(body), string(body))
-		rows, err = tx.QueryContext(ctx, `SELECT e.edge_id,e.from_node_id,e.to_node_id,e.edge_type FROM `+edges+` e
+		rows, err = tx.QueryContext(ctx, `SELECT e.edge_id,e.from_node_id,e.to_node_id,e.edge_type,`+edgeStatus+` FROM `+edges+` e
 WHERE e.tenant_id=? AND e.knowledge_base_id=?`+condition+`
 AND e.from_node_id IN (SELECT value FROM json_each(?)) AND e.to_node_id IN (SELECT value FROM json_each(?))
 ORDER BY e.created_at,e.edge_id LIMIT 513`, params...)
@@ -128,7 +139,7 @@ ORDER BY e.created_at,e.edge_id LIMIT 513`, params...)
 		}
 		for rows.Next() {
 			var edge GraphEdge
-			if err := rows.Scan(&edge.ID, &edge.From, &edge.To, &edge.Type); err != nil {
+			if err := rows.Scan(&edge.ID, &edge.From, &edge.To, &edge.Type, &edge.Status); err != nil {
 				rows.Close()
 				return err
 			}

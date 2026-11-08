@@ -19,7 +19,7 @@ func (l *Ledger) permissionRefsTx(ctx context.Context, tx *sql.Tx, s Scope, refs
 		if e != nil {
 			return nil, e
 		}
-		if a.Invalid(l.now().UTC()) {
+		if a.ReadBlocked(l.now().UTC()) {
 			return nil, ErrEvidence
 		}
 		parents := make([]SourceRef, 0, len(a.Sources))

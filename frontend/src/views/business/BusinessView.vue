@@ -64,14 +64,45 @@
               </button>
             </article>
           </section>
-          <p v-if="detail.edge_type==='attachment_of'" class="subtle">由文件提取自动登记。箭头从附件指向所属主件，下载时仍需核对双方状态和版本。</p>
+          <template v-if="detail.edge_type==='repeals'">
+            <dl>
+              <dt>废止通知标识</dt><dd><code>{{ detail.document_id }}</code></dd>
+              <dt>通知锁定版本</dt><dd><code>{{ detail.source_version_id }}</code></dd>
+              <dt>被废止制度</dt><dd>{{ docName(detail.target_document_id) }}</dd>
+              <dt>制度文档标识</dt><dd><code>{{ detail.target_document_id }}</code></dd>
+              <dt>制度锁定版本</dt><dd><code>{{ detail.target_version_id }}</code></dd>
+              <dt>废止生效时间</dt><dd>{{ date(detail.effective_at) }}</dd>
+              <template v-if="detail.applied_at"><dt>实际执行时间</dt><dd>{{ date(detail.applied_at) }}</dd></template>
+            </dl>
+            <p v-if="detail.status==='needs_review'" class="notice">文档版本或状态已变化。核对两份文档后重新提交。</p>
+          </template>
+          <template v-else-if="clauseRelation(detail.edge_type)">
+            <p v-if="!detail.pins_current" class="notice">锁定版本已变化或失效。此条款关系仅作历史记录。</p>
+            <ClauseEvidence v-if="detail.source_clause&&detail.document_id&&detail.source_version_id" :kb="kb" :document-id="detail.document_id" :version="detail.source_version_id" :anchor="detail.source_clause" :current="detail.pins_current===true" label="源条款" />
+            <ClauseEvidence v-if="detail.target_clause&&detail.target_document_id&&detail.target_version_id" :kb="kb" :document-id="detail.target_document_id" :version="detail.target_version_id" :anchor="detail.target_clause" :current="detail.pins_current===true" label="目标条款" />
+            <h4>适用范围与条件</h4>
+            <pre class="content-preview">{{ detail.applies_when }}</pre>
+            <template v-if="detail.resolution">
+              <dl>
+                <dt>裁决</dt><dd>{{ clauseDecisions[detail.resolution] || detail.resolution }}</dd>
+                <dt>裁决人</dt><dd>{{ detail.resolved_by }}</dd>
+                <dt>裁决时间</dt><dd>{{ date(detail.resolved_at) }}</dd>
+              </dl>
+              <pre class="content-preview">{{ detail.decision_note }}</pre>
+            </template>
+            <template v-if="canWrite&&detail.pins_current&&detail.status==='awaiting_resolution'">
+              <label>处理方式<select v-model="clauseDecision" :disabled="running||!!pending"><option value="">请选择处理方式</option><option v-for="(label,value) in clauseDecisions" :key="value" :value="value">{{ label }}</option></select></label>
+              <label>裁决依据<textarea v-model="clauseDecisionNote" rows="3" maxlength="4000" :disabled="running||!!pending" /></label>
+            </template>
+          </template>
+          <p v-else-if="detail.edge_type==='attachment_of'" class="subtle">由文件提取自动登记。箭头从附件指向所属主件，下载时仍需核对双方状态和版本。</p>
           <p v-else-if="kind==='relation'" class="subtle">已确认表示声明已保存；有效关联查询还会核对文档当前状态和版本。</p>
-          <div v-if="kind==='relation'" class="actions">
+          <div v-if="kind==='relation'&&detail.edge_type!=='repeals'&&!clauseRelation(detail.edge_type)" class="actions">
             <button v-if="detail.document_id" type="button" class="text-button" @click="inspectRelated(detail.document_id)">查询源文档关联</button>
             <button v-if="detail.target_document_id" type="button" class="text-button" @click="inspectRelated(detail.target_document_id)">查询目标文档关联</button>
           </div>
           <p v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" class="notice">尚在冷静期，达到上面的时间后可激活指导。</p>
-          <div class="actions"><button v-for="action in actionsFor(kind,detail,canWrite,now)" :key="action" :disabled="running||!!pending" :class="{primary:action==='revision_publish'||action==='split_approve'||action==='feedback_activate'||action==='relation_confirm'}" @click="beginWrite(action,{},detail)">{{ actionLabels[action] }}</button><button v-if="kind==='guidance'&&detail.status==='active'&&canWrite" class="primary" :disabled="running||!!pending" @click="router.push({path:'/platform/revisions',query:{kb,guidance:detail.id}})">用于修订提案</button><button :disabled="loading||running" @click="openRecord(detail)">重新载入详情</button></div>
+          <div class="actions"><button v-for="action in actionsFor(kind,detail,canWrite,now)" :key="action" :disabled="running||!!pending||(action==='clause_resolve'&&(!clauseDecision||!clauseDecisionNote.trim()))" :class="{primary:action==='revision_publish'||action==='split_approve'||action==='feedback_activate'||action==='relation_confirm'||action==='clause_confirm'||action==='clause_resolve'}" @click="beginWrite(action,action==='clause_resolve'?{resolution:clauseDecision,text:clauseDecisionNote}:{},detail)">{{ actionLabels[action] }}</button><button v-if="kind==='guidance'&&detail.status==='active'&&canWrite" class="primary" :disabled="running||!!pending" @click="router.push({path:'/platform/revisions',query:{kb,guidance:detail.id}})">用于修订提案</button><button :disabled="loading||running" @click="openRecord(detail)">重新载入详情</button></div>
           <p v-if="!canWrite" class="subtle">当前账号仅有查看权限。</p>
         </section>
         <CreateForm v-else-if="canWrite" :key="kb+kind+formVersion" :kb="kb" :kind="kind" :disabled="running||!!pending" :initial-guidance="initialGuidance" @submit="(action,payload)=>beginWrite(action,payload)" />
@@ -89,10 +120,11 @@ import { useAuthStore } from '@/stores/auth'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { overview } from '@/api/lifecycle'
 import * as api from '@/api/business'
+import ClauseEvidence from './ClauseEvidence.vue'
 import CreateForm from './CreateForm.vue'
 import DocumentPicker from './DocumentPicker.vue'
 import { requestFence } from '../lifecycle/model'
-import { actionLabels, actionsFor, buildIntent, businessError, canActivate, date, edgeLabels, httpStatus, shortID, statusLabels, type WriteIntent } from './model'
+import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, shortID, statusLabels, type WriteIntent } from './model'
 
 const props=defineProps<{section:api.BusinessSection}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
 const sections=[{key:'associations',label:'文档关联'},{key:'feedback-governance',label:'反馈与指导'},{key:'revisions',label:'修订发布'}]
@@ -106,6 +138,7 @@ const knowledgeBases=ref<{id:string;name:string}[]>([]),kb=ref(''),loadingKB=ref
 const records=ref<api.BusinessRecord[]>([]),detail=ref<api.BusinessRecord>(),detailLoading=ref(false),page=ref(1),loading=ref(false),running=ref(false),error=ref(''),authorityError=ref(''),success=ref(''),formVersion=ref(0)
 const titles=ref(new Map<string,string>()),detailHeading=ref<HTMLElement>(),dialog=ref<HTMLDialogElement>(),confirmationOpen=ref(false),secondConfirmation=ref(false),highRisk=ref(false)
 const pending=ref<{kb:string;intent:WriteIntent;detailID?:string}>(),confirmationText=ref(''),now=ref(Date.now())
+const clauseDecision=ref(''),clauseDecisionNote=ref('')
 const queryDocument=ref(''),queryResult=ref<api.RelatedDocument[]>(),queryError=ref(''),querying=ref(false)
 const queryHeading=ref<HTMLElement>()
 const listFence=requestFence(),detailFence=requestFence(),kbFence=requestFence(),queryFence=requestFence(),catalogFence=requestFence()
@@ -159,6 +192,9 @@ async function beginWrite(action:api.BusinessAction,payload:api.BusinessPayload,
   highRisk.value=action==='feedback_activate'&&row?.risk==='high';secondConfirmation.value=false
   confirmationText.value=action==='revision_publish'?'发布将创建新的有效版本，并让原文档退出检索。请确认已审阅完整修订正文。':action==='feedback_approve'?'批准后仍需等待对应风险的冷静期。':action==='feedback_activate'?'激活后，这条反馈将成为可供修订使用的指导。':action==='guidance_seed'?'种子指导将直接加入指导清单；请确认内容已经人工核对。':'请确认已审阅记录，并执行这项状态变更。'
   if(action==='split_approve')confirmationText.value='请确认已审阅全部分件正文。批准后锁定名单和内容，并允许逐份发布。'
+  if(action==='repeal_approve')confirmationText.value=`请核对废止通知与旧制度。批准后将于 ${date(row?.effective_at)} 执行，旧制度归档并退出普通检索。若已到该时点，将立即执行。`
+  if(action==='repeal_cancel')confirmationText.value='撤回此计划后，系统将停止执行这条废止计划。'
+  if(action==='clause_resolve')confirmationText.value='请确认已核对两处条款、适用范围及裁决依据。'
   if(action==='revision_publish'&&row?.record_kind==='split_part'){
     confirmationText.value=`本次处理「${row.split_title||'此分件'}」。首份新制度正式发布时，旧制度退出普通检索。`
   }
@@ -219,6 +255,7 @@ async function loadKBs(){
 watch(kb,()=>{resetScope();if(kb.value){void loadAuthority();void loadRecords()}})
 watch(kind,()=>{queryDocument.value='';clearRelatedResult();if(!kb.value)return;listFence.invalidate();detailFence.invalidate();records.value=[];detail.value=undefined;page.value=1;error.value='';loading.value=false;void loadRecords()})
 watch(queryDocument,clearRelatedResult,{flush:'sync'})
+watch([()=>detail.value?.id,()=>detail.value?.revision],()=>{clauseDecision.value='';clauseDecisionNote.value=''})
 watch(()=>auth.effectiveTenantId,()=>void loadKBs())
 watch(()=>route.query.kb,value=>{if(typeof value==='string'&&knowledgeBases.value.some(v=>v.id===value))kb.value=value})
 function allowNavigation(){if(running.value||pending.value){error.value='本次操作仍待核对，请先重试原请求，或核对后选择“结束重试”。';return false}return true}

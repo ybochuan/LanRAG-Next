@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
@@ -159,6 +160,28 @@ func (n *NativePublisher) Create(ctx context.Context, p Publication) (RemoteDocu
 // ValidateSplitSource verifies the native source can enter the Markdown split flow.
 func (n *NativePublisher) ValidateSplitSource(ctx context.Context, p Publication) error {
 	return n.manualSource(ctx, p)
+}
+
+func (n *NativePublisher) repealDocumentInactive(ctx context.Context, scope provenance.Scope, id string) (bool, error) {
+	if n == nil || n.client == nil || n.client.TenantID() != scope.TenantID {
+		return false, ErrUnavailable
+	}
+	docs, err := n.client.AttachmentDocuments(ctx, []string{scope.KnowledgeBaseID}, []string{id})
+	if err != nil {
+		return false, err
+	}
+	if len(docs) == 0 {
+		return true, nil
+	}
+	doc := docs[0]
+	switch doc.ParseStatus {
+	case "draft", "failed", "deleting", "cancelled":
+		return true, nil
+	case "completed":
+		return doc.EnableStatus == "disabled", nil
+	default:
+		return false, nil
+	}
 }
 
 // CreateDraft creates a natively disabled document before the local target binding.

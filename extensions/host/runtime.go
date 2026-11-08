@@ -239,6 +239,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService)
 		if upstream != nil {
 			manager.WithNativeSQLite(cfg.NativeDBPath, upstream.DocumentTitles)
+			manager.WithRenditions(lineage.NewRenditions(sourceRegistry, upstream.OriginalSHA256))
 		}
 		proofScopes := make([]provenance.Scope, 0, len(scopes))
 		for _, scope := range scopes {
@@ -260,7 +261,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	serveResult := make(chan error, 1)
 	go func() { serveResult <- server.Serve(l) }()
 	var tasks sync.WaitGroup
-	backgroundResult := make(chan error, 5)
+	backgroundResult := make(chan error, 6)
 	launch := func(fn func(context.Context) error) {
 		tasks.Add(1)
 		go func() { defer tasks.Done(); backgroundResult <- fn(runCtx) }()
@@ -268,6 +269,24 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	if reconcile != nil {
 		launch(func(ctx context.Context) error { return reconcile.Run(ctx, scopes) })
 		launch(worker.Run)
+		launch(func(ctx context.Context) error {
+			repealScopes := make([]provenance.Scope, 0, len(scopes))
+			for _, scope := range scopes {
+				repealScopes = append(repealScopes, provenance.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID})
+			}
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				if err := businessService.SweepRepeals(ctx, repealScopes); err != nil && ctx.Err() == nil {
+					report("repeal_scan_failed")
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+				}
+			}
+		})
 		launch(func(ctx context.Context) error {
 			return runDependencyDaily(ctx, db, sourceRegistry, machine, lifecycleScopes, report)
 		})

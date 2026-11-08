@@ -1,6 +1,6 @@
 import { get } from '@/utils/request'
 
-export type GraphMode = 'version-ancestry' | 'provenance' | 'relations'
+export type GraphMode = 'version-ancestry' | 'provenance' | 'relations' | 'renditions'
 export interface LineageNode {
   id: string
   type: string
@@ -12,7 +12,7 @@ export interface LineageNode {
   created_at: string
   title?: string
 }
-export interface LineageEdge { id: string; from: string; to: string; type: string }
+export interface LineageEdge { id: string; from: string; to: string; type: string; status?: string }
 export interface LineageGraph {
   mode: GraphMode
   root_id: string

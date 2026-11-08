@@ -45,7 +45,7 @@ def check_upgrade(path, emit):
         owner = db.execute("SELECT attachment_id,evidence_kind,retired_at FROM ext_attachment_links WHERE import_id='v16-receipt'").fetchone()
     with closing(sqlite3.connect(path.with_name("ext-v16-backup.db").as_uri() + "?mode=ro", uri=True)) as db:
         backup_version, = db.execute("SELECT MAX(version) FROM ext_schema_migrations").fetchone()
-    if version not in (18, 19) or (backup_version, integrity, violations, row, owner) != (
+    if version not in (18, 19, 20, 21, 22) or (backup_version, integrity, violations, row, owner) != (
         16, [("ok",)], [], ("amends", 4, "v16-edge"), ("v16-child", "upload_receipt", None),
     ):
         raise RuntimeError("schema upgrade, preservation or rollback snapshot verification failed")

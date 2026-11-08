@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/ybochuan/LanRAG-Next/extensions/business"
-	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/business"
+	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 )
 
 func businessRead(action string) bool {
@@ -37,6 +38,8 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	c.Page = r.Page
 	c.PageSize = r.PageSize
 	switch c.Action {
+	case "rendition_bind":
+		return s.renditions.Bind(ctx, c.Scope, c.Payload.DocumentID, c.ID)
 	case "related":
 		return b.QueryRelated(ctx, c.Scope, r.DocumentID)
 	case "relation_list", "feedback_list", "guidance_list", "revision_list":

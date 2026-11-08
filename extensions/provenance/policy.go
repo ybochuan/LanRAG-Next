@@ -14,7 +14,7 @@ import (
 func (l *Ledger) sourceReason(ctx context.Context, tx *sql.Tx, s Scope, ref SourceRef) (string, error) {
 	var version, state string
 	var from, until sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT h.version_id,CASE WHEN `+store.LifecycleCurrentVerifiedSQL+` THEN c.state ELSE '' END,a.effective_from,a.effective_until
+	err := tx.QueryRowContext(ctx, `SELECT h.version_id,CASE WHEN `+store.LifecycleReadableSQL+` THEN c.state ELSE '' END,a.effective_from,a.effective_until
  FROM ext_provenance_source_heads h JOIN ext_lifecycle_current c ON c.tenant_id=h.tenant_id AND c.knowledge_base_id=h.knowledge_base_id AND c.document_id=h.document_id
  `+store.LifecycleEventJoinSQL+` LEFT JOIN ext_document_annotations a ON a.tenant_id=c.tenant_id AND a.knowledge_base_id=c.knowledge_base_id AND a.document_id=c.document_id
  WHERE h.tenant_id=? AND h.knowledge_base_id=? AND h.document_id=?`, args(s, ref.DocumentID)...).Scan(&version, &state, &from, &until)
@@ -50,7 +50,7 @@ func (l *Ledger) sourceReason(ctx context.Context, tx *sql.Tx, s Scope, ref Sour
 	if err != nil {
 		return "", err
 	}
-	if a.Invalid(now) {
+	if a.ReadBlocked(now) {
 		return "source_dependency_invalid", nil
 	}
 	return "", nil

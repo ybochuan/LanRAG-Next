@@ -42,6 +42,11 @@ type Payload struct {
 	SecondConfirmation bool             `json:"second_confirmation,omitempty"`
 	GuidanceIDs        []string         `json:"guidance_ids,omitempty"`
 	SplitParts         []SplitPartInput `json:"split_parts,omitempty"`
+	EffectiveAt        *time.Time       `json:"effective_at,omitempty"`
+	SourceClause       *ClauseAnchor    `json:"source_clause,omitempty"`
+	TargetClause       *ClauseAnchor    `json:"target_clause,omitempty"`
+	AppliesWhen        string           `json:"applies_when,omitempty"`
+	Resolution         string           `json:"resolution,omitempty"`
 	Similarity         float64          `json:"similarity,omitempty"`
 	Declaration        float64          `json:"declaration,omitempty"`
 	Structure          float64          `json:"structure,omitempty"`
@@ -122,6 +127,38 @@ func newID() string {
 func validID(v string) bool {
 	return weknora.ValidID(v) && len(v) <= 128 && strings.TrimSpace(v) == v && !strings.ContainsAny(v, "\x00\r\n\t ")
 }
+
+// Read receipts before any remote observation that may fail after a successful command.
+func (s *Service) replay(ctx context.Context, c Command) (Result, bool, error) {
+	var result Result
+	var hash string
+	var body []byte
+	err := s.db.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT payload_hash,result_json FROM ext_business_receipts
+			WHERE tenant_id=? AND knowledge_base_id=? AND operation_id=?`, args(c.Scope, c.OperationID)...).Scan(&hash, &body)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Result{}, false, nil
+	}
+	if err != nil {
+		return Result{}, false, err
+	}
+	if hash != digest(c) {
+		return Result{}, false, ErrConflict
+	}
+	if json.Unmarshal(body, &result) != nil {
+		return Result{}, false, ErrUnavailable
+	}
+	return result, true, nil
+}
+
+func (s *Service) replayAfterObservationError(ctx context.Context, c Command, cause error) (Result, error) {
+	if result, replayed, err := s.replay(ctx, c); replayed || err != nil {
+		return result, err
+	}
+	return Result{}, cause
+}
+
 func (s *Service) transact(ctx context.Context, c Command, f func(*sql.Tx) (Result, error)) (out Result, err error) {
 	if s == nil || s.db == nil {
 		return out, ErrUnavailable
@@ -198,6 +235,27 @@ func (s *Service) current(ctx context.Context, tx *sql.Tx, scope provenance.Scop
 	return nil
 }
 
+func (s *Service) currentEnabled(ctx context.Context, tx *sql.Tx, scope provenance.Scope, doc, version string) error {
+	if err := s.current(ctx, tx, scope, doc, version); err != nil {
+		return err
+	}
+	var enabled sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT json_extract(snapshot_json,'$.header_fields.enable_status')
+		FROM ext_source_snapshot_evidence WHERE tenant_id=? AND knowledge_base_id=? AND version_node_id=?`,
+		args(scope, version)...).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !enabled.Valid {
+		return ErrUnavailable
+	}
+	if err != nil {
+		return err
+	}
+	// The native snapshot hashes the JSON string, including quotes.
+	if enabled.String != textHash(`"enabled"`) {
+		return ErrConflict
+	}
+	return nil
+}
+
 // Execute dispatches writes without touching native documents or search indexes.
 func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 	switch c.Action {
@@ -209,6 +267,10 @@ func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 		return s.revision(ctx, c)
 	case "split_create", "split_approve", "split_reject":
 		return s.split(ctx, c)
+	case "repeal_create", "repeal_approve", "repeal_cancel":
+		return s.repeal(ctx, c)
+	case "clause_create", "clause_confirm", "clause_resolve", "clause_revoke":
+		return s.clause(ctx, c)
 	default:
 		return Result{}, ErrInvalid
 	}

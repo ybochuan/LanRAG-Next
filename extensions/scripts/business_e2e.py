@@ -4,9 +4,161 @@ import uuid
 import json
 import sqlite3
 import os
+import hashlib
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 from startup_e2e import until as wait_until
+
+
+def run_repeal(http, kb, emit, ask):
+    base = "/knowledge-bases/" + kb["id"]
+    route = base + "/lifecycle/business/"
+    def put(action, payload=None, previous=None):
+        body = {"payload": payload or {}}
+        if previous:
+            body["id"] = previous["id"]
+        return http.api("PUT", route + action, {
+            "operation_id": uuid.uuid4().hex, "expected_revision": previous["revision"] if previous else 0,
+            "business": body,
+        })["data"]
+    def upload(title, extra=""):
+        return http.api("POST", base + "/knowledge/manual", {
+            "title": title, "content": "# " + title + "\n\nSynthetic repeal acceptance clause. " + extra, "status": "publish",
+        })["data"]["id"]
+    def state(doc):
+        status, body = http.call("GET", http.base_url + "/api/v1" + base + "/lifecycle/documents/" + doc)
+        return json.loads(body)["data"]["snapshot"]["current"]["state"] if status == 200 else None
+    def permitted(allowed, denied):
+        for mode in ("rag", "agent"):
+            payload = {"request_id": uuid.uuid4().hex, "session_id": "repeal-fixture", "mode": mode,
+                       "tenant_id": kb["tenant_id"], "knowledge_base_ids": [kb["id"]], "knowledge_ids": allowed + denied}
+            request = urllib.request.Request("http://127.0.0.1:8090/bridge/before-retrieve",
+                data=json.dumps(payload).encode(), headers={"Content-Type": "application/json", "X-AgentRAG-Bridge-Version": "1"})
+            with http.opener.open(request, timeout=5) as response:
+                result = json.load(response)
+            if result["knowledge_ids"] != allowed or result["excluded_document_ids"] != denied:
+                raise RuntimeError("repeal permit differs from the approved state")
+    canary = "REPEALONLY" + uuid.uuid4().hex
+    notice = upload("Repeal notice fixture")
+    old = upload("Prior policy fixture", "AGENTRAG_E2E_MARKER RETENTIONDEADLINE " + canary)
+    withdrawn_notice, unaffected = upload("Withdrawn repeal notice"), upload("Unaffected policy fixture")
+    wait_until(lambda: all(state(doc) == "active" for doc in (notice, old, withdrawn_notice, unaffected)), 40)
+    status, _, captured = ask("rag-repeal-active", False, old)
+    if status != 200 or canary not in captured:
+        raise RuntimeError("repeal old policy did not reach the active RAG positive control")
+    due = (datetime.now(timezone.utc) + timedelta(seconds=10)).isoformat()
+    draft = put("repeal_create", {"document_id": notice, "target_document_id": old, "effective_at": due})
+    if draft["status"] != "pending_review" or state(old) != "active":
+        raise RuntimeError("unapproved repeal affected source eligibility")
+    scheduled = put("repeal_approve", previous=draft)
+    if scheduled["status"] != "scheduled" or state(old) != "active":
+        raise RuntimeError("future repeal archived its target before the deadline")
+    permitted([notice, old], [])
+    withdrawn = put("repeal_create", {"document_id": withdrawn_notice, "target_document_id": unaffected, "effective_at": due})
+    if put("repeal_approve", previous=withdrawn)["status"] != "scheduled":
+        raise RuntimeError("second repeal was not scheduled")
+    http.api("PUT", "/knowledge/manual/" + withdrawn_notice, {
+        "title": "Withdrawn repeal notice", "content": "# Draft copy", "status": "draft",
+    })
+    def record(record_id):
+        return http.api("GET", route + "relation_list?id=" + record_id)["data"][0]
+    wait_until(lambda: state(old) == "archived", 35)
+    wait_until(lambda: record(withdrawn["id"])["status"] == "needs_review", 20)
+    permitted([notice], [old])
+    permitted([unaffected], [])
+    original = http.api("GET", "/knowledge/" + old)["data"]
+    if original["id"] != old or original["parse_status"] != "completed":
+        raise RuntimeError("repeal changed or removed the native original")
+    for phase, agent in (("rag-repeal-archived", False), ("agent-read-repeal", True)):
+        status, _, captured = ask(phase, agent, old)
+        if status != 200 or canary in captured:
+            raise RuntimeError("repealed content reached a regular model request")
+    records = http.api("GET", route + "relation_list?id=" + draft["id"])["data"]
+    if len(records) != 1 or records[0]["status"] != "applied" or not records[0]["applied_at"]:
+        raise RuntimeError("completed repeal was not visible in the association list")
+    graph = http.api("GET", route + "lineage_graph?mode=relations")["data"]
+    nodes = {node["id"]: node["document_id"] for node in graph["nodes"]}
+    if not any(e["type"] == "repeals" and nodes[e["from"]] == notice and nodes[e["to"]] == old for e in graph["edges"]):
+        raise RuntimeError("repeal notice did not retain the old version in the relation graph")
+    emit("[REL-06] PASS: real JWT approval, timed archive, RAG/Agent exclusion, retained repeal edge, native draft drift sent to review")
+    return old, canary
+
+
+def run_clause(http, kb, emit):
+    base = "/knowledge-bases/" + kb["id"]
+    route = base + "/lifecycle/business/"
+
+    def put(action, payload=None, previous=None, expected=200):
+        business = {"payload": payload or {}}
+        if previous:
+            business["id"] = previous["id"]
+        status, body = http.call("PUT", http.base_url + "/api/v1" + route + action, {
+            "business": business, "operation_id": uuid.uuid4().hex,
+            "expected_revision": previous["revision"] if previous else 0,
+        })
+        if status != expected:
+            raise RuntimeError(f"{action}: expected HTTP {expected}, got {status}")
+        return json.loads(body)["data"] if status == 200 else None
+
+    def clause_fixture(title, content):
+        doc = http.api("POST", base + "/knowledge/manual", {
+            "title": title, "content": "# " + title + "\n\n" + content, "status": "publish",
+        })["data"]["id"]
+
+        def ready():
+            status, body = http.call("GET", http.base_url + "/api/v1" + base + "/lifecycle/documents/" + doc)
+            return status == 200 and json.loads(body)["data"]["snapshot"]["current"]["state"] == "active"
+
+        wait_until(ready, 40)
+        chunks = http.api("GET", "/chunks/" + doc + "?page=1&page_size=20")["data"]
+        row = next(chunk for chunk in chunks if chunk["knowledge_id"] == doc and content in chunk["content"])
+        row = http.api("GET", "/chunks/by-id/" + row["id"])["data"]
+        return doc, {"chunk_id": row["id"], "content_hash": hashlib.sha256(row["content"].encode()).hexdigest()}, row
+
+    def graph_edges():
+        graph = http.api("GET", route + "lineage_graph?mode=relations")["data"]
+        nodes = {node["id"]: node["document_id"] for node in graph["nodes"]}
+        return {edge["id"]: (nodes[edge["from"]], nodes[edge["to"]], edge["status"])
+                for edge in graph["edges"] if edge["type"] in ("exception_to", "conflicts_with")}
+
+    source, anchor, _ = clause_fixture("Clause exception fixture", "Priority cases have two review days.")
+    target, target_anchor, row = clause_fixture("Clause general fixture", "Standard cases have five review days.")
+    other, other_anchor, _ = clause_fixture("Clause alternate fixture", "Weekend cases have four review days.")
+    relation = {"document_id": source, "target_document_id": target, "edge_type": "exception_to",
+                "applies_when": "Priority cases", "source_clause": anchor, "target_clause": target_anchor}
+    put("clause_create", {**relation, "source_clause": target_anchor}, expected=409)
+    put("clause_create", {**relation, "source_clause": {**anchor, "content_hash": "a" * 64}}, expected=409)
+    draft = put("clause_create", relation)
+    if draft["status"] != "pending_review" or "clause:" + draft["id"] in graph_edges():
+        raise RuntimeError("unapproved clause appeared in the graph")
+    exception = put("clause_confirm", previous=draft)
+    conflict = put("clause_confirm", previous=put("clause_create", {**relation, "edge_type": "conflicts_with"}))
+    outstanding = put("clause_confirm", previous=put("clause_create", {
+        **relation, "document_id": other, "source_clause": other_anchor, "edge_type": "conflicts_with",
+    }))
+    edges = graph_edges()
+    if edges.get("clause:" + exception["id"]) != (source, target, "active") or edges.get("clause:" + conflict["id"]) != (source, target, "awaiting_resolution"):
+        raise RuntimeError("confirmed clause statuses missing from the graph")
+    decision = {"resolution": "prefer_source", "text": "Priority cases follow the special rule."}
+    resolved = put("clause_resolve", decision, conflict)
+    if graph_edges().get("clause:" + resolved["id"]) != (source, target, "resolved"):
+        raise RuntimeError("resolved conflict was not reflected in the graph")
+
+    http.api("PUT", "/chunks/" + target + "/" + row["id"], {
+        "content": row["content"] + " The original review period was amended.",
+        "expected_revision": row["content_revision"],
+    })
+    wait_until(lambda: http.api("GET", "/chunks/by-id/" + row["id"])["data"]["index_status"] == "ready", 30)
+    put("clause_resolve", decision, outstanding, expected=409)
+    saved = http.api("GET", route + "relation_list?id=" + resolved["id"])["data"][0]
+    if saved["status"] != "resolved" or saved["pins_current"] or saved["decision_note"] != decision["text"] or not saved["resolved_by"] or not saved["resolved_at"]:
+        raise RuntimeError("original decision or pin was overwritten after chunk edit")
+    if any("clause:" + record["id"] in graph_edges() for record in (exception, resolved, outstanding)):
+        raise RuntimeError("drifted clause still appeared in the current relation graph")
+    if put("clause_revoke", previous=saved)["status"] != "revoked":
+        raise RuntimeError("historical relation could not be revoked")
+    emit("[REL-07] PASS: native chunk evidence, approval, graph status, manual adjudication, source edit rejection and retained history")
 
 
 def run(http, kb, source, emit, extension_db):

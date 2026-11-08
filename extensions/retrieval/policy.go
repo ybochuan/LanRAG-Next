@@ -149,7 +149,7 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 	}
 	err = p.db.View(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT c.document_id,c.knowledge_base_id,
-			CASE WHEN `+store.LifecycleCurrentVerifiedSQL+` AND NOT `+store.SplitTargetPendingSQL+` THEN c.state ELSE '' END,
+			CASE WHEN `+store.LifecycleReadableSQL+` AND NOT `+store.SplitTargetPendingSQL+` THEN c.state ELSE '' END,
 			COALESCE(`+store.PublishedSplitProposalSQL+`,'') FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
 			WHERE c.tenant_id=? AND c.knowledge_base_id IN (`+placeholders(len(r.KnowledgeBaseIDs))+`)
 			AND c.document_id IN (`+placeholders(len(r.KnowledgeIDs))+`)`, args...)
@@ -186,7 +186,7 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 			if e != nil {
 				return e
 			}
-			if a.Invalid(time.Now().UTC()) {
+			if a.ReadBlocked(time.Now().UTC()) {
 				blocked[scope.DocumentID] = true
 			}
 			for _, ref := range a.Sources {

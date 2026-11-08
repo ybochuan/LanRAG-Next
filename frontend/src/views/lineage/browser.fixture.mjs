@@ -10,6 +10,7 @@ const nodes = [
   { id: 'v1', title: '采购管理办法（2024 版）', sequence: 1, current: true, state: 'superseded', document_id: 'policy-2024' },
   { id: 'notice', title: '采购审批权限补充通知', sequence: 1, current: true, state: 'active', document_id: 'notice-doc' },
   { id: 'answer', title: '本轮答复的引用分块', sequence: 0, current: false, state: '', document_id: '', type: 'chunk' },
+  { id: 'rendition', title: 'MinerU 结构化产物', sequence: 0, current: false, state: '', document_id: '', type: 'parser_artifact' },
 ].map(node => ({ type: 'document_version', family_id: 'observed-' + node.id, created_at: '2026-11-05T10:00:00Z', ...node }))
 const edges = [
   { id: 's1', from: 'v3', to: 'v2', type: 'supersedes' },
@@ -18,6 +19,7 @@ const edges = [
   { id: 's4', from: 'notice', to: 'v1', type: 'supersedes' },
   { id: 'd1', from: 'answer', to: 'v3', type: 'derived_from' },
   { id: 'r1', from: 'notice', to: 'v3', type: 'supplements' },
+  { id: 'c1', from: 'rendition', to: 'v3', type: 'rendition_of' },
 ]
 const modules = {
   '/lineage-entry.js': `import{createApp,h}from'vue';import{createRouter,createWebHistory,RouterView}from'vue-router';import'tdesign-vue-next/es/style/index.css';import'/src/assets/theme/theme.css';import Page from'/src/views/lineage/LineageView.vue';const router=createRouter({history:createWebHistory(),routes:[{path:'/:pathMatch(.*)*',component:Page}]});createApp({render:()=>h(RouterView)}).use(router).mount('#app')`,
@@ -43,9 +45,10 @@ const server = await createServer({
         }
         if (!url.pathname.startsWith('/lineage-fixture/')) { next(); return }
         const mode = url.searchParams.get('mode') || 'version-ancestry', rootID = url.searchParams.get('id') || ''
-        const allowed = mode === 'provenance' ? ['derived_from'] : mode === 'relations' ? ['supplements', 'amends', 'interprets', 'related_to'] : ['supersedes', 'merged_into']
+        const allowed = mode === 'renditions' ? ['rendition_of'] : mode === 'provenance' ? ['derived_from'] : mode === 'relations' ? ['supplements', 'amends', 'interprets', 'related_to'] : ['supersedes', 'merged_into']
         let graphEdges = edges.filter(edge => allowed.includes(edge.type))
-        let graphNodes = nodes.filter(node => mode === 'provenance' || node.type === 'document_version')
+        let graphNodes = nodes.filter(node => mode === 'renditions' ? graphEdges.some(edge => edge.from === node.id || edge.to === node.id) :
+          node.type === 'document_version' || mode === 'provenance' && node.type === 'chunk')
         if (url.pathname.includes('/kb-b/')) { graphNodes = []; graphEdges = [] }
         if (rootID) {
           const seen = new Set([rootID])

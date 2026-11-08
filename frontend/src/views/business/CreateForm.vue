@@ -10,13 +10,22 @@
           <option value="split">拆分为多份新制度</option>
         </select>
       </label>
-      <DocumentPicker v-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" label="源文档" />
-      <DocumentPicker v-if="kind==='relation'" v-model="form.target_document_id" :kb="kb" :disabled="disabled" :exclude="form.document_id" label="关联文档" searchable />
+      <DocumentPicker v-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
+      <DocumentPicker v-if="kind==='relation'" v-model="form.target_document_id" :kb="kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
       <template v-if="kind==='relation'">
         <label>关系类型<select v-model="form.edge_type" :disabled="disabled"><option v-for="item in relationChoices" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
         <p class="subtle">{{ relationChoices.find(item => item.key === form.edge_type)?.direction }}</p>
         <div v-if="form.edge_type==='related_to'" class="score-fields"><label>语义相似度<input v-model.number="form.similarity" type="number" min="0" max="1" step="0.05" :disabled="disabled" required /></label><label>声明信号<input v-model.number="form.declaration" type="number" min="0" max="1" step="0.05" :disabled="disabled" required /></label><label>结构信号<input v-model.number="form.structure" type="number" min="0" max="1" step="0.05" :disabled="disabled" required /></label></div>
-        <p class="subtle">相关候选需要确认；评分低于 0.70 不进入有效关联查询。补充依赖请在生命周期的文档详情中维护。</p>
+        <template v-if="form.edge_type==='repeals'">
+          <label>废止生效时间（本机时区）<input v-model="form.effective_at" type="datetime-local" :disabled="disabled" required /></label>
+          <p class="subtle">批准后按指定时点执行。生效后旧制度归档并退出普通检索。</p>
+        </template>
+        <template v-else-if="clauseMode">
+          <ClausePicker v-model="clauses.source_clause" :kb="kb" :document-id="form.document_id" label="源条款" :disabled="disabled" />
+          <ClausePicker v-model="clauses.target_clause" :kb="kb" :document-id="form.target_document_id" label="目标条款" :disabled="disabled" />
+          <label>适用范围与条件<textarea v-model="clauses.applies_when" rows="3" maxlength="4000" :disabled="disabled" required /></label>
+        </template>
+        <p v-else class="subtle">相关候选需要确认；评分低于 0.70 不进入有效关联查询。补充依赖请在生命周期的文档详情中维护。</p>
       </template>
       <template v-if="kind==='feedback' || kind==='guidance'">
         <label>主题<input v-model="form.topic" maxlength="128" :disabled="disabled" placeholder="例如：生效日期、适用范围" required /></label>
@@ -41,19 +50,22 @@
         <div class="mini-pages"><button type="button" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">上一页</button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><button type="button" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">下一页</button></div>
         <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <button type="button" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">移除</button></small>
       </fieldset>
-      <button type="submit" class="primary" :disabled="disabled || (kind==='revision'&&!selected.length)">{{ kind==='relation'?'保存关联':kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</button>
+      <button type="submit" class="primary" :disabled="disabled || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</button>
     </form>
   </section>
 </template>
 <script setup lang="ts">
-import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import * as api from '@/api/business'
 import DocumentPicker from './DocumentPicker.vue'
+import ClausePicker from './ClausePicker.vue'
 import { requestFence } from '../lifecycle/model'
-import { relationChoices } from './model'
+import { clauseRelation, relationChoices } from './model'
 const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;initialGuidance?:string}>()
 const emit=defineEmits<{submit:[action:api.BusinessAction,payload:api.BusinessPayload]}>()
-const form=reactive({document_id:'',target_document_id:'',edge_type:'amends',topic:'',risk:'medium',text:'',negative:false,similarity:0.8,declaration:0.8,structure:0.8})
+const form=reactive({document_id:'',target_document_id:'',edge_type:'amends',effective_at:'',topic:'',risk:'medium',text:'',negative:false,similarity:0.8,declaration:0.8,structure:0.8})
+const clauses=reactive({source_clause:undefined as api.ClauseAnchor|undefined,target_clause:undefined as api.ClauseAnchor|undefined,applies_when:''})
+const clauseMode=computed(()=>props.kind==='relation'&&clauseRelation(form.edge_type))
 const revisionMode=ref<'single'|'split'>('single')
 const splitParts=ref([{key:0,title:'',text:''},{key:1,title:'',text:''}])
 let nextPartKey=2
@@ -70,7 +82,14 @@ function addSplitPart(){
 }
 function submit(){
   if(props.disabled)return
-  if(props.kind==='relation')emit('submit','relation_declare',{document_id:form.document_id,target_document_id:form.target_document_id,edge_type:form.edge_type,similarity:form.similarity,declaration:form.declaration,structure:form.structure})
+  if(clauseMode.value){
+    emit('submit','clause_create',{document_id:form.document_id,target_document_id:form.target_document_id,edge_type:form.edge_type,...clauses})
+  }
+  else if(props.kind==='relation'&&form.edge_type==='repeals'){
+    const time=Date.parse(form.effective_at)
+    emit('submit','repeal_create',{document_id:form.document_id,target_document_id:form.target_document_id,effective_at:Number.isFinite(time)?new Date(time).toISOString():''})
+  }
+  else if(props.kind==='relation')emit('submit','relation_declare',{document_id:form.document_id,target_document_id:form.target_document_id,edge_type:form.edge_type,similarity:form.similarity,declaration:form.declaration,structure:form.structure})
   else if(props.kind==='revision'){
     const scope={document_id:form.document_id,guidance_ids:[...selected.value]}
     if(revisionMode.value==='split')emit('submit','split_create',{...scope,split_parts:splitParts.value.map(({title,text})=>({title,text}))})

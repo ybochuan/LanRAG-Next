@@ -15,6 +15,24 @@ test('activation respects the server deadline, including high risk',()=>{
  assert.equal(canActivate(row,Date.parse('2026-11-05T00:00:00Z')),true)
  assert.equal(canActivate({...row,ready_at:null},Date.now()),false)
 })
+test('repeal schedules require two documents, an explicit time, and a separate approval', () => {
+ const row = { id: 'r', revision: 2, status: 'pending_review', edge_type: 'repeals' }
+ assert.deepEqual(actionsFor('relation', row, true), ['repeal_approve', 'repeal_cancel'])
+ assert.deepEqual(actionsFor('relation', row, false), [])
+ assert.deepEqual(actionsFor('relation', { ...row, status: 'scheduled' }, true), ['repeal_cancel'])
+ assert.deepEqual(actionsFor('relation', { ...row, status: 'applied' }, true), [])
+ const payload = { document_id: 'notice', target_document_id: 'old', effective_at: '2026-11-08T09:00:00.000Z' }
+ assert.throws(() => buildIntent('repeal_create', undefined, { ...payload, effective_at: '' }, 'missing-time'))
+ assert.equal(buildIntent('repeal_create', undefined, payload, 'schedule').body.business.payload.effective_at, payload.effective_at)
+})
+test('clause adjudication requires a reviewed, still-current conflict and a reason', () => {
+ const row = { id: 'c', revision: 2, status: 'awaiting_resolution', edge_type: 'conflicts_with', pins_current: true }
+ assert.deepEqual(actionsFor('relation', row, true), ['clause_resolve', 'clause_revoke'])
+ assert.deepEqual(actionsFor('relation', { ...row, pins_current: false }, true), ['clause_revoke'])
+ assert.deepEqual(actionsFor('relation', row, false), [])
+ assert.throws(() => buildIntent('clause_resolve', row, { resolution: 'prefer_source', text: '' }, 'missing-note'))
+ assert.equal(buildIntent('clause_resolve', row, { resolution: 'contextual', text: 'Context B applies.' }, 'decision').body.expected_revision, 2)
+})
 test('split review applies to the batch and each approved part can resume publishing', () => {
  const batch = { id: 'split', revision: 1, status: 'pending_review', record_kind: 'split_batch' as const }
  const part = { id: 'part', revision: 2, status: 'pending_review', record_kind: 'split_part' as const }

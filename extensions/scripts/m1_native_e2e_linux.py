@@ -1,5 +1,6 @@
 """Owned Linux core/Host upload test; Windows MinerU is reached by a test-only relay."""
 import base64
+import hashlib
 import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -114,6 +115,78 @@ def upload(http,kb):
     if result.get("success") is False:raise RuntimeError("native upload rejected")
     return result["data"]
 
+def check_rendition(http, kb, doc, artifact_id, artifact, host_port, key, restart, emit):
+    route = f"/knowledge-bases/{kb['id']}/lifecycle"
+    until = time.monotonic() + 20
+    while time.monotonic() < until:
+        code, body = http.call("GET", http.base_url + "/api/v1" + route + "/documents/" + doc["id"])
+        if code == 200 and json.loads(body)["data"]["snapshot"]["current"]["state"] == "active":
+            break
+        time.sleep(.25)
+    else:
+        raise RuntimeError("parser document was not observed active")
+
+    def manage(action, expected=200, can_write=True, tenant=None, token=key):
+        body = {"action": action, "tenant_id": tenant or kb["tenant_id"], "knowledge_base_id": kb["id"],
+                "document_id": doc["id"], "artifact_id": artifact_id, "can_write": can_write}
+        url = f"http://127.0.0.1:{host_port}/management/lifecycle"
+        request = urllib.request.Request(url, data=json.dumps(body).encode(), headers={
+            "Authorization": "Bearer " + token, "Content-Type": "application/json", "X-AgentRAG-Bridge-Version": "1",
+        })
+        try:
+            response = http.opener.open(request, timeout=20)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            data = response.read((16 << 20) + 1)
+            if response.status != expected:
+                raise RuntimeError(f"{action}: expected HTTP {expected}, got {response.status}")
+            if action == "rendition_download" and expected == 200:
+                if response.headers.get("Content-Disposition") != 'attachment; filename="middle.json"' or data != artifact:
+                    raise RuntimeError("conversion download changed bytes or filename")
+            return data
+
+    manage("rendition_download", 404)
+    manage("rendition_bind", 401, token="invalid")
+    manage("rendition_bind", 403, tenant=kb["tenant_id"] + 1)
+    manage("rendition_bind", 403, can_write=False)
+    first = http.api("PUT", route + "/business/rendition_bind", {"operation_id": uuid.uuid4().hex,
+        "expected_revision": 0, "business": {"payload": {"document_id": doc["id"]}}})["data"]
+    if first["source_sha256"] != hashlib.sha256(fixture_pdf()).hexdigest() or first["artifact_sha256"] != hashlib.sha256(artifact).hexdigest():
+        raise RuntimeError("conversion receipt does not match original and output bytes")
+    manage("rendition_download", 403, can_write=False)
+    manage("rendition_download")
+    graph_route = route + "/business/lineage_graph?mode=renditions"
+    graph = http.api("GET", graph_route)["data"]
+    if len(graph["edges"]) != 1 or not any(e["type"] == "rendition_of" and e["from"] == first["artifact_node_id"] and e["to"] == first["source_version_id"] for e in graph["edges"]):
+        raise RuntimeError("native JWT graph is missing the verified conversion relation")
+    emit("[REL-08-BIND] PASS: real PDF + MinerU receipt, native JWT binding by document ID and graph, byte-for-byte guarded download and scope/credential/role refusals")
+    restart()
+    if json.loads(manage("rendition_bind"))["data"] != first:
+        raise RuntimeError("restarted Host rebound the existing conversion")
+    manage("rendition_download")
+    emit("[REL-08-RESTART] PASS: durable binding replay and unchanged conversion bytes")
+
+    rows = http.api("GET", "/chunks/" + doc["id"] + "?page=1&page_size=20")["data"]
+    row = next(item for item in rows if item["knowledge_id"] == doc["id"] and "reviewers" in item["content"])
+    row = http.api("GET", "/chunks/by-id/" + row["id"])["data"]
+    http.api("PUT", "/chunks/" + doc["id"] + "/" + row["id"], {
+        "expected_revision": row["content_revision"], "content": row["content"] + " Replaced clause.",
+    })
+    until = time.monotonic() + 30
+    while time.monotonic() < until:
+        changed = http.api("GET", "/chunks/by-id/" + row["id"])["data"]
+        if changed["index_status"] == "ready" and changed["content_revision"] > row["content_revision"]:
+            break
+        time.sleep(.25)
+    else:
+        raise RuntimeError("native edit did not finish indexing")
+    manage("rendition_download", 409)
+    manage("rendition_bind", 409)
+    if http.api("GET", graph_route)["data"]["edges"]:
+        raise RuntimeError("old conversion is still in the current graph")
+    emit("[REL-08-DRIFT] PASS: native version changed, old conversion could neither download nor rebind and disappeared from the current graph")
+
 def main():
     cfg=json.load(sys.stdin);work=Path(cfg["work"]);root=Path(__file__).resolve().parents[2]
     owned=[];handles=[];model=relay=None;live_relays=[];result=1
@@ -135,7 +208,10 @@ def main():
         if cfg.get("live_models") and host_port!=8090:raise RuntimeError("live RAG requires canonical Host8090 for the fixed native M0 gate")
         emit(f"[PORTS] Owned core={core_port} Host={host_port}; unknown existing owners are never stopped by this script")
         env={k:v for k,v in os.environ.items() if not k.startswith("AGENTRAG_")}
-        env.update(PATH="/usr/local/go/bin:/usr/bin:/bin",GOWORK="off",CGO_ENABLED="0")
+        env.update(PATH="/usr/local/go/bin:/usr/bin:/bin",GOWORK="off",CGO_ENABLED="0",GOMAXPROCS="4")
+        management_key = secrets.token_hex(32)
+        if cfg.get("renditions"):
+            env["AGENTRAG_MANAGEMENT_KEY"] = management_key
         host_binary=work/"extension-host"
         command=["/usr/local/go/bin/go","build","-mod=readonly","-o",str(host_binary),"./cmd/extension-host"] if host_port==8090 else ["/usr/local/go/bin/go","test","-mod=readonly","-c","-o",str(host_binary),"./host"]
         build=subprocess.Popen(command,cwd=root/"extensions",env=env,start_new_session=True);owned.append(build)
@@ -163,6 +239,16 @@ def main():
         kb=http.api("POST","/knowledge-bases",{"name":"Native isolated fixture","type":"document","embedding_model_id":ids[1],"summary_model_id":ids[0],"indexing_strategy":{"vector_enabled":True,"keyword_enabled":True,"graph_enabled":False,"wiki_enabled":False},"auto_tag_config":{"enabled":False},"profile_config":{"enabled":False}})["data"]
         host_env={k:v for k,v in env.items() if not k.startswith("AGENTRAG_")}
         host_env.update(AGENTRAG_MODE="probe",AGENTRAG_PARSER_UPSTREAM_URL=f"http://127.0.0.1:{relay.server.server_port}",AGENTRAG_PARSER_UPSTREAM_KEY=cfg["backend_key"],AGENTRAG_PARSER_PROXY_KEY=cfg["core_key"],AGENTRAG_PARSER_ARTIFACT_ROOT=str(work/"data/parser_artifacts"),AGENTRAG_PARSER_SCOPES=json.dumps([{"tenant_id":kb["tenant_id"],"knowledge_base_id":kb["id"]}]))
+        state_path = work/"data/parser_artifacts/.parser-state.sqlite"
+        if cfg.get("renditions"):
+            if host_port != 8090:
+                raise RuntimeError("rendition graph requires isolated canonical Host port")
+            state_path = work/"ext.db"
+            api_key = http.api("POST", f"/tenants/{kb['tenant_id']}/api-keys", {"name": "Rendition fixture", "full_access": False,
+                "knowledge_base_ids": [kb["id"]], "capabilities": ["retrieve", "ingest", "manage_kbs"]})["data"]["token"]
+            host_env.update(AGENTRAG_MODE="worker", AGENTRAG_EXT_DB=str(state_path), AGENTRAG_WEKNORA_URL=http.base_url,
+                AGENTRAG_WEKNORA_API_KEY=api_key, AGENTRAG_TENANT_ID=str(kb["tenant_id"]), AGENTRAG_KB_IDS=kb["id"],
+                AGENTRAG_MANAGEMENT_KEY=management_key, AGENTRAG_RECONCILE_INTERVAL="250ms")
         host_env.update(AGENTRAG_M1_E2E_HOST_READY=str(work/"host-ready.json"),AGENTRAG_M1_E2E_HOST_PORT=str(host_port))
         out=(work/"host-private.log").open("w");handles.append(out)
         host_command=[str(host_binary)] if host_port==8090 else [str(host_binary),"-test.run=^TestNativeE2EHostProcess$","-test.timeout=180s"]
@@ -187,13 +273,27 @@ def main():
         emit(f"[UPLOAD] PASS: native multipart upload -> completed; native chunks containing PDF text={chunks}")
         emit("[PROXY] PASS: authenticated native identity; real PDF preflight; one actual MinerU job; effective flash/txt")
         emit("[ARCHIVE] PASS: native doc_id/tenant/KB match manifest; original middle.json schema2.0 / MinerU4.0.1")
-        state_path=work/"data/parser_artifacts/.parser-state.sqlite"
         with sqlite3.connect(state_path.as_uri()+"?mode=ro",uri=True) as db:
-            registered=db.execute("SELECT a.middle_json,a.artifact_schema_version,a.mineru_version,j.status,j.receipt FROM ext_parser_artifacts a JOIN ext_parser_jobs j ON a.identity_key=j.identity_key AND a.job_key=j.job_key WHERE a.tenant_id=? AND a.knowledge_base_id=? AND a.doc_id=?",(doc["tenant_id"],kb["id"],doc["id"])).fetchall()
+            registered=db.execute("SELECT a.middle_json,a.artifact_schema_version,a.mineru_version,j.status,j.receipt,a.identity_key FROM ext_parser_artifacts a JOIN ext_parser_jobs j ON a.identity_key=j.identity_key AND a.job_key=j.job_key WHERE a.tenant_id=? AND a.knowledge_base_id=? AND a.doc_id=?",(doc["tenant_id"],kb["id"],doc["id"])).fetchall()
             fk_errors=db.execute("PRAGMA foreign_key_check").fetchall()
         if len(registered)!=1 or registered[0][0]!=(artifact/"middle.json").read_bytes() or registered[0][1:3]!=("2.0","4.0.1") or registered[0][3]==0 or fk_errors:raise RuntimeError("durable artifact original bytes/job/FK verification failed")
         emit("[SQL] PASS: original middle JSON byte-for-byte; schema/MinerU versions; known formal job FK; no foreign key violations")
         emit("[INDEX] PASS: original native pipeline completed and persisted real PDF chunks")
+        if cfg.get("renditions"):
+            def restart():
+                nonlocal host
+                helpers.stop_owned(host)
+                out = (work/"host-private.log").open("a"); handles.append(out)
+                host = subprocess.Popen(host_command, cwd=root/"extensions", env=host_env, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+                owned.append(host)
+                helpers.wait_health(http, host, f"http://127.0.0.1:{host_port}/healthz", 30)
+
+            check_rendition(http, kb, doc, registered[0][5], registered[0][0], host_port, management_key, restart, emit)
+            with sqlite3.connect(state_path.as_uri()+"?mode=ro", uri=True) as db:
+                if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok" or db.execute("PRAGMA foreign_key_check").fetchone():
+                    raise RuntimeError("rendition database failed integrity checks")
+                if db.execute("SELECT count(*) FROM ext_parser_rendition_bindings").fetchone()[0] != 1 or relay.jobs != 1:
+                    raise RuntimeError("rendition binding replay created a duplicate")
         if cfg.get("joint_m0"):
             session=http.api("POST","/sessions",{"title":"M1 joint M0 gate fixture"})["data"]
             payload={"query":"Retrieve AGENTRAG_E2E_MARKER: how many reviewers are required before publication?","knowledge_base_ids":[kb["id"]],"knowledge_ids":[doc["id"]],"agent_enabled":False,"web_search_enabled":False,"summary_model_id":ids[0],"disable_title":True}
