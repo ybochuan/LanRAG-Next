@@ -4,9 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
 func TestGraphPreservesDiamondEdgesAndScopeAndCycles(t *testing.T) {
@@ -69,5 +74,155 @@ func TestGraphReportsBoundedNodeWindow(t *testing.T) {
 	graph, err := r.Graph(t.Context(), fixtureScope, "provenance", "")
 	if err != nil || len(graph.Nodes) != 256 || !graph.Truncated {
 		t.Fatalf("node limit not reported: %d %v %v", len(graph.Nodes), graph.Truncated, err)
+	}
+}
+
+func TestGraphProjectsOwnershipOnlyForMatchingObservedVersions(t *testing.T) {
+	r, db, reader, _ := registryFixture(t)
+	ctx := t.Context()
+	parentHash, childHash := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{
+		EventID: "child-event", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "child",
+		ToState: lifecycle.Active, Reason: "test", OccurredAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	observe := func(id, fileHash string) string {
+		t.Helper()
+		snapshot := fixtureSnapshot(t, id)
+		snapshot.DocumentID = id
+		snapshot.HeaderFields["file_hash"] = sha([]byte(strconv.Quote(fileHash)))
+		snapshot.HeaderHash = headerDigest(snapshot.HeaderFields)
+		snapshot.RootHash = rootDigest(snapshot)
+		reader.snapshot = snapshot
+		v, err := r.Refresh(ctx, fixtureScope, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.ID
+	}
+	parent, child := observe("doc", parentHash), observe("child", childHash)
+	importID, err := db.PrepareAttachmentImport(ctx, 7, "kb", "doc", parentHash, strings.Repeat("c", 64), childHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.ClaimAttachmentUpload(ctx, importID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.BindAttachments(ctx, 7, "kb", "doc", parentHash, []store.AttachmentBinding{{ImportID: importID, AttachmentID: "child"}}); err != nil {
+		t.Fatal(err)
+	}
+	graph, err := r.Graph(ctx, fixtureScope, "relations", "")
+	if err != nil || len(graph.Edges) != 1 || graph.Edges[0] != (GraphEdge{ID: "attachment:child", Type: "attachment_of", From: child, To: parent}) {
+		t.Fatalf("attachment graph = %+v, %v", graph.Edges, err)
+	}
+	graph, err = r.Graph(ctx, fixtureScope, "provenance", "")
+	if err != nil || len(graph.Edges) != 0 {
+		t.Fatalf("ownership leaked into provenance: %+v, %v", graph.Edges, err)
+	}
+	observe("doc", strings.Repeat("d", 32))
+	graph, err = r.Graph(ctx, fixtureScope, "relations", "")
+	if err != nil || len(graph.Edges) != 0 {
+		t.Fatalf("old attachment projected onto replacement: %+v, %v", graph.Edges, err)
+	}
+}
+
+func TestSplitBranchesShareAncestryWithoutLeakingOtherModesOrScopes(t *testing.T) {
+	r, db, reader, _ := registryFixture(t)
+	ctx := t.Context()
+	now := time.Now().UTC()
+	stamp := now.Format(time.RFC3339Nano)
+	observe := func(scope provenance.Scope, id string) Version {
+		t.Helper()
+		if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{
+			EventID: id + "-active", TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID,
+			DocumentID: id, ToState: lifecycle.Active, Reason: "fixture", OccurredAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		snapshot := fixtureSnapshot(t, id)
+		snapshot.DocumentID, snapshot.TenantID, snapshot.KnowledgeBaseID = id, scope.TenantID, scope.KnowledgeBaseID
+		snapshot.RootHash = rootDigest(snapshot)
+		reader.snapshot = snapshot
+		v, err := r.Refresh(ctx, scope, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	seed := func(scope provenance.Scope, batch string, published int) (Version, []Version) {
+		t.Helper()
+		source := observe(scope, batch+"-source")
+		parts := []Version{observe(scope, batch+"-a"), observe(scope, batch+"-b"), observe(scope, batch+"-c")}
+		err := db.Write(ctx, func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`INSERT INTO ext_revision_split_batches
+				(tenant_id,knowledge_base_id,batch_id,source_document_id,source_version_id,status,revision,created_at)
+				VALUES(?,?,?,?,?,'approved',2,?)`, scopeArgs(scope, batch, source.DocumentID, source.ID, stamp)...); err != nil {
+				return err
+			}
+			for i, part := range parts {
+				status, proposal := "indexed", part.DocumentID+"-proposal"
+				var version, publishedAt any
+				if i < published {
+					status, version, publishedAt = "published", part.ID, stamp
+				}
+				if _, err := tx.Exec(`INSERT INTO ext_revision_proposals
+					(tenant_id,knowledge_base_id,proposal_id,source_document_id,source_version_id,family_id,
+					trigger_guidance_ids,proposed_patch,target_content_hash,status,revision,publication_key,target_document_id,created_at,published_at)
+					VALUES(?,?,?,?,?,?,'[]','Split text',?,?,3,?,?,?,?)`,
+					scopeArgs(scope, proposal, source.DocumentID, source.ID, part.FamilyID,
+						sha([]byte("Split text")), status, proposal, part.DocumentID, stamp, publishedAt)...); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(`INSERT INTO ext_revision_split_parts
+					(tenant_id,knowledge_base_id,batch_id,proposal_id,position,title,target_version_id)
+					VALUES(?,?,?,?,?,?,?)`, scopeArgs(scope, batch, proposal, i+1, part.DocumentID, version)...); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(`UPDATE ext_revision_split_batches SET first_proposal_id=?
+				WHERE tenant_id=? AND knowledge_base_id=? AND batch_id=?`,
+				parts[0].DocumentID+"-proposal", strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, batch)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return source, parts
+	}
+	source, parts := seed(fixtureScope, "domestic", 2)
+	foreignScope := provenance.Scope{TenantID: fixtureScope.TenantID, KnowledgeBaseID: "other"}
+	_, foreign := seed(foreignScope, "foreign", 1)
+
+	full, err := r.Graph(ctx, fixtureScope, "version-ancestry", "")
+	if err != nil || full.Truncated || len(full.Edges) != 2 {
+		t.Fatalf("version graph did not return the two published branches: %+v, %v", full.Edges, err)
+	}
+	for _, part := range parts[:2] {
+		history, err := r.Graph(ctx, fixtureScope, "version-ancestry", part.ID)
+		if err != nil || history.Truncated || len(history.Nodes) != 2 || len(history.Edges) != 1 {
+			t.Fatalf("rooted split graph: %+v, %v", history, err)
+		}
+		edge := history.Edges[0]
+		if edge.Type != "split_from" || edge.From != part.ID || edge.To != source.ID {
+			t.Fatalf("wrong split direction or source: %+v", edge)
+		}
+		got, err := r.Query(ctx, fixtureScope, part.ID, "version-ancestry")
+		if err != nil || len(got) != 1 || got[0] != (Ancestor{NodeID: source.ID, EdgeType: "split_from", Depth: 1}) {
+			t.Fatalf("ancestry should reach the common source: %+v, %v", got, err)
+		}
+	}
+	got, err := r.Query(ctx, fixtureScope, parts[2].ID, "version-ancestry")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("indexed member appeared in version history before publish: %+v, %v", got, err)
+	}
+	for _, mode := range []string{"provenance", "relations"} {
+		snapshot, err := r.Graph(ctx, fixtureScope, mode, "")
+		if err != nil || len(snapshot.Edges) != 0 {
+			t.Fatalf("split history leaked into %s: %+v, %v", mode, snapshot.Edges, err)
+		}
+	}
+	if _, err := r.Graph(ctx, fixtureScope, "version-ancestry", foreign[0].ID); err != ErrEvidence {
+		t.Fatalf("foreign split root admitted: %v", err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/attachmentcleanup"
 	"github.com/ybochuan/LanRAG-Next/extensions/bridge"
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
 	"github.com/ybochuan/LanRAG-Next/extensions/ingest"
@@ -104,6 +105,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	var sourceLedger *provenance.Ledger
 	var businessService *business.Service
 	var upstream *weknora.Client
+	var attachmentCleanup *attachmentcleanup.Service
 	var scopes []ingest.Scope
 	if cfg.Mode == "worker" {
 		client, err := weknora.NewClient(cfg.UpstreamURL, cfg.APIKey, cfg.TenantID)
@@ -175,6 +177,9 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 				return errors.New("parser database initialization failed")
 			}
 		}
+		if parserCfg.Attachments != nil {
+			parserCfg.Attachments.WithSemantics(db)
+		}
 		native, err = parser.NewPersistentNativeHandler(parserCfg, db)
 		if err != nil {
 			return errors.New("native parser initialization failed")
@@ -206,6 +211,10 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		policy.WithAttachments(attachmentSource)
 		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs, NativeDBPath: cfg.NativeDBPath}
 		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
+		if cfg.NativeDBPath != "" {
+			attachmentCleanup = attachmentcleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, attachmentSource.DeleteAttachment, cfg.RetryDelay)
+			services.BeforeAttachmentDelete = &bridge.AttachmentDeleteHandler{Key: cfg.ManagementKey, Cleanup: attachmentCleanup}
+		}
 		services.BeforeRetrieve, err = bridge.NewRetrieveHandler(cfg.TenantID, cfg.KnowledgeBaseIDs, policy)
 		if err != nil {
 			return errors.New("retrieval handler initialization failed")
@@ -251,7 +260,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	serveResult := make(chan error, 1)
 	go func() { serveResult <- server.Serve(l) }()
 	var tasks sync.WaitGroup
-	backgroundResult := make(chan error, 4)
+	backgroundResult := make(chan error, 5)
 	launch := func(fn func(context.Context) error) {
 		tasks.Add(1)
 		go func() { defer tasks.Done(); backgroundResult <- fn(runCtx) }()
@@ -264,6 +273,11 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		})
 		launch(func(ctx context.Context) error {
 			return reviewService.RunDaily(ctx, lifecycleScopes, func(error) { report("review_scan_failed") })
+		})
+	}
+	if attachmentCleanup != nil {
+		launch(func(ctx context.Context) error {
+			return attachmentCleanup.Run(ctx, cfg.PollInterval, func(error) { report("attachment_cleanup_retry") })
 		})
 	}
 	started = true

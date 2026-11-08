@@ -4,6 +4,17 @@ export interface RelatedAttachment {
   parent_document_id: string
   file_name: string
   download_url: string
+  /** Deterministic semantic fields are optional; native download fields stay required. */
+  display_name?: string
+  original_filename?: string
+  attachment_sequence?: number
+  reference_title?: string
+  reference_location?: string
+  reference_excerpt?: string
+  mapping_status?: 'confirmed' | 'candidate' | 'unmatched' | string
+  mapping_confidence?: number
+  parent_title?: string
+  index_policy?: string
 }
 
 /** Collect structured server metadata; answer prose cannot create a download card. */
@@ -26,7 +37,19 @@ export function relatedAttachments(session: any): RelatedAttachment[] {
       if (!seen.has(key)) { result.push(item); seen.add(key) }
     }
   }
-  return result
+  const parentOrder = new Map<string, number>()
+  for (const item of result) {
+    if (!parentOrder.has(item.parent_document_id)) parentOrder.set(item.parent_document_id, parentOrder.size)
+  }
+  return result.sort((left, right) => {
+    const leftParent = parentOrder.get(left.parent_document_id) ?? 0
+    const rightParent = parentOrder.get(right.parent_document_id) ?? 0
+    if (leftParent !== rightParent) return leftParent - rightParent
+    const leftSequence = Number(left.attachment_sequence) > 0 ? Number(left.attachment_sequence) : Number.MAX_SAFE_INTEGER
+    const rightSequence = Number(right.attachment_sequence) > 0 ? Number(right.attachment_sequence) : Number.MAX_SAFE_INTEGER
+    if (leftSequence !== rightSequence) return leftSequence - rightSequence
+    return (left.original_filename || left.file_name).localeCompare(right.original_filename || right.file_name)
+  })
 }
 
 /** Recognize native download anchors backed by this answer's metadata. */

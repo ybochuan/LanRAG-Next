@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
+	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
 const archiveNotice = "【系统提示：以下内容来自历史归档文档，已失效，请在回答时提醒用户】"
@@ -46,11 +47,13 @@ JOIN weknora.chunks ch ON ch.knowledge_id=k.id AND ch.tenant_id=k.tenant_id AND 
 WHERE c.tenant_id=?2 AND c.state IN ('stale','archived') AND (`+store.LifecycleCurrentVerifiedSQL+`)
   AND c.knowledge_base_id IN (SELECT value FROM json_each(?3))
   AND (c.knowledge_base_id IN (SELECT value FROM json_each(?4)) OR c.document_id IN (SELECT value FROM json_each(?5)))
+  AND NOT `+store.SplitTargetPendingSQL+`
+  AND (substr(coalesce(k.channel,''),1,length(?6))<>?6 OR k.channel=?6||`+store.PublishedSplitProposalSQL+`)
   AND k.deleted_at IS NULL AND k.parse_status='completed'
   AND ch.deleted_at IS NULL AND ch.is_enabled=1 AND ch.chunk_type='text'
 )
 SELECT document_id,id,title,state,substr(content,max(1,hit-200),1200) FROM matches
-WHERE hit>0 OR title_hit>0 ORDER BY hit>0 DESC, document_id, chunk_index, id LIMIT 8`, query, strconv.FormatUint(s.Tenant, 10), string(kbs), string(whole), string(ids))
+WHERE hit>0 OR title_hit>0 ORDER BY hit>0 DESC, document_id, chunk_index, id LIMIT 8`, query, strconv.FormatUint(s.Tenant, 10), string(kbs), string(whole), string(ids), weknora.SplitPublicationChannelPrefix)
 		if err != nil {
 			return err
 		}

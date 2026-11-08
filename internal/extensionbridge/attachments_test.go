@@ -14,7 +14,8 @@ func TestAttachmentResponseScopeAndNativeDownloadURL(t *testing.T) {
 		t.Run(map[bool]string{false: "valid", true: "foreign_url"}[bad], func(t *testing.T) {
 			in := attachmentLookup{"r", "s", "rag", 7, []string{"kb-a"}, []string{"parent"}}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				a := RelatedAttachment{"child", "kb-a", "parent", "table.docx", "/api/v1/knowledge/child/download"}
+				a := RelatedAttachment{KnowledgeID: "child", KnowledgeBaseID: "kb-a", ParentDocumentID: "parent",
+					FileName: "table.docx", DownloadURL: "/api/v1/knowledge/child/download"}
 				if bad {
 					a.DownloadURL = "https://example.invalid/file"
 				}

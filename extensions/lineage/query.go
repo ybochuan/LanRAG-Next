@@ -26,10 +26,20 @@ func requireNode(ctx context.Context, tx *sql.Tx, s provenance.Scope, id string)
 	return nil
 }
 
+// Split edges are projected from committed publication facts. The canonical
+// edge table continues to store the existing version and provenance types.
+const versionAncestryEdges = `(
+	SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at
+	FROM ext_lineage_edge WHERE edge_type IN ('supersedes','merged_into')
+	UNION ALL
+	SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at
+	FROM ext_revision_split_ancestry
+)`
+
 func traverse(ctx context.Context, tx *sql.Tx, s provenance.Scope, id, mode string) ([]Ancestor, error) {
-	condition := "edge_type='derived_from'"
+	edges, condition := "ext_lineage_edge", " AND edge_type='derived_from'"
 	if mode == "version-ancestry" {
-		condition = "edge_type IN ('supersedes','merged_into')"
+		edges, condition = versionAncestryEdges, ""
 	} else if mode != "provenance" {
 		return nil, ErrEvidence
 	}
@@ -42,7 +52,7 @@ func traverse(ctx context.Context, tx *sql.Tx, s provenance.Scope, id, mode stri
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		rows, e := tx.QueryContext(ctx, "SELECT to_node_id,edge_type FROM ext_lineage_edge WHERE tenant_id=? AND knowledge_base_id=? AND from_node_id=? AND "+condition+" ORDER BY to_node_id,edge_type LIMIT 257", scopeArgs(s, current.NodeID)...)
+		rows, e := tx.QueryContext(ctx, "SELECT to_node_id,edge_type FROM "+edges+" WHERE tenant_id=? AND knowledge_base_id=? AND from_node_id=?"+condition+" ORDER BY to_node_id,edge_type LIMIT 257", scopeArgs(s, current.NodeID)...)
 		if e != nil {
 			return nil, e
 		}
@@ -80,7 +90,7 @@ func traverse(ctx context.Context, tx *sql.Tx, s provenance.Scope, id, mode stri
 }
 
 // Query keeps /provenance (derived_from) separate from /version-ancestry
-// (supersedes/merged_into). Native access must precede any future HTTP facade.
+// (supersedes/merged_into and committed split_from).
 func (r *Registry) Query(ctx context.Context, s provenance.Scope, node, mode string) ([]Ancestor, error) {
 	if r == nil || r.db == nil || s.TenantID == 0 || !validID(s.KnowledgeBaseID) || !validID(node) {
 		return nil, ErrEvidence

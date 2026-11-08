@@ -1,13 +1,14 @@
 import type { GraphMode, LineageGraph, LineageNode } from '@/api/lineage'
 
 export const modes: { key: GraphMode; label: string; description: string }[] = [
-  { key: 'version-ancestry', label: '版本历史', description: '箭头从新版本指向被替代或合并的版本。' },
+  { key: 'version-ancestry', label: '版本历史', description: '箭头从新版本指向被替代、合并或拆分的旧版本。' },
   { key: 'provenance', label: '内容溯源', description: '箭头从派生内容指向它的来源，仅显示 derived_from。' },
-  { key: 'relations', label: '文档关联', description: '查看补充、修订、解释和相关关系，箭头保留声明方向。' },
+  { key: 'relations', label: '文档关联', description: '查看制度关系、引用、模板和附件归属，箭头保留登记方向。' },
 ]
 export const edgeLabels: Record<string, string> = {
-  supersedes: '替代', merged_into: '合并至', derived_from: '来源于',
-  supplements: '补充', amends: '修订', interprets: '解释', related_to: '相关',
+  supersedes: '替代', merged_into: '合并至', split_from: '拆分自', derived_from: '来源于',
+  supplements: '补充', amends: '修订', interprets: '解释', related_to: '相关', attachment_of: '归属主件',
+  cites: '引用依据', implements: '实施细则', template_for: '独立模板',
 }
 export const typeLabels: Record<string, string> = {
   document_version: '文档版本', chunk: '分块', parser_artifact: '解析产物', chunk_revision: '分块修订',

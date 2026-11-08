@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -477,6 +478,12 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		return nil
 	}
 	ctx, ids, knowledgeList := plan.ctx, plan.ids, plan.knowledge
+	if !plan.rowsDeleted {
+		if err := extensionbridge.PrepareAttachmentDelete(ctx, knowledgeList); err != nil {
+			logger.Warnf(ctx, "[Bridge] attachment delete intent unavailable; native deletion deferred")
+			return apperrors.NewServiceUnavailableError("attachment cleanup is not ready; retry document deletion")
+		}
+	}
 	knowledgeBases, kbFileServices := plan.kbs, plan.files
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 

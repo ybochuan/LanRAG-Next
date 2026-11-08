@@ -42,6 +42,20 @@ func DefaultRegistry() *Registry {
 	return NewRegistry(PDFExtractor{}, OfficeExtractor{}, DocxAnnexExtractor{})
 }
 
+// Supports reports whether an extractor recognizes this source. Only such a
+// source can produce an authoritative empty attachment manifest.
+func (r *Registry) Supports(name string, data []byte) bool {
+	if len(data) == 0 || len(data) > MaxSourceBytes {
+		return false
+	}
+	for _, e := range r.extractors {
+		if e != nil && e.Supports(name, data[:min(len(data), 1024)]) {
+			return true
+		}
+	}
+	return false
+}
+
 // Extract filters supported results before any independent ingestion.
 func (r *Registry) Extract(name string, data []byte) ([]File, error) {
 	if len(data) == 0 || len(data) > MaxSourceBytes {

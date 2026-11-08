@@ -1,5 +1,12 @@
 # 原生薄补丁记录
 
+## ATTACH-08B 主件删除接线
+
+- `internal/application/service/knowledge_delete.go` 只在 `executeKnowledgeDelete` 处理已校验的原生记录、开始修改状态之前调用 Bridge。已由数据源替换软删的旧行沿用原路径。
+- `internal/extensionbridge/attachment_delete.go` 将已配置 SQLite 租户和知识库范围内的文件转换为 DTO，通过固定回环、版本 1、管理 Bearer 和 2 秒 HTTP 客户端发送。只接受同请求的 204 确认。失败时本次原生执行停在修改状态之前。
+- 清理意图、上传围栏、核对、重试、查询状态均在扩展模块。子件仍通过原生删除接口和原有异步清理路径处理。没有原生表、依赖、删除顺序或索引算法变更。已有附件响应测试仅改用具名字段以兼容 ATTACH-07A DTO。
+- 单删、批删、清空库及 Host 离线和重启恢复见 `tmp/attach-08b-e2e.log`。候选服务和 SQLite 文件与正式环境隔离。
+
 ## M6-b 单库血缘图管理查询（2026-11-05）
 
 - 用户明确要求提前启动血缘DAG可视化，沿用已批准的原生界面集成。新增 `business_lineage_graph` 只读动作，复用既有JWT、Viewer、KBRead及management固定回环转发。原生仅修改 `internal/handler/extension_lifecycle.go` 的读动作映射及模式参数，`internal/extensionbridge/management.go` 增加独立DTO字段。

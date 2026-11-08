@@ -13,6 +13,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
+	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
 // Policy permits only known active lifecycle facts in its configured scopes.
@@ -91,6 +92,10 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 	if err != nil {
 		return nil, err
 	}
+	attachmentParents, err := p.attachmentParents(ctx, r, attachmentDocs)
+	if err != nil {
+		return nil, err
+	}
 	// Collect only dependencies of native-authorized targets, refresh outside the
 	// final read transaction, then compare every pin again in that transaction.
 	verified := map[dependencies.Scope]string{}
@@ -143,15 +148,23 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 		args = append(args, id)
 	}
 	err = p.db.View(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT c.document_id,CASE WHEN `+store.LifecycleCurrentVerifiedSQL+` THEN c.state ELSE '' END FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+` WHERE c.tenant_id=? AND c.knowledge_base_id IN (`+placeholders(len(r.KnowledgeBaseIDs))+`) AND c.document_id IN (`+placeholders(len(r.KnowledgeIDs))+`)`, args...)
+		rows, err := tx.QueryContext(ctx, `SELECT c.document_id,c.knowledge_base_id,
+			CASE WHEN `+store.LifecycleCurrentVerifiedSQL+` AND NOT `+store.SplitTargetPendingSQL+` THEN c.state ELSE '' END,
+			COALESCE(`+store.PublishedSplitProposalSQL+`,'') FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
+			WHERE c.tenant_id=? AND c.knowledge_base_id IN (`+placeholders(len(r.KnowledgeBaseIDs))+`)
+			AND c.document_id IN (`+placeholders(len(r.KnowledgeIDs))+`)`, args...)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
-			var id, state string
-			if err = rows.Scan(&id, &state); err != nil {
+			var id, kb, state, publishedSplit string
+			if err = rows.Scan(&id, &kb, &state, &publishedSplit); err != nil {
 				rows.Close()
 				return err
+			}
+			if doc := attachmentDocs[id]; doc.KnowledgeBaseID == kb && strings.HasPrefix(doc.Channel, weknora.SplitPublicationChannelPrefix) &&
+				(publishedSplit == "" || doc.Channel != weknora.SplitPublicationChannelPrefix+publishedSplit) {
+				state = ""
 			}
 			if state == "active" {
 				active[id] = true
@@ -183,16 +196,36 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 				}
 			}
 		}
+		if p.attachments == nil {
+			return nil
+		}
+		owners, err := store.AttachmentOwnershipsTx(ctx, tx, r.TenantID, r.KnowledgeIDs)
+		if err != nil {
+			return err
+		}
 		for _, id := range r.KnowledgeIDs {
-			if p.attachments == nil {
-				break
-			}
 			d, ok := attachmentDocs[id]
 			if !ok {
 				blocked[id] = true
 				continue
 			}
+			owner, linked := owners[id]
+			parent := attachmentParents[d.ParentDocumentID]
+			if linked || d.ImportID != "" {
+				receiptMatches := owner.EvidenceKind == store.AttachmentUploadEvidence && owner.ImportID == d.ImportID ||
+					owner.EvidenceKind == store.AttachmentLegacyEvidence && d.ImportID == "" && owner.AttachmentSHA256 == d.ExtractedSHA256
+				if !linked || owner.Historical || !d.IsAttachment || !receiptMatches || owner.KnowledgeBaseID != d.KnowledgeBaseID ||
+					owner.ParentDocumentID != d.ParentDocumentID || owner.ParentFileHash != parent.FileHash ||
+					owner.AttachmentFileHash != d.FileHash {
+					blocked[id] = true
+					continue
+				}
+			}
 			if d.IsAttachment {
+				if !validAttachmentParent(d, parent) || d.ParseStatus == "deleting" || d.EnableStatus == "disabled" {
+					blocked[id] = true
+					continue
+				}
 				permit, e := attachmentParentActive(ctx, tx, r.TenantID, d)
 				if e != nil {
 					return e

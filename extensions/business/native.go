@@ -2,17 +2,22 @@ package business
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
 // ErrBinarySource preserves Frozen12.8: PDF/DOCX require the user's revised original upload.
 var ErrBinarySource = errors.New("binary source requires revised original upload")
 
 func (n *NativePublisher) manualSource(ctx context.Context, p Publication) error {
+	if n == nil || n.client == nil || n.client.TenantID() != p.Scope.TenantID || !validID(p.Scope.KnowledgeBaseID) {
+		return ErrUnavailable
+	}
 	if !validID(p.SourceDocumentID) {
 		return ErrInvalid
 	}
@@ -25,7 +30,8 @@ func (n *NativePublisher) manualSource(ctx context.Context, p Publication) error
 	if out.Data.ID != p.SourceDocumentID || out.Data.TenantID != p.Scope.TenantID || out.Data.KnowledgeBaseID != p.Scope.KnowledgeBaseID {
 		return ErrConflict
 	}
-	if out.Data.Type != "manual" || out.Data.Metadata.Status != "publish" {
+	var meta manualMetadata
+	if out.Data.Type != "manual" || json.Unmarshal(out.Data.Metadata, &meta) != nil || meta.Status != "publish" {
 		return ErrBinarySource
 	}
 	return nil
@@ -38,24 +44,50 @@ type NativePublisher struct{ client *weknora.Client }
 func NewNativePublisher(c *weknora.Client) *NativePublisher { return &NativePublisher{client: c} }
 
 type nativeDocument struct {
-	ID              string `json:"id"`
-	TenantID        uint64 `json:"tenant_id"`
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Title           string `json:"title"`
-	Type            string `json:"type"`
-	ParseStatus     string `json:"parse_status"`
-	Metadata        struct {
-		Content string `json:"content"`
-		Status  string `json:"status"`
-	} `json:"metadata"`
+	ID              string          `json:"id"`
+	TenantID        uint64          `json:"tenant_id"`
+	KnowledgeBaseID string          `json:"knowledge_base_id"`
+	Title           string          `json:"title"`
+	Type            string          `json:"type"`
+	Channel         string          `json:"channel"`
+	ParseStatus     string          `json:"parse_status"`
+	Metadata        json.RawMessage `json:"metadata"`
 }
 
-func marker(p Publication) string { return "AgentRAG revision " + p.Key }
+type manualMetadata struct {
+	Content string `json:"content"`
+	Status  string `json:"status"`
+}
+
+func marker(p Publication) string {
+	if p.SplitID != "" {
+		return p.SplitTitle
+	}
+	return "AgentRAG revision " + p.Key
+}
+
+func splitChannel(p Publication) string {
+	return weknora.SplitPublicationChannelPrefix + p.ProposalID
+}
+
 func checkedNative(p Publication, d nativeDocument) (RemoteDocument, error) {
-	if !validID(d.ID) || d.TenantID != p.Scope.TenantID || d.KnowledgeBaseID != p.Scope.KnowledgeBaseID || d.Type != "manual" || d.Title != marker(p) || d.Metadata.Status != "publish" || textHash(d.Metadata.Content) != p.ContentHash {
+	var meta manualMetadata
+	if !validID(d.ID) || d.TenantID != p.Scope.TenantID || d.KnowledgeBaseID != p.Scope.KnowledgeBaseID ||
+		d.Type != "manual" || d.Title != marker(p) || json.Unmarshal(d.Metadata, &meta) != nil || textHash(meta.Content) != p.ContentHash {
 		return RemoteDocument{}, ErrConflict
 	}
-	return RemoteDocument{ID: d.ID, ContentHash: p.ContentHash, Indexed: d.ParseStatus == "completed"}, nil
+	if p.SplitID != "" && d.Channel != splitChannel(p) {
+		return RemoteDocument{}, ErrConflict
+	}
+	draft := meta.Status == "draft" && d.ParseStatus == "draft" && p.SplitID != ""
+	if !draft && meta.Status != "publish" {
+		return RemoteDocument{}, ErrConflict
+	}
+	// The native snapshot hashes the metadata bytes as a JSON-encoded byte slice.
+	metadata, _ := json.Marshal([]byte(d.Metadata))
+	return RemoteDocument{ID: d.ID, ContentHash: p.ContentHash, Draft: draft,
+		Indexed: !draft && d.ParseStatus == "completed", IndexFailed: !draft && d.ParseStatus == "failed",
+		MetadataHash: textHash(string(metadata))}, nil
 }
 func (n *NativePublisher) read(ctx context.Context, p Publication, id string) (RemoteDocument, error) {
 	var out struct {
@@ -97,7 +129,7 @@ func (n *NativePublisher) Reconcile(ctx context.Context, p Publication) (RemoteD
 			if d.TenantID != p.Scope.TenantID || d.KnowledgeBaseID != p.Scope.KnowledgeBaseID {
 				return RemoteDocument{}, ErrConflict
 			}
-			if d.Title != marker(p) {
+			if p.SplitID == "" && d.Title != marker(p) || p.SplitID != "" && d.Channel != splitChannel(p) {
 				continue
 			}
 			if found.ID != "" {
@@ -118,14 +150,49 @@ func (n *NativePublisher) Create(ctx context.Context, p Publication) (RemoteDocu
 	if n == nil || n.client == nil || n.client.TenantID() != p.Scope.TenantID || !validID(p.Scope.KnowledgeBaseID) || textHash(p.Content) != p.ContentHash {
 		return RemoteDocument{}, ErrInvalid
 	}
-	body := map[string]any{"title": marker(p), "content": p.Content, "status": "publish", "channel": "api"}
 	if e := n.manualSource(ctx, p); e != nil {
 		return RemoteDocument{}, e
+	}
+	return n.writeManual(ctx, p, http.MethodPost, "/api/v1/knowledge-bases/"+url.PathEscape(p.Scope.KnowledgeBaseID)+"/knowledge/manual", "publish")
+}
+
+// ValidateSplitSource verifies the native source can enter the Markdown split flow.
+func (n *NativePublisher) ValidateSplitSource(ctx context.Context, p Publication) error {
+	return n.manualSource(ctx, p)
+}
+
+// CreateDraft creates a natively disabled document before the local target binding.
+func (n *NativePublisher) CreateDraft(ctx context.Context, p Publication) (RemoteDocument, error) {
+	if p.SplitID == "" || p.TargetDocumentID != "" {
+		return RemoteDocument{}, ErrInvalid
+	}
+	if err := n.manualSource(ctx, p); err != nil {
+		return RemoteDocument{}, err
+	}
+	return n.writeManual(ctx, p, http.MethodPost, "/api/v1/knowledge-bases/"+url.PathEscape(p.Scope.KnowledgeBaseID)+"/knowledge/manual", "draft")
+}
+
+// IndexDraft asks Core to index the same target, after its gate has been committed.
+func (n *NativePublisher) IndexDraft(ctx context.Context, p Publication) (RemoteDocument, error) {
+	if p.SplitID == "" || !validID(p.TargetDocumentID) {
+		return RemoteDocument{}, ErrInvalid
+	}
+	return n.writeManual(ctx, p, http.MethodPut, "/api/v1/knowledge/manual/"+url.PathEscape(p.TargetDocumentID), "publish")
+}
+
+func (n *NativePublisher) writeManual(ctx context.Context, p Publication, method, route, status string) (RemoteDocument, error) {
+	if n == nil || n.client == nil || n.client.TenantID() != p.Scope.TenantID ||
+		!validID(p.Scope.KnowledgeBaseID) || textHash(p.Content) != p.ContentHash {
+		return RemoteDocument{}, ErrInvalid
+	}
+	body := map[string]any{"title": marker(p), "content": p.Content, "status": status, "channel": "api"}
+	if p.SplitID != "" {
+		body["channel"] = splitChannel(p)
 	}
 	var out struct {
 		Data nativeDocument `json:"data"`
 	}
-	if e := n.client.JSON(ctx, http.MethodPost, "/api/v1/knowledge-bases/"+url.PathEscape(p.Scope.KnowledgeBaseID)+"/knowledge/manual", nil, body, &out); e != nil {
+	if e := n.client.JSON(ctx, method, route, nil, body, &out); e != nil {
 		return RemoteDocument{}, e
 	}
 	return checkedNative(p, out.Data)

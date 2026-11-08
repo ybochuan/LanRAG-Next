@@ -71,6 +71,9 @@ func (r *Registry) Refresh(ctx context.Context, s provenance.Scope, doc string) 
 		fetchCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		defer cancel()
 		snapshot, e := r.reader.Capture(fetchCtx, s, doc)
+		if errors.Is(e, ErrSourceMissing) && fetchCtx.Err() == nil {
+			return e
+		}
 		if e != nil || fetchCtx.Err() != nil || snapshot.Validate(s, doc) != nil {
 			return ErrEvidence
 		}

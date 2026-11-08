@@ -300,6 +300,22 @@
   border-radius:var(--app-radius-md);
   padding:14px
 }
+.business-page .split-parts,.business-page .split-part{
+  min-width:0;
+  display:grid;
+  gap:12px
+}
+.business-page .split-parts>button,.business-page .split-part>button{
+  justify-self:start
+}
+.business-page .split-detail-part{
+  border-top:1px solid var(--td-component-stroke);
+  padding:12px 0
+}
+.business-page .split-detail-part h4{
+  margin:0;
+  overflow-wrap:anywhere
+}
 .business-page .check-label,.business-page .guidance-choice{
   flex-direction:row;
   align-items:flex-start
@@ -323,16 +339,46 @@
   gap:10px
 }
 .business-page .relation-query{
-  margin-top:24px
+  margin-bottom:24px
+}
+.business-page .relation-query .section-heading h2{
+  margin:0
+}
+.business-page .relation-query .section-heading a{
+  color:var(--td-brand-color)
+}
+.business-page .document-picker{
+  min-width:0;
+  display:grid;
+  gap:8px
 }
 .business-page .relation-query form{
   grid-template-columns:minmax(200px,1fr) auto;
-  align-items:center;
+  align-items:end;
   max-width:650px
 }
-.business-page .relation-query li{
-  padding:8px 0;
-  line-height:1.7
+.business-page .relation-results{
+  list-style:none;
+  margin:12px 0 0;
+  padding:0
+}
+.business-page .relation-results li{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:12px 0;
+  border-top:1px solid var(--td-component-stroke)
+}
+.business-page .relation-results li span{
+  min-width:0;
+  overflow-wrap:anywhere
+}
+.business-page .relation-results small{
+  display:block
+}
+.business-page .relation-results button{
+  flex-shrink:0
 }
 
 .business-page dialog{

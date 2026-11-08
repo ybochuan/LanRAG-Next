@@ -46,9 +46,12 @@ func (p *Projector) publishedFamily(ctx context.Context, scope Scope) (string, e
 	err := p.db.View(ctx, func(tx *sql.Tx) error {
 		// The published revision chain, not the per-document observation family
 		// or a historical Outbox payload, determines the projected family.
-		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT family_id FROM ext_revision_proposals
-WHERE tenant_id=? AND knowledge_base_id=? AND status IN ('published','superseded')
-AND (source_document_id=? OR target_document_id=?) LIMIT 2`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, scope.DocumentID, scope.DocumentID)
+		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT r.family_id FROM ext_revision_proposals r
+WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.status IN ('published','superseded')
+AND (r.target_document_id=? OR r.source_document_id=? AND NOT EXISTS (
+	SELECT 1 FROM ext_revision_split_parts p WHERE p.tenant_id=r.tenant_id
+	AND p.knowledge_base_id=r.knowledge_base_id AND p.proposal_id=r.proposal_id
+)) LIMIT 2`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, scope.DocumentID, scope.DocumentID)
 		if err != nil {
 			return err
 		}

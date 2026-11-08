@@ -27,6 +27,7 @@ type bodyPart struct {
 	start, end         int
 	text               string
 	paragraph, section bool
+	style              string
 }
 
 func (DocxAnnexExtractor) Extract(data []byte) ([]File, error) {
@@ -153,6 +154,14 @@ func documentParts(source []byte) ([]bodyPart, int, int, error) {
 			} else if bodyDepth > 0 && depth == bodyDepth+1 {
 				parts = append(parts, bodyPart{start: before, paragraph: t.Name.Space == wordNS && t.Name.Local == "p", section: t.Name.Space == wordNS && t.Name.Local == "sectPr"})
 				current = &parts[len(parts)-1]
+			}
+			if current != nil && t.Name.Space == wordNS && t.Name.Local == "pStyle" {
+				for _, attr := range t.Attr {
+					if attr.Name.Local == "val" {
+						current.style = attr.Value
+						break
+					}
+				}
 			}
 			if t.Name.Space == wordNS && t.Name.Local == "t" {
 				inText = true

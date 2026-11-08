@@ -164,15 +164,13 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 ) THEN 'qa' ELSE 'manual' END)`
 	switch c.Action {
 	case "relation_list":
-		table, idcol = "ext_document_relations", "relation_id"
-		fields = `json_object('document_id',document_id,'target_document_id',target_document_id,'edge_type',edge_type,'confidence',confidence,'source_version_id',source_version_id,'target_version_id',target_version_id)`
+		table, idcol, fields = relationRecords, "relation_id", "details"
 	case "feedback_list":
 	case "guidance_list":
 		table, idcol = "ext_feedback_guidances", "guidance_id"
 		fields = `json_object('text',text,'topic',topic,'source',source,'confidence',confidence)`
 	case "revision_list":
-		table, idcol = "ext_revision_proposals", "proposal_id"
-		fields = `json_object('proposed_patch',proposed_patch,'source_document_id',source_document_id,'source_version_id',source_version_id,'family_id',family_id,'guidance_ids',json(trigger_guidance_ids),'publication_key',publication_key,'target_document_id',target_document_id,'publish_error',publish_error)`
+		table, idcol, fields = revisionRecords, "proposal_id", "details"
 	default:
 		return nil, ErrInvalid
 	}
@@ -198,6 +196,8 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 			}
 			where += " AND " + idcol + "=?"
 			params = append(params, c.ID)
+		} else if c.Action == "revision_list" {
+			where += " AND json_extract(details,'$.record_kind') <> 'split_part'"
 		}
 		params = append(params, c.PageSize, (c.Page-1)*c.PageSize)
 		rows, e := tx.QueryContext(ctx, `SELECT `+idcol+`,status,revision,`+fields+` FROM `+table+` WHERE `+where+` ORDER BY `+idcol+` LIMIT ? OFFSET ?`, params...)
@@ -221,7 +221,39 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 			row["revision"] = rev
 			out = append(out, row)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if c.Action == "revision_list" && c.ID != "" && len(out) == 1 && out[0]["record_kind"] == "split_batch" {
+			parts, err := listSplitParts(ctx, tx, c.Scope, c.ID)
+			if err != nil {
+				return err
+			}
+			out[0]["split_parts"] = parts
+		}
+		return nil
 	})
 	return out, e
 }
+
+// Attachment links are system records; their presence is not a claim that
+// either document is currently retrievable.
+const relationRecords = `(
+SELECT tenant_id,knowledge_base_id,relation_id,status,revision,
+json_object('document_id',document_id,'target_document_id',target_document_id,'edge_type',edge_type,'confidence',confidence,'source_version_id',source_version_id,'target_version_id',target_version_id) AS details
+FROM ext_document_relations
+UNION ALL
+SELECT a.tenant_id,a.knowledge_base_id,'attachment:'||a.attachment_id,
+CASE WHEN a.removed_at IS NOT NULL THEN 'attachment_removed'
+     WHEN d.document_id IS NULL AND a.retired_at IS NOT NULL THEN 'attachment_retired'
+     WHEN d.document_id IS NULL THEN 'linked'
+     WHEN a.cleanup_error<>'' THEN 'attachment_cleanup_retry'
+     ELSE 'attachment_cleanup_pending' END,1,
+json_object('document_id',a.attachment_id,'target_document_id',a.parent_document_id,'edge_type','attachment_of')
+FROM ext_attachment_links a LEFT JOIN ext_attachment_delete_intents d
+ON d.tenant_id=a.tenant_id AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id
+WHERE a.attachment_id IS NOT NULL
+)`

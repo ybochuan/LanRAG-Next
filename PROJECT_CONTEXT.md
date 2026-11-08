@@ -1,5 +1,30 @@
 # AgentRAG 项目上下文
 
+## 附件自动归属（ATTACH-08A）
+
+- 扩展 schema 15 的 `ext_attachment_links` 保存提取导入意图和已确认的同库附件归属。Host 校验源字节与原生主件文件哈希，先持久领取上传回执再 POST，核对原生子件 scope、回执与文件哈希后登记。重复提取复用同一附件；上传结果未知时只按回执对账。父件和子件原生文件哈希用作版本标识，附件 SHA-256 用作提取内容标识。
+- 原生已有 JWT 文档关联列表呈现 `attachment_of` 自动登记项。单库图的文档关联视图仅将已登记关系投影到文件指纹相符的当前已观察版本；底层 `ext_lineage_edge` 枚举、内容溯源和版本历史语义保持各自独立。
+- 检索、关联文件 MCP 和原生附件下载沿用既有入口。附件许可额外检查同库父件仍可读；带新回执的附件还必须匹配持久归属、父版本和附件版本。历史附件兼容既有 Metadata 展示，盘点命令单独标为 legacy，语义映射和旧标签均不授予清理权限。
+- `attachment-backfill -audit-ownership` 只读统计旧附件、已核对归属、缺失父件、库归属冲突和回执或版本不符。
+
+## 文档关系与附件换版
+
+- schema 17 扩展同库业务关系为 `cites`、`implements` 和 `template_for`。复用原生管理入口和扩展回执、审计及两端观察版本核对。图从业务记录投影这些关系，附件归属和生命周期继续各用独立的规则。
+- schema 18 记录附件历史状态和旧附件归属证据。受支持的主件完整提取后，扩展库按原生文件哈希核对整组附件，复用仍在的归属，将消失的附件标为历史。历史归属退出当前问答与下载，仍由主件删除流程清理。
+- `attachment-backfill -plan-legacy-ownership` 从原生 SQLite 与本地原件只读生成清单，支持直接本地路径及同租户、同文档 `source_file` 绑定的 `resource://` 引用（活跃、本地、无路径前缀的后端）。`-apply-legacy-ownership` 重新核对清单的字节、哈希和同库身份，并在工具支持的 schema 18 及以上扩展库中登记审核通过的条目。确认后的旧附件证据类型为 `legacy_reextracted`，仍需通过当前版本和删除门卫。
+
+## 制度拆分发布（REL-05）
+
+- 扩展 schema 19 在 `ext_revision_split_batches` 锁定同库在线 Markdown 源版本，在 `ext_revision_split_parts` 登记经整批审批的 2–8 份分件。原生「修订发布」页面创建和审阅批次，再逐件推进发布。
+- 分件以原生 `channel` 携带发布凭证，先创建禁用草稿，提交目标 ID 后才由发布器请求索引。普通检索和历史 MCP 都以发布凭证及目标 ID 拦截未发布内容。首个完成索引及治理确认的分件在一个扩展事务内解除自身门卫、让旧制度成为 `superseded` 并写审计。后续分件核对同一源版本，失败可对账并复用原目标。
+- 血缘版本历史投影 `split_from`，方向为分件发布版本指向锁定的旧版本。各分件有独立版本族，沿用原生管理路由和既有关键血缘枚举。
+
+## 受管附件随主件删除（ATTACH-08B）
+
+- 扩展 schema 16 保存同库删除意图及附件清理进度。启用 SQLite Lite、明确的 `AGENTRAG_TENANT_ID` / `AGENTRAG_KB_IDS` 及共享管理凭据时，原生文件删除任务在首次状态修改之前提交持久意图。Host 不可用或附件上传结果未核对时，任务暂缓执行。
+- 该意图立即阻断关联附件的普通检索和原生下载，并阻止新附件上传。worker 使用与 Core 同一个 `DB_PATH` 的只读 SQLite 通道核对原生软删除记录，复查附件的库、父件、回执及文件版本，再调用原生删除 API。已提交但未完成的任务持续核对，重启续跑；旧 Metadata 本身不能授权清理。
+- 文档关联列表报告「附件清理中」「清理待重试」「已随主件删除」。原生 API 的 HTTP 200 继续表示任务已提交。覆盖进入共用执行点的单删、批删和清空库，整库删除和数据源硬删是独立入口。
+
 ## 一键启动（2026-11-05）
 
 - 入口分层：Windows `start.cmd` → `scripts/onekey.ps1`（Docker Desktop/docreader、MinerU、supervisor 与两台模型、WSL 网络模式），随后前台调用 WSL 的 `start-all.sh`（Core/Host/凭证/MCP）。`start-all.sh` 仍可单独运行，只做 WSL 半并如实报告 Windows 侧缺失。
@@ -15,7 +40,7 @@
 
 - 原生导航 `/platform/lineage` 使用 AntV X6 3.1.8，提供版本历史、内容溯源、文档关联三个视图。库切换沿用原生可访问知识库列表，支持图中名称/编号搜索、缩放、平移、节点详情及指定节点展开。
 - 查询通过已有JWT接口 `GET /api/v1/knowledge-bases/:id/lifecycle/business/lineage_graph?mode=...&id=...`，mode为 `version-ancestry`、`provenance` 或 `relations`，id为可选根节点。原生仅鉴权和转发；`extensions/lineage/graph.go` 在同一只读事务内读取实际节点与边。根节点查询复用现有有界、带循环保护的遍历。
-- 图只包含当前库登记的节点和实际边。版本历史使用supersedes/merged_into，内容溯源仅derived_from，关联使用supplements/amends/interprets/related_to。最多256节点/512边，响应与界面显式标出截断。附件Metadata不会自动转为血缘边，尚未登记的生产者及分块不会凭空出现在图里。
+- 图只包含当前库登记的节点和关系。版本历史使用supersedes/merged_into，内容溯源仅derived_from，关联使用supplements/amends/interprets/related_to及符合ATTACH-08A条件的attachment_of投影。最多256节点/512边，响应与界面显式标出截断。旧附件Metadata不作为图中的归属边。
 - 节点名称来自当前原生文档标题，生命周期表示文档当前状态，观测序号和current标记来自已有观察版本族。普通编辑和当前观测版本均不自动代表制度已发布。浏览器验收使用 `frontend/src/views/lineage/browser.fixture.mjs` 的合成数据，真实接口验收通过 `AGENTRAG_LINEAGE_E2E=1` 与既有business E2E联合运行。
 
 ## 关联文件MCP接线（2026-11-03）

@@ -8,18 +8,29 @@ import (
 	"strconv"
 )
 
+// SplitPublicationChannelPrefix identifies native drafts owned by the split publisher.
+const SplitPublicationChannelPrefix = "agentrag-split-"
+
 // AttachmentDocument is the minimal native metadata used by attachment policy.
 type AttachmentDocument struct {
 	ID               string
 	TenantID         uint64
 	KnowledgeBaseID  string
 	FileName         string
+	Title            string
+	Channel          string
+	FileHash         string
+	ParseStatus      string
+	EnableStatus     string
 	IsAttachment     bool
 	ParentDocumentID string
+	ImportID         string
+	ExtractedSHA256  string
 }
 type nativeAttachmentDocument struct {
 	attachmentDocument
 	FileName string `json:"file_name"`
+	Channel  string `json:"channel"`
 }
 
 func (c *Client) decodeAttachmentDocument(d nativeAttachmentDocument, kbs map[string]bool) (AttachmentDocument, error) {
@@ -30,7 +41,12 @@ func (c *Client) decodeAttachmentDocument(d nativeAttachmentDocument, kbs map[st
 	if raw, ok := d.Metadata["is_attachment"]; ok && json.Unmarshal(raw, &flag) != nil {
 		return AttachmentDocument{}, errors.New("invalid attachment metadata")
 	}
-	out := AttachmentDocument{ID: d.ID, TenantID: d.TenantID, KnowledgeBaseID: d.KBID, FileName: d.FileName, IsAttachment: flag == "true", ParentDocumentID: d.value("parent_document_id")}
+	out := AttachmentDocument{
+		ID: d.ID, TenantID: d.TenantID, KnowledgeBaseID: d.KBID, FileName: d.FileName, Title: d.Title, Channel: d.Channel,
+		FileHash: d.FileHash, ParseStatus: d.ParseStatus, EnableStatus: d.EnableStatus,
+		IsAttachment: flag == "true", ParentDocumentID: d.value("parent_document_id"), ImportID: d.value("attachment_import_id"),
+		ExtractedSHA256: d.value("attachment_sha256"),
+	}
 	if out.IsAttachment && (!ValidID(out.ParentDocumentID) || out.ParentDocumentID == out.ID) {
 		return AttachmentDocument{}, errors.New("invalid attachment parent")
 	}

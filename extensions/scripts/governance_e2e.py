@@ -375,7 +375,7 @@ def main():
         emit("[PROVENANCE-AGENT] PASS: actual native execution sealed; real fields verified against native source snapshots; unsupported composition remains unattributed; FK check clean")
         if os.environ.get("AGENTRAG_BUSINESS_E2E") == "1":
             import business_e2e
-            business_e2e.run(http, kb, doc, emit, work / "ext.db")
+            business_guidance = business_e2e.run(http, kb, doc, emit, work / "ext.db")
             with sqlite3.connect(work / "ext.db") as db:
                 if db.execute("PRAGMA foreign_key_check").fetchone():
                     raise RuntimeError("business foreign key violation")
@@ -384,6 +384,8 @@ def main():
                 if db.execute("SELECT count(*) FROM ext_projection_outbox WHERE projection_type='family_tag'").fetchone()[0] != 2:
                     raise RuntimeError("family projection intent missing")
             emit("[M5-FACTS] PASS: source superseded, single published proposal, two family projection intents and FK integrity")
+            if os.environ.get("AGENTRAG_SPLIT_E2E") == "1":
+                business_e2e.run_split(http, kb, emit, work / "ext.db", business_guidance)
         helpers.stop_owned(host); host = None
         with sqlite3.connect(work / "ext.db") as db:
             db.execute("UPDATE ext_document_annotations SET effective_until='2000-01-01T00:00:00Z', revision=revision+1 WHERE document_id=?", (doc["id"],))

@@ -24,8 +24,13 @@ func TestFamilyProjectionReconcilesCatalogAndPreservesDocumentTags(t *testing.T)
 	if err := db.Write(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`INSERT INTO ext_lineage_node VALUES('version-source','7','kb-a','document_version','doc-a','now');
 INSERT INTO ext_document_version_family VALUES('family-real','7','kb-a','doc-a','','version-source','version-source',1,'now','now');
+INSERT INTO ext_lineage_node VALUES('version-part','7','kb-a','document_version','doc-c','now');
+INSERT INTO ext_document_version_family VALUES('family-part','7','kb-a','doc-c','','version-part','version-part',1,'now','now');
 INSERT INTO ext_revision_proposals(tenant_id,knowledge_base_id,proposal_id,source_document_id,source_version_id,family_id,trigger_guidance_ids,proposed_patch,target_content_hash,status,revision,publication_key,target_document_id,created_at,published_at)
-VALUES('7','kb-a','revision','doc-a','version-source','family-real','[]','body','hash','published',1,'key','doc-b','now','now');`); err != nil {
+VALUES('7','kb-a','revision','doc-a','version-source','family-real','[]','body','hash','published',1,'key','doc-b','now','now'),
+('7','kb-a','split-part','doc-a','version-source','family-part','[]','body','hash','published',1,'split-key','doc-c','now','now');
+INSERT INTO ext_revision_split_batches VALUES('7','kb-a','batch','doc-a','version-source','approved',2,'split-part','now');
+INSERT INTO ext_revision_split_parts VALUES('7','kb-a','batch','split-part',1,'Part','version-part');`); err != nil {
 			return err
 		}
 		return outbox.EnqueueTx(ctx, tx, item)
@@ -88,6 +93,9 @@ VALUES('7','kb-a','revision','doc-a','version-source','family-real','[]','body',
 	}
 	defer writer.Close()
 	p := NewProjector(db, lifecycle.NewStore(db), NewMapping(db, api), writer)
+	if family, err := p.publishedFamily(ctx, Scope{TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: "doc-c"}); err != nil || family != "family-part" {
+		t.Fatalf("split part family = %q, %v", family, err)
+	}
 	if err := p.Handle(ctx, item); !errors.Is(err, ErrAmbiguousTags) {
 		t.Fatalf("unknown tag list must refuse document replacement: %v", err)
 	}

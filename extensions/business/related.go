@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 	"math"
 	"time"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
+	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 )
 
 // Related is a same-KB, currently active relationship without document content.
@@ -26,12 +28,26 @@ func score(p Payload) (float64, error) {
 	}
 	return .6*p.Similarity + .25*p.Declaration + .15*p.Structure, nil
 }
+
+func navigationRelation(kind string) bool {
+	switch kind {
+	case "cites", "implements", "template_for":
+		return true
+	default:
+		return false
+	}
+}
+
+func declarableRelation(kind string) bool {
+	return kind == "amends" || kind == "interprets" || kind == "related_to" || navigationRelation(kind)
+}
+
 func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
 	p := c.Payload
 	var source, target string
 	var e error
 	if c.Action == "relation_declare" {
-		if !validID(p.DocumentID) || !validID(p.TargetDocumentID) || p.DocumentID == p.TargetDocumentID || p.EdgeType != "amends" && p.EdgeType != "interprets" && p.EdgeType != "related_to" {
+		if !validID(p.DocumentID) || !validID(p.TargetDocumentID) || p.DocumentID == p.TargetDocumentID || !declarableRelation(p.EdgeType) {
 			return Result{}, ErrInvalid
 		}
 		source, e = s.verify(ctx, c.Scope, p.DocumentID)
@@ -98,6 +114,11 @@ func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
 				return Result{}, e
 			}
 		}
+		// Navigation relationships have a business record and audit receipt,
+		// but carry no lifecycle or dependency semantics.
+		if navigationRelation(kind) {
+			return out, nil
+		}
 		edgeID := digest([]string{strconvScope(c.Scope), sv, tv, kind})
 		if out.Status == "active" {
 			if _, e = tx.ExecContext(ctx, `INSERT INTO ext_lineage_edge VALUES(?,?,?,?,?,?,'governance_critical',?) ON CONFLICT DO NOTHING`, append([]any{edgeID}, args(c.Scope, sv, tv, kind, s.now().UTC().Format(time.RFC3339Nano))...)...); e != nil {
@@ -156,7 +177,7 @@ func (s *Service) QueryRelated(ctx context.Context, scope provenance.Scope, doc 
 	verified := map[string]string{}
 	for _, v := range items {
 		current, e := s.verify(ctx, scope, v.DocumentID)
-		if errors.Is(e, ErrConflict) {
+		if errors.Is(e, ErrConflict) || errors.Is(e, lineage.ErrSourceMissing) {
 			continue
 		}
 		if e != nil {

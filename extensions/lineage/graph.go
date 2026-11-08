@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
@@ -44,14 +45,14 @@ type GraphSnapshot struct {
 // provenance or version ancestry using the existing cycle-guarded traversal.
 func (r *Registry) Graph(ctx context.Context, s provenance.Scope, mode, root string) (GraphSnapshot, error) {
 	out := GraphSnapshot{Mode: mode, RootID: root, Nodes: []GraphNode{}, Edges: []GraphEdge{}}
-	condition := ""
+	edges, condition := "ext_lineage_edge", ""
 	switch mode {
 	case "provenance":
-		condition = "e.edge_type='derived_from'"
+		condition = " AND e.edge_type='derived_from'"
 	case "version-ancestry":
-		condition = "e.edge_type IN ('supersedes','merged_into')"
+		edges = versionAncestryEdges
 	case "relations":
-		condition = "e.edge_type IN ('supplements','amends','interprets','related_to')"
+		condition = " AND e.edge_type IN ('supplements','amends','interprets','related_to')"
 	default:
 		return out, ErrEvidence
 	}
@@ -118,17 +119,17 @@ WHERE n.tenant_id=? AND n.knowledge_base_id=?`+where+" ORDER BY n.created_at DES
 		}
 		body, _ := json.Marshal(ids)
 		params = scopeArgs(s, string(body), string(body))
-		rows, err = tx.QueryContext(ctx, `SELECT e.edge_id,e.from_node_id,e.to_node_id,e.edge_type FROM ext_lineage_edge e
-WHERE e.tenant_id=? AND e.knowledge_base_id=? AND `+condition+`
+		rows, err = tx.QueryContext(ctx, `SELECT e.edge_id,e.from_node_id,e.to_node_id,e.edge_type FROM `+edges+` e
+WHERE e.tenant_id=? AND e.knowledge_base_id=?`+condition+`
 AND e.from_node_id IN (SELECT value FROM json_each(?)) AND e.to_node_id IN (SELECT value FROM json_each(?))
 ORDER BY e.created_at,e.edge_id LIMIT 513`, params...)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var edge GraphEdge
 			if err := rows.Scan(&edge.ID, &edge.From, &edge.To, &edge.Type); err != nil {
+				rows.Close()
 				return err
 			}
 			if len(out.Edges) == 512 {
@@ -137,7 +138,90 @@ ORDER BY e.created_at,e.edge_id LIMIT 513`, params...)
 			}
 			out.Edges = append(out.Edges, edge)
 		}
-		return rows.Err()
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if mode == "relations" && len(ids) > 0 {
+			if err := appendNavigationEdges(ctx, tx, s, string(body), &out); err != nil {
+				return err
+			}
+			return appendAttachmentEdges(ctx, tx, s, string(body), &out)
+		}
+		return nil
 	})
 	return out, err
+}
+
+func appendNavigationEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, ids string, out *GraphSnapshot) error {
+	rows, err := tx.QueryContext(ctx, `SELECT 'relation:'||r.relation_id,r.source_version_id,r.target_version_id,r.edge_type
+	FROM ext_document_relations r
+	JOIN ext_document_version_family a ON a.tenant_id=r.tenant_id AND a.knowledge_base_id=r.knowledge_base_id
+		AND a.document_id=r.document_id AND a.current_version_node_id=r.source_version_id
+	JOIN ext_document_version_family b ON b.tenant_id=r.tenant_id AND b.knowledge_base_id=r.knowledge_base_id
+		AND b.document_id=r.target_document_id AND b.current_version_node_id=r.target_version_id
+	WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.status='active'
+	AND r.edge_type IN ('cites','implements','template_for')
+	AND r.source_version_id IN (SELECT value FROM json_each(?))
+	AND r.target_version_id IN (SELECT value FROM json_each(?))
+	ORDER BY r.relation_id LIMIT 513`, scopeArgs(s, ids, ids)...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var edge GraphEdge
+		if err := rows.Scan(&edge.ID, &edge.From, &edge.To, &edge.Type); err != nil {
+			return err
+		}
+		if len(out.Edges) == 512 {
+			out.Truncated = true
+			break
+		}
+		out.Edges = append(out.Edges, edge)
+	}
+	return rows.Err()
+}
+
+// appendAttachmentEdges projects stored ownership only onto current observed
+// versions whose file fingerprints match the binding.
+func appendAttachmentEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, ids string, out *GraphSnapshot) error {
+	rows, err := tx.QueryContext(ctx, `SELECT a.attachment_id,c.current_version_node_id,p.current_version_node_id,
+	a.attachment_file_hash,a.parent_file_hash,
+	json_extract(ce.snapshot_json,'$.header_fields.file_hash'),
+	json_extract(pe.snapshot_json,'$.header_fields.file_hash')
+	FROM ext_attachment_links a
+	JOIN ext_document_version_family c ON c.tenant_id=a.tenant_id AND c.knowledge_base_id=a.knowledge_base_id AND c.document_id=a.attachment_id
+	JOIN ext_document_version_family p ON p.tenant_id=a.tenant_id AND p.knowledge_base_id=a.knowledge_base_id AND p.document_id=a.parent_document_id
+	JOIN ext_source_snapshot_evidence ce ON ce.tenant_id=c.tenant_id AND ce.knowledge_base_id=c.knowledge_base_id AND ce.version_node_id=c.current_version_node_id
+	JOIN ext_source_snapshot_evidence pe ON pe.tenant_id=p.tenant_id AND pe.knowledge_base_id=p.knowledge_base_id AND pe.version_node_id=p.current_version_node_id
+	WHERE a.tenant_id=? AND a.knowledge_base_id=? AND a.removed_at IS NULL AND a.retired_at IS NULL
+	AND NOT EXISTS (SELECT 1 FROM ext_attachment_delete_intents d WHERE d.tenant_id=a.tenant_id
+	AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id)
+	AND c.current_version_node_id IN (SELECT value FROM json_each(?))
+	AND p.current_version_node_id IN (SELECT value FROM json_each(?))
+	ORDER BY a.attachment_id`, scopeArgs(s, ids, ids)...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var childID, childHash, parentHash string
+		var childEvidence, parentEvidence sql.NullString
+		edge := GraphEdge{Type: "attachment_of"}
+		if err := rows.Scan(&childID, &edge.From, &edge.To, &childHash, &parentHash, &childEvidence, &parentEvidence); err != nil {
+			return err
+		}
+		if childEvidence.String != sha([]byte(strconv.Quote(childHash))) || parentEvidence.String != sha([]byte(strconv.Quote(parentHash))) {
+			continue
+		}
+		if len(out.Edges) == 512 {
+			out.Truncated = true
+			break
+		}
+		edge.ID = "attachment:" + childID
+		out.Edges = append(out.Edges, edge)
+	}
+	return rows.Err()
 }

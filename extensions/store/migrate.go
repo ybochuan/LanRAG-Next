@@ -43,6 +43,27 @@ var qaFeedbackMigration string
 //go:embed migrations/013_guidance_budget.sql
 var guidanceBudgetMigration string
 
+//go:embed migrations/014_attachment_semantics.sql
+var attachmentSemanticsMigration string
+
+//go:embed migrations/015_attachment_links.sql
+var attachmentLinksMigration string
+
+//go:embed migrations/016_attachment_cleanup.sql
+var attachmentCleanupMigration string
+
+//go:embed migrations/017_document_relations.sql
+var documentRelationsMigration string
+
+//go:embed migrations/018_attachment_revisions.sql
+var attachmentRevisionsMigration string
+
+//go:embed migrations/019_revision_splits.sql
+var revisionSplitsMigration string
+
+// LatestSchemaVersion is the last published migration supported by this Host.
+const LatestSchemaVersion = 19
+
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
 
@@ -58,7 +79,7 @@ func (db *DB) migrate(ctx context.Context) error {
 		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(version),0) FROM ext_schema_migrations").Scan(&version); err != nil {
 			return err
 		}
-		if version > 13 {
+		if version > LatestSchemaVersion {
 			return fmt.Errorf("unsupported extension schema version %d", version)
 		}
 		if version < 1 {
@@ -168,6 +189,54 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(13)"); err != nil {
+				return err
+			}
+		}
+		if version < 14 {
+			if _, err := tx.ExecContext(ctx, attachmentSemanticsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(14)"); err != nil {
+				return err
+			}
+		}
+		if version < 15 {
+			if _, err := tx.ExecContext(ctx, attachmentLinksMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(15)"); err != nil {
+				return err
+			}
+		}
+		if version < 16 {
+			if _, err := tx.ExecContext(ctx, attachmentCleanupMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(16)"); err != nil {
+				return err
+			}
+		}
+		if version < 17 {
+			if _, err := tx.ExecContext(ctx, documentRelationsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(17)"); err != nil {
+				return err
+			}
+		}
+		if version < 18 {
+			if _, err := tx.ExecContext(ctx, attachmentRevisionsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(18)"); err != nil {
+				return err
+			}
+		}
+		if version < 19 {
+			if _, err := tx.ExecContext(ctx, revisionSplitsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(19)"); err != nil {
 				return err
 			}
 		}

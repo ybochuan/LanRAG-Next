@@ -9,6 +9,49 @@ import (
 	"time"
 )
 
+func TestNavigationRelationsUseBusinessAuditWithoutGovernanceEdges(t *testing.T) {
+	s, db, _ := fixture(t)
+	ctx := t.Context()
+	scope := provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}
+	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: "source", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	seedVersions(t, db, scope)
+	s.verify = func(_ context.Context, _ provenance.Scope, doc string) (string, error) { return "version-" + doc, nil }
+	for _, kind := range []string{"cites", "implements", "template_for"} {
+		c := cmd("relation_declare", "create-"+kind)
+		c.Payload = Payload{DocumentID: "source", TargetDocumentID: "target", EdgeType: kind}
+		relation, err := s.Execute(ctx, c)
+		if err != nil || relation.Status != "active" {
+			t.Fatalf("declare %s: %v %v", kind, relation, err)
+		}
+		items, err := s.QueryRelated(ctx, scope, "target")
+		if err != nil || len(items) != 1 || items[0].Direction != "incoming" || items[0].DocumentID != "source" || items[0].EdgeType != kind {
+			t.Fatalf("query %s: %v %v", kind, items, err)
+		}
+		c = cmd("relation_revoke", "revoke-"+kind)
+		c.ID, c.ExpectedRevision = relation.ID, relation.Revision
+		if _, err = s.Execute(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		items, err = s.QueryRelated(ctx, scope, "target")
+		if err != nil || len(items) != 0 {
+			t.Fatalf("revoked relation visible: %v %v", items, err)
+		}
+	}
+	if err := db.View(ctx, func(tx *sql.Tx) error {
+		var edges, audits int
+		err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM ext_lineage_edge),
+			(SELECT COUNT(*) FROM ext_business_audit WHERE action IN ('relation_declare','relation_revoke'))`).Scan(&edges, &audits)
+		if err == nil && (edges != 0 || audits != 6) {
+			t.Fatalf("governance edges=%d, audit rows=%d", edges, audits)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRelatedCandidatesConfirmationRevocationAndStale(t *testing.T) {
 	s, db, _ := fixture(t)
 	ctx := context.Background()

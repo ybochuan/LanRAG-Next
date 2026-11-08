@@ -22,7 +22,7 @@ function mountSetup(api: Record<string, unknown>, lifecycle: Record<string, unkn
     '@/api/business': { documentTitle: async () => '', ...api },
     './CreateForm.vue': {}, './DocumentPicker.vue': {}, '../lifecycle/model': { requestFence }, './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated};`)(
     (id: string) => modules[id], () => props, () => 0, () => {}, { addEventListener() {}, removeEventListener() {} }, {},
   ))
   return { state, guards, props, stop: () => scope.stop() }
@@ -56,6 +56,39 @@ test('document titles are resolved once in a single batch with unique ids', asyn
     assert.deepEqual(calls, [{ kb: 'kb-a', ids: ['doc-a', 'doc-b'] }])
     assert.equal(view.state.titles.value.get('doc-a'), '文档 A')
     assert.equal(view.state.titles.value.get('doc-b'), '文档 B')
+  } finally { view.stop() }
+})
+
+test('current relations resolve titles for the selected document and peers', async () => {
+  const view = mountSetup({
+    list: async () => [],
+    related: async () => [{ document_id: 'peer', edge_type: 'cites', direction: 'incoming', confidence: 1 }],
+    documentTitles: async () => ({ source: '制度 A', peer: '引用 B' }),
+  }, {}, { section: 'associations' })
+  try {
+    view.state.kb.value = 'kb-a'; await vue.nextTick()
+    view.state.queryDocument.value = 'source'
+    await view.state.queryRelated()
+    assert.equal(view.state.queryResult.value[0].document_id, 'peer')
+    assert.equal(view.state.titles.value.get('source'), '制度 A')
+    assert.equal(view.state.titles.value.get('peer'), '引用 B')
+  } finally { view.stop() }
+})
+
+test('changing the selected document discards an earlier relation response', async () => {
+  let release!: (rows: unknown[]) => void
+  const view = mountSetup({
+    list: async () => [],
+    related: async () => new Promise(resolve => { release = resolve }),
+  }, {}, { section: 'associations' })
+  try {
+    view.state.kb.value = 'kb-a'; await vue.nextTick()
+    view.state.queryDocument.value = 'old'
+    const old = view.state.queryRelated()
+    view.state.queryDocument.value = 'new'
+    release([{ document_id: 'old-peer', edge_type: 'cites', direction: 'incoming', confidence: 1 }])
+    await old
+    assert.equal(view.state.queryResult.value, undefined)
   } finally { view.stop() }
 })
 
@@ -93,6 +126,31 @@ test('completed write cannot replace new scope details after its slow list refre
     view.state.detail.value = { id: 'new-proposal', revision: 4, status: 'pending_review' }
     release([]); await operation
     assert.equal(view.state.detail.value?.id, 'new-proposal')
+  } finally { view.stop() }
+})
+
+test('publishing a split part submits its revision and reloads the batch', async () => {
+  const batch = { id: 'batch', status: 'approved', revision: 2, record_kind: 'split_batch' }
+  const part = { id: 'part', status: 'indexed', revision: 4, record_kind: 'split_part', split_id: batch.id }
+  const refreshed = { ...batch, split_parts: [{ ...part, status: 'published', revision: 5 }] }
+  const writes: unknown[] = []
+  const view = mountSetup({
+    list: async (_kb: string, _kind: string, _page: number, id?: string) => !id || id === batch.id ? [refreshed] : [],
+    write: async (_kb: string, action: string, body: unknown) => {
+      writes.push([action, body])
+      return { ...part, status: 'published', revision: 5 }
+    },
+  })
+  try {
+    view.state.kb.value = 'kb-a'; await vue.nextTick()
+    view.state.canWrite.value = true
+    view.state.detail.value = batch
+    await view.state.beginWrite('revision_publish', {}, part)
+    await view.state.confirmWrite()
+    assert.equal((writes[0] as [string, { expected_revision: number }])[0], 'revision_publish')
+    assert.equal((writes[0] as [string, { expected_revision: number }])[1].expected_revision, 4)
+    assert.equal(view.state.detail.value.id, batch.id)
+    assert.equal(view.state.detail.value.split_parts[0].status, 'published')
   } finally { view.stop() }
 })
 

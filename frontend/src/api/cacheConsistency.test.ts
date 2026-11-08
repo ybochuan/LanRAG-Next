@@ -217,6 +217,28 @@ test('DocumentPicker cache key includes tenant and KB', async (t) => {
   third.close()
 })
 
+test('DocumentPicker searches active titles from page one without reusing unfiltered cache', async (t) => {
+  clearRequestCache()
+  const calls: unknown[][] = []
+  const picker = fixture(t).component(new URL('../views/business/DocumentPicker.vue', import.meta.url), {
+    '@/api/lifecycle': {
+      overview: async (...args: unknown[]) => {
+        calls.push(args)
+        return { documents: [], total: 50 }
+      },
+    },
+    '@/api/requestCache': requestCache,
+  }, { kb: 'kb-a', modelValue: '', label: 'document', searchable: true })
+  await flush()
+  picker.vm.move(1)
+  await flush()
+  picker.vm.title = ' 管理办法 '
+  await flush()
+  t.mock.timers.tick(300)
+  await flush()
+  assert.deepEqual(calls.at(-1), ['kb-a', 1, 'active', '管理办法'])
+})
+
 test('lifecycle saves invalidate the document picker cache', async (t) => {
   clearRequestCache()
   const f = fixture(t)

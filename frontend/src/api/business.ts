@@ -8,11 +8,18 @@ export type BusinessAction = 'relation_declare' | 'relation_confirm' | 'relation
   | 'feedback_create' | 'feedback_approve' | 'feedback_reject' | 'feedback_quarantine'
   | 'feedback_activate' | 'feedback_withdraw' | 'guidance_seed' | 'guidance_quarantine_topic'
   | 'revision_create' | 'revision_approve' | 'revision_reject' | 'revision_publish'
+  | 'split_create' | 'split_approve' | 'split_reject'
+export interface SplitPartInput { title: string; text: string }
+export interface SplitPartRecord {
+  id: string; title: string; proposed_patch: string; revision: number; status: string
+  target_document_id?: string; publish_error?: string
+}
 export interface BusinessPayload {
   document_id?: string; target_document_id?: string; edge_type?: string
   text?: string; topic?: string; risk?: string; negative?: boolean
   second_confirmation?: boolean; guidance_ids?: string[]
   similarity?: number; declaration?: number; structure?: number
+  split_parts?: SplitPartInput[]
 }
 export interface BusinessRecord {
   id: string; revision: number; status: string; text?: string; topic?: string
@@ -21,6 +28,8 @@ export interface BusinessRecord {
   source_document_id?: string; source_version_id?: string; target_version_id?: string
   proposed_patch?: string; guidance_ids?: string[]; publication_key?: string
   publish_error?: string; family_id?: string
+  record_kind?: 'split_batch' | 'split_part'
+  split_id?: string; split_title?: string; split_parts?: SplitPartRecord[]
 }
 export interface BusinessResult { id: string; revision: number; status: string; target_document_id?: string }
 export interface BusinessBody { operation_id: string; expected_revision: number; business: { id?: string; payload: BusinessPayload } }

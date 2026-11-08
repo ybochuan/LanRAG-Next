@@ -22,3 +22,20 @@ test('Markdown download interception only matches a currently listed attachment'
 test('trusted MCP structured results reuse the related-file cards', () => {
   assert.deepEqual(relatedAttachments({ agentEventStream: [{ tool_data: { structured_content: { related_attachments: [child] } } }] }), [child])
 })
+
+test('cards group by parent and sort by attachment sequence', () => {
+  const attachment = (id: string, parent: string, sequence: number) => ({
+    ...child,
+    knowledge_id: id,
+    parent_document_id: parent,
+    file_name: `annex-0${sequence}.docx`,
+    download_url: `/api/v1/knowledge/${id}/download`,
+    attachment_sequence: sequence,
+  })
+  const session = {
+    knowledge_references: [{
+      metadata: { related_attachments: [attachment('a4', 'parent-a', 4), attachment('b2', 'parent-b', 2), attachment('a2', 'parent-a', 2), attachment('b1', 'parent-b', 1)] },
+    }],
+  }
+  assert.deepEqual(relatedAttachments(session).map(item => item.knowledge_id), ['a2', 'a4', 'b1', 'b2'])
+})

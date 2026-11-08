@@ -12,6 +12,7 @@ import (
 
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
+	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
 func TestArchiveDiscoveryWarningAndAuthorizedHistoryOnly(t *testing.T) {
@@ -28,7 +29,7 @@ func TestArchiveDiscoveryWarningAndAuthorizedHistoryOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer native.Close()
-	if _, err = native.Exec(`CREATE TABLE knowledges (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, title TEXT, parse_status TEXT, deleted_at DATETIME);
+	if _, err = native.Exec(`CREATE TABLE knowledges (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, title TEXT, parse_status TEXT, deleted_at DATETIME, channel TEXT DEFAULT 'web');
 CREATE TABLE chunks (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, knowledge_id TEXT, content TEXT, chunk_index INTEGER, chunk_type TEXT, is_enabled INTEGER, deleted_at DATETIME);`); err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +40,7 @@ CREATE TABLE chunks (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, knowled
 		deleted bool
 	}{
 		{"stale-doc", "kb", 7, lifecycle.Stale, false}, {"archived-doc", "kb", 7, "archived", false}, {"active-doc", "kb", 7, lifecycle.Active, false}, {"other-kb", "other", 7, lifecycle.Stale, false}, {"foreign", "kb", 8, lifecycle.Stale, false}, {"deleted-doc", "kb", 7, lifecycle.Stale, true},
+		{"unpublished-split-doc", "kb", 7, lifecycle.Stale, false},
 	} {
 		ls := lifecycle.NewStore(db)
 		e := lifecycle.Event{EventID: v.id + "-active", TenantID: v.tenant, KnowledgeBaseID: v.kb, DocumentID: v.id, ToState: lifecycle.Active, Reason: "test", OccurredAt: time.Now()}
@@ -51,12 +53,17 @@ CREATE TABLE chunks (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, knowled
 				t.Fatal(err)
 			}
 		}
-		if _, err = native.Exec(`INSERT INTO knowledges VALUES (?,?,?,?,'completed',CASE WHEN ? THEN '2026-01-01' END)`, v.id, v.tenant, v.kb, v.id, v.deleted); err != nil {
+		if _, err = native.Exec(`INSERT INTO knowledges (id,tenant_id,knowledge_base_id,title,parse_status,deleted_at)
+			VALUES (?,?,?,?,'completed',CASE WHEN ? THEN '2026-01-01' END)`, v.id, v.tenant, v.kb, v.id, v.deleted); err != nil {
 			t.Fatal(err)
 		}
 		if _, err = native.Exec(`INSERT INTO chunks VALUES (?,?,?,?,?,1,'text',1,NULL)`, v.id, v.tenant, v.kb, v.id, "历史条款 "+v.id); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := native.Exec(`UPDATE knowledges SET channel=? WHERE id='unpublished-split-doc'`,
+		weknora.SplitPublicationChannelPrefix+"unbound"); err != nil {
+		t.Fatal(err)
 	}
 	s := &Server{DB: db, Key: strings.Repeat("k", 32), Tenant: 7, KBs: []string{"kb", "other"}, NativeDBPath: path}
 	call := func(method string, params any) []byte {
@@ -90,7 +97,7 @@ CREATE TABLE chunks (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, knowled
 	if failed || !strings.HasPrefix(text, "【系统提示：以下内容来自历史归档文档，已失效，请在回答时提醒用户】") || !strings.Contains(text, "stale-doc") || !strings.Contains(text, "archived-doc") {
 		t.Fatalf("missing warning or results: %s", text)
 	}
-	for _, id := range []string{"active-doc", "other-kb", "foreign", "deleted-doc"} {
+	for _, id := range []string{"active-doc", "other-kb", "foreign", "deleted-doc", "unpublished-split-doc"} {
 		if strings.Contains(text, id) {
 			t.Fatalf("unexpected hit %s", id)
 		}

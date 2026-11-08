@@ -14,13 +14,14 @@ const Address = "127.0.0.1:8090"
 // Services explicitly enables individual typed hooks and optional local
 // readiness; zero values reject business requests and readiness checks.
 type Services struct {
-	Ready             func(context.Context) bool // Local DB/services only; never depends on Core availability.
-	BeforeRetrieve    *RetrieveHandler
-	AfterRetrieve     *AttachmentHandler
-	MCP               http.Handler
-	Metrics           http.Handler  // Optional loopback-only operational metrics endpoint.
-	Parser            http.Handler  // Optional identity-bearing V1 parser; disabled unless configured.
-	ParserReadTimeout time.Duration // Zero uses 1000s; applies only to the parser body.
+	Ready                  func(context.Context) bool // Local DB/services only; never depends on Core availability.
+	BeforeRetrieve         *RetrieveHandler
+	AfterRetrieve          *AttachmentHandler
+	BeforeAttachmentDelete *AttachmentDeleteHandler
+	MCP                    http.Handler
+	Metrics                http.Handler  // Optional loopback-only operational metrics endpoint.
+	Parser                 http.Handler  // Optional identity-bearing V1 parser; disabled unless configured.
+	ParserReadTimeout      time.Duration // Zero uses 1000s; applies only to the parser body.
 }
 
 // NewServer constructs the protocol foundation without business services.
@@ -33,6 +34,9 @@ func NewServerWithServices(services Services) *http.Server {
 	mux := http.NewServeMux()
 	if services.MCP != nil {
 		mux.Handle("/mcp", services.MCP)
+	}
+	if services.BeforeAttachmentDelete != nil {
+		mux.HandleFunc("POST /bridge/before-attachment-delete", requireVersion(services.BeforeAttachmentDelete.ServeHTTP))
 	}
 	if services.Parser != nil {
 		mux.Handle("/parser/native/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

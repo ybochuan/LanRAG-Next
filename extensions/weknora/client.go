@@ -29,6 +29,8 @@ type UpstreamError struct {
 	Code   string
 	detail string
 	cause  error
+	// Status is the upstream HTTP status when a non-success response was received.
+	Status int
 }
 
 func (e *UpstreamError) Error() string {
@@ -82,7 +84,7 @@ func (c *Client) Health(ctx context.Context) error {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return &UpstreamError{Code: UpstreamHTTPError, detail: fmt.Sprintf("upstream HTTP status %d", response.StatusCode)}
+		return &UpstreamError{Code: UpstreamHTTPError, detail: fmt.Sprintf("upstream HTTP status %d", response.StatusCode), Status: response.StatusCode}
 	}
 	const limit = 64 * 1024
 	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
@@ -154,7 +156,7 @@ func (c *Client) JSON(ctx context.Context, method, path string, query url.Values
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &UpstreamError{Code: UpstreamHTTPError, detail: fmt.Sprintf("upstream HTTP status %d", response.StatusCode)}
+		return &UpstreamError{Code: UpstreamHTTPError, detail: fmt.Sprintf("upstream HTTP status %d", response.StatusCode), Status: response.StatusCode}
 	}
 	const limit = 4 * 1024 * 1024
 	data, err = io.ReadAll(io.LimitReader(response.Body, limit+1))

@@ -30,8 +30,21 @@
 | ATTACH-04／已接线并验证 | 主命中关联附件、直接命中自身链接；`weknora/attachment_read.go`、`retrieval/attachments.go`、Bridge after-retrieve、原生RAG/Agent薄DTO | 用户明确授权阶段二 | 真实Core/Host/原生上传后的RAG主/子和Agent均返回下载Metadata；增强失败不保留旧链接。原生API、检索输出和权限形态变化时重审。 |
 | ATTACH-05／已接线并验证 | 父active前置条件、附件点击时许可；`retrieval/policy.go`及原生下载薄门卫 | 用户明确授权阶段三 | active/stale/archived/缺失及元数据故障单测；真实父active→stale而子保持active，链接消失、旧下载403；停Host旧地址403。不包括原生/files、signed grant和流中撤销，相关需求另行审视。 |
 | ATTACH-06／已交付（聊天配套） | TDesign卡片、RAG/Agent去重、登录下载和Markdown链接点击；`RelatedAttachments.vue`及相关工具/薄渲染 | 用户明确要求原生聊天UI | 全前端2379项中2378通过/1既有skip；type-check/build退出0；实际组件浏览器下载字节核对、403提示及截图。完整App生产替换未执行；新消息/嵌入页协议变化时重审。 |
+| ATTACH-07A／已交付并生产验证（2026-11-08） | DOCX/Office附件真实标题识别、正文附件引用映射、`ext_attachment_semantics` v14、Bridge DTO可选语义字段、`RelatedAttachments.vue`语义卡片与排序；`extensions/parser/attachment/semantic.go`、`importer.go`、`extensions/store/attachment_semantics.go`、`extensions/retrieval/attachments.go`、`frontend/src/components/RelatedAttachments.vue`、`frontend/src/utils/relatedAttachments.ts`及`extensions/cmd/attachment-backfill/`。 | 用户2026-11-07选择ATTACH-07A最小闭环：先做DOCX/Office标题、正文引用映射、扩展库存储、接口、聊天卡片和现有附件回填；管理端与PDF/PPTX后续。 | 扩展`go build`/`go test ./...`/`go vet`/模块边界全通过；前端type-check、排序单测5/5、全量`npm test` 2406项2401通过/4个既有环境失败（3个POSIX shell依赖Git for Windows usr/bin、1个cache TTL时序）/1 skip、build退出0。生产ext DB已备份并迁移schema14、语义表17行（confirmed11/candidate5/unmatched1）；新Host `/bridge/after-retrieve` 对0fa411f8返回4条带`display_name/reference_title/parent_title`的附件，678a8d05仍0（6个deleting/disabled）；`web`已同步并重启；登录态聊天UI已目视验收：新回答显示「相关附件（7） 可下载」、语义标题、原文件、对应正文、来源与下载按钮，candidate 项显示「待确认」。 |
+| ATTACH-08A／自动归属已接线并隔离验收 | schema15、上传意图及回执恢复、附件→主件的系统关系、文档关联列表、同库图投影及读取核对。复用 `parser/attachment`、`store/attachment_links.go`、`business/feedback.go`、`lineage/graph.go`、`retrieval` 与现有前端入口。另提供 `attachment-backfill -audit-ownership`。 | 用户确认 ATTACH-07A 并要求开始文档关联改造。旧标签和语义映射只作兼容读取。 | 丢响应、重启、版本不符、缺失父件、图中方向和版本隔离通过。隔离 Core/Host 上传两附录、JWT 关联列表、原生分块、重提取同 ID、RAG/Agent 下载和过期/断 Host 拒绝均验证。扩展全量测试、构建、vet、模块门禁、受影响四包 Linux race、前端 type-check/build 均退出0，前端 2405 通过、1 跳过。只读盘点前后两库哈希相同。正式部署前先盘点旧附件。 |
+| ATTACH-08B／删除联动已接线并隔离验收 | `executeKnowledgeDelete` 薄接线、schema16、上传围栏、原生软删除证明、子件清理续跑与文档关联状态。实现位于 `extensions/attachmentcleanup/`、`store/migrations/016_attachment_cleanup.sql`、`bridge/attachment_delete.go` 和 `weknora/attachment_delete.go`。 | 用户要求继续所提议的下一步；保留原生异步接口和删除算法。只自动清理有确认回执的同库受管附件。 | `attachment_e2e.py --cleanup` 退出0，真实候选 Core/Host 通过离线拒绝、重启恢复、单删、批删、清空库以及零活跃分块与向量索引记录核对。批量意图回滚、未提交上传围栏和错误归属保留已测试。正式部署、旧附件归属核验、主件替换及其他原生删除入口另审。 |
 
-本轮证据：`docs/evidence/attachment-downloads-2026-11-03.md`；阶段一改动完整保留，未提交/推送。
+相关证据：`docs/evidence/attachment-downloads-2026-11-03.md`、`docs/evidence/attachment-semantics-2026-11-07.md`、`tmp/attach-08-e2e.log`、`tmp/attach-08b-e2e.log`。
+
+文档关联总清单见 [文档关联总体改造](docs/design/文档关联总体改造.md)。REL-04 已完成正式切换、登录态验收、真实 DOCX 与问答联调及旧版回滚演练，扩展库已升至 schema 18。ATTACH-08D 的换版重解析在隔离库验证，当前原生未提供公开换版上传入口。见 [REL-04 发布与回滚](docs/operations/REL-04-发布与回滚.md)。
+
+| 任务 | 期望结果 | 依据 | 何时重新审视 |
+|---|---|---|---|
+| ATTACH-08C 真实库回填／已完成（2026-11-08） | 按审核清单登记 23 条同库历史附件归属，启用随主件治理。 | 停写备份两库，重新提取后与批准清单逐项一致。应用退出 0，范围内未确认旧归属为 0。重启后管理接口读回 23 条 `attachment_of`，两库完整性和扩展外键检查通过。见 [REL-04 发布与回滚](docs/operations/REL-04-发布与回滚.md#历史附件)。 | 新增旧库、存储后端或路径规则变化时，重新按库核验。 |
+| REL-03 工作台按文档查关联／预览验收通过（2026-11-08） | 标题筛选定位生效文档，从记录详情或结果继续查两端关系，进入同库关联图。查询结果补齐标题并丢弃过时响应。 | 沿用原生已授权的标题筛选、当前关系查询和图路由。18 项定向回归、前端全量 2408 通过／1 跳过、类型检查和独立构建均退出 0。登录态预览验证真实标题筛选、两条有效关系、继续查询及同库关系图。 | 正式静态资源部署时复查；扩展关系类型或跨库权限变更时重审。 |
+| REL-05 制度拆分发布／隔离验收通过（2026-11-08） | 首份新制度正式发布时旧制度失效，后续分件继续追溯同一旧版本。 | 已实现批次审批、索引前门卫和 `split_from` 投影。真实 Core/Host 隔离验证两份分件，定向测试验证并发首发、事务回滚和失败重试。见 [实施与验证](docs/superpowers/plans/2026-11-08-rel-05.md)。 | 正式切换前确认 schema 19 停写备份与回滚，部署新版 Host 和静态资源后补登录态浏览器验收。 |
+
+其余关系和原生独立入口按总清单的前置条件重审。
 
 ## 文档附件阶段一（2026-11-03）
 

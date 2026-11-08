@@ -28,6 +28,8 @@ var (
 	ErrEvidence    = errors.New("trusted source snapshot unavailable or invalid")
 	ErrConflict    = errors.New("observed source head conflicts")
 	ErrUnavailable = errors.New("source authority unavailable")
+	// ErrSourceMissing identifies a native 404 for an authorized snapshot request.
+	ErrSourceMissing = errors.New("native snapshot source not found")
 )
 
 var headerNames = []string{"type", "title", "description", "source", "channel", "parse_status", "summary_status", "profile", "enable_status", "file_name", "folder_path", "file_type", "file_size", "file_hash", "metadata", "custom_metadata", "created_at"}
@@ -164,6 +166,10 @@ func (r *HTTPReader) Capture(ctx context.Context, s provenance.Scope, doc string
 		Data json.RawMessage `json:"data"`
 	}
 	e := r.client.JSON(ctx, http.MethodGet, "/api/v1/knowledge-bases/"+url.PathEscape(s.KnowledgeBaseID)+"/knowledge/"+url.PathEscape(doc)+"/source-snapshot", nil, nil, &env)
+	var upstream *weknora.UpstreamError
+	if errors.As(e, &upstream) && upstream.Status == http.StatusNotFound {
+		return Snapshot{}, errors.Join(ErrEvidence, ErrSourceMissing)
+	}
 	if e != nil || len(env.Data) > 2<<20 {
 		return Snapshot{}, ErrEvidence
 	}

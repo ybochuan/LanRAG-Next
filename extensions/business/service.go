@@ -30,20 +30,21 @@ var (
 
 // Payload contains business data only; native authorization supplies Command scope/actor.
 type Payload struct {
-	DocumentID         string   `json:"document_id,omitempty"`
-	TargetDocumentID   string   `json:"target_document_id,omitempty"`
-	SessionID          string   `json:"session_id,omitempty"`
-	MessageID          string   `json:"message_id,omitempty"`
-	EdgeType           string   `json:"edge_type,omitempty"`
-	Text               string   `json:"text,omitempty"`
-	Topic              string   `json:"topic,omitempty"`
-	Risk               string   `json:"risk,omitempty"`
-	Negative           bool     `json:"negative,omitempty"`
-	SecondConfirmation bool     `json:"second_confirmation,omitempty"`
-	GuidanceIDs        []string `json:"guidance_ids,omitempty"`
-	Similarity         float64  `json:"similarity,omitempty"`
-	Declaration        float64  `json:"declaration,omitempty"`
-	Structure          float64  `json:"structure,omitempty"`
+	DocumentID         string           `json:"document_id,omitempty"`
+	TargetDocumentID   string           `json:"target_document_id,omitempty"`
+	SessionID          string           `json:"session_id,omitempty"`
+	MessageID          string           `json:"message_id,omitempty"`
+	EdgeType           string           `json:"edge_type,omitempty"`
+	Text               string           `json:"text,omitempty"`
+	Topic              string           `json:"topic,omitempty"`
+	Risk               string           `json:"risk,omitempty"`
+	Negative           bool             `json:"negative,omitempty"`
+	SecondConfirmation bool             `json:"second_confirmation,omitempty"`
+	GuidanceIDs        []string         `json:"guidance_ids,omitempty"`
+	SplitParts         []SplitPartInput `json:"split_parts,omitempty"`
+	Similarity         float64          `json:"similarity,omitempty"`
+	Declaration        float64          `json:"declaration,omitempty"`
+	Structure          float64          `json:"structure,omitempty"`
 }
 
 // Command is a native-authorized, idempotent business operation.
@@ -206,6 +207,8 @@ func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 		return s.feedback(ctx, c)
 	case "revision_create", "revision_approve", "revision_reject":
 		return s.revision(ctx, c)
+	case "split_create", "split_approve", "split_reject":
+		return s.split(ctx, c)
 	default:
 		return Result{}, ErrInvalid
 	}
