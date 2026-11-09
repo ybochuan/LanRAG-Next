@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -536,6 +538,42 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	assert.Equal(t, int64(1), got)
 }
 
+func TestCountOrphans_CountsJSONNullInLinks(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var db *gorm.DB
+			if backend == "postgres" {
+				db = setupWikiSnapshotPostgresDB(t)
+			} else {
+				db = setupWikiPagesTestDB(t)
+			}
+			repo := NewWikiPageRepository(db)
+			ctx := context.Background()
+
+			const kbID = "kb-null-links"
+			entity, published := types.WikiPageTypeEntity, types.WikiPageStatusPublished
+			nullLinks := makeWikiPage(kbID, "entity/null", entity, published)
+			emptyLinks := makeWikiPage(kbID, "entity/empty", entity, published)
+			emptyLinks.InLinks = types.StringArray{}
+			linked := makeWikiPage(kbID, "entity/linked", entity, published)
+			linked.InLinks = types.StringArray{"entity/null"}
+			for _, p := range []*types.WikiPage{nullLinks, emptyLinks, linked} {
+				require.NoError(t, repo.Create(ctx, p))
+			}
+
+			var stored string
+			require.NoError(t, db.Raw(
+				"SELECT CAST(in_links AS TEXT) FROM wiki_pages WHERE id = ?", nullLinks.ID,
+			).Scan(&stored).Error)
+			require.Equal(t, "null", stored)
+
+			got, err := repo.CountOrphans(ctx, kbID)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), got)
+		})
+	}
+}
+
 func TestWikiStatsQueriesExcludeArchivedPages(t *testing.T) {
 	db := setupWikiPagesTestDB(t)
 	repo := NewWikiPageRepository(db)
@@ -1021,4 +1059,45 @@ func TestFindSimilarPagesSQLitePunctuationVariants(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pages, 1)
 	assert.Equal(t, page.Slug, pages[0].Slug)
+}
+
+// setupWikiSnapshotPostgresDB creates an isolated schema in the explicitly
+// configured PostgreSQL test database; it skips when no DSN is provided.
+func setupWikiSnapshotPostgresDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv("WEKNORA_REPOSITORY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set WEKNORA_REPOSITORY_TEST_POSTGRES_DSN for PostgreSQL wiki snapshot tests")
+	}
+	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	adminSQL, err := admin.DB()
+	require.NoError(t, err)
+	schema := "wiki_snapshot_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	require.NoError(t, admin.Exec("CREATE SCHEMA "+schema).Error)
+	t.Cleanup(func() {
+		require.NoError(t, admin.Exec("DROP SCHEMA "+schema+" CASCADE").Error)
+		require.NoError(t, adminSQL.Close())
+	})
+	separator := " "
+	if strings.Contains(dsn, "://") {
+		separator = "?"
+		if strings.Contains(dsn, "?") {
+			separator = "&"
+		}
+	}
+	db, err := gorm.Open(postgres.Open(dsn+separator+"search_path="+schema), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&types.WikiPage{}, &types.WikiPageRevision{}))
+	for _, column := range []string{
+		"aliases", "category_path", "source_refs", "chunk_refs", "in_links", "out_links", "page_metadata",
+	} {
+		require.NoError(t, db.Exec(
+			"ALTER TABLE wiki_pages ALTER COLUMN "+column+" TYPE JSONB USING "+column+"::jsonb",
+		).Error)
+	}
+	return db
 }
