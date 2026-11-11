@@ -124,3 +124,8 @@
 - DTO增加parents/operation_id/actor_id，继续固定回环、2s管理请求、版本1、64KiB/2MiB和响应scope校验。2s为管理通道，before_retrieve原生500ms限制保持。
 - 关系治理、版本核验、幂等/CAS、状态机、事务、重试、每日任务及提醒都在extensions；不改原生数据库或检索/RRF/Agent/解析/分块算法。界面嵌入生命周期详情，不下发Host凭据。
 - 交付与验收：`docs/evidence/m2-supplements-2026-11-01.md`。候选Lite仅输出到tmp，生产服务/真实库未替换；完整run封存、副本门卫和生成中撤销仍为后续独立门禁。
+## 附件原件读取门禁（2026-11-11）
+
+- `internal/handler/knowledge.go` 的预览在原生知识库权限校验后复用现有附件许可。`internal/handler/knowledge_download.go` 在创建 ZIP 前核验整批中有原件的附件。
+- `internal/router/{router,files}.go` 在 `/files` 完成租户验证和资源路径解析后接入同一门禁。`internal/extensionbridge/attachments.go` 从原生上传路径的租户和文档目录解析身份，使用原生同租户查询和知识库授权。已受管附件响应使用 `private, no-store`。
+- 沿用现有回环 `before_retrieve` 和 Host 权威许可。隔离测试覆盖失效、Host 离线、主件删除后清理前、普通文件正向、混合批次拒绝及同文件的资源引用、物理路径和别名。独立资源授权与已签发链接沿用各自的原生路径。

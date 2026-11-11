@@ -13,7 +13,6 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
-	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
 // Policy permits only known active lifecycle facts in its configured scopes.
@@ -24,6 +23,7 @@ type Policy struct {
 	kbs         map[string]bool
 	sources     SourceRefresher
 	attachments AttachmentSource
+	now         func() time.Time
 }
 
 // SourceRefresher reacquires scoped native evidence; no cached permit is accepted.
@@ -33,6 +33,15 @@ type SourceRefresher interface {
 
 // WithSources installs the production registry before the policy is served.
 func (p *Policy) WithSources(s SourceRefresher) *Policy { p.sources = s; return p }
+
+// WithNow installs the governance clock used for time-sensitive cuts; tests
+// and business commands must use the same clock as their lifecycle rows.
+func (p *Policy) WithNow(now func() time.Time) *Policy {
+	if now != nil {
+		p.now = now
+	}
+	return p
+}
 
 func dependencyTargets(ctx context.Context, tx *sql.Tx, r contract.BeforeRetrieveRequest) ([]dependencies.Scope, error) {
 	placeholders := func(n int) string { return strings.TrimSuffix(strings.Repeat("?,", n), ",") }
@@ -66,7 +75,7 @@ func NewPolicy(db *store.DB, tenant uint64, kbs []string) (*Policy, error) {
 	if db == nil || (contract.Context{TenantID: tenant, KnowledgeBaseIDs: kbs}).ValidateScope() != nil {
 		return nil, errors.New("database and explicit policy scopes required")
 	}
-	p := &Policy{db: db, tenant: tenant, kbs: make(map[string]bool, len(kbs))}
+	p := &Policy{db: db, tenant: tenant, kbs: make(map[string]bool, len(kbs)), now: time.Now}
 	for _, kb := range kbs {
 		p.kbs[kb] = true
 	}
@@ -140,7 +149,8 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 	active := make(map[string]bool, len(r.KnowledgeIDs))
 	blocked := make(map[string]bool)
 	placeholders := func(n int) string { return strings.TrimSuffix(strings.Repeat("?,", n), ",") }
-	args := []any{fmt.Sprint(r.TenantID)}
+	now := p.now().UTC()
+	args := []any{now.UnixMilli(), fmt.Sprint(r.TenantID)}
 	for _, kb := range r.KnowledgeBaseIDs {
 		args = append(args, kb)
 	}
@@ -149,24 +159,26 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 	}
 	err = p.db.View(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT c.document_id,c.knowledge_base_id,
-			CASE WHEN `+store.LifecycleReadableSQL+` AND NOT `+store.SplitTargetPendingSQL+` THEN c.state ELSE '' END,
-			COALESCE(`+store.PublishedSplitProposalSQL+`,'') FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
+			CASE WHEN `+store.LifecycleReadableSQL+` AND NOT `+store.PublicationTargetPendingSQL+` AND NOT `+store.FamilyReplacementDueSQL+` THEN c.state ELSE '' END,
+			COALESCE(`+store.PublishedPublicationChannelSQL+`,''),a.effective_from,a.effective_until
+			FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+store.LifecycleAnnotationJoinSQL+`
 			WHERE c.tenant_id=? AND c.knowledge_base_id IN (`+placeholders(len(r.KnowledgeBaseIDs))+`)
 			AND c.document_id IN (`+placeholders(len(r.KnowledgeIDs))+`)`, args...)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
-			var id, kb, state, publishedSplit string
-			if err = rows.Scan(&id, &kb, &state, &publishedSplit); err != nil {
+			var id, kb, state, publishedChannel string
+			var from, until sql.NullString
+			if err = rows.Scan(&id, &kb, &state, &publishedChannel, &from, &until); err != nil {
 				rows.Close()
 				return err
 			}
-			if doc := attachmentDocs[id]; doc.KnowledgeBaseID == kb && strings.HasPrefix(doc.Channel, weknora.SplitPublicationChannelPrefix) &&
-				(publishedSplit == "" || doc.Channel != weknora.SplitPublicationChannelPrefix+publishedSplit) {
+			if doc, ok := attachmentDocs[id]; ok && (doc.KnowledgeBaseID != kb || !publicationChannelReadable(doc.Channel, publishedChannel)) {
 				state = ""
 			}
-			if state == "active" {
+			effective, _ := store.EffectiveAt(now, from, until)
+			if state == "active" && effective {
 				active[id] = true
 			} else {
 				blocked[id] = true
@@ -186,7 +198,7 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 			if e != nil {
 				return e
 			}
-			if a.ReadBlocked(time.Now().UTC()) {
+			if a.ReadBlocked(now) {
 				blocked[scope.DocumentID] = true
 			}
 			for _, ref := range a.Sources {
@@ -205,7 +217,15 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 		}
 		for _, id := range r.KnowledgeIDs {
 			d, ok := attachmentDocs[id]
-			if !ok {
+			if !ok || d.EnableStatus != "" && d.EnableStatus != "enabled" || d.ParseStatus != "" && d.ParseStatus != "completed" {
+				blocked[id] = true
+				continue
+			}
+			held, e := store.LegacyPublicationHeldTx(ctx, tx, d)
+			if e != nil {
+				return e
+			}
+			if held {
 				blocked[id] = true
 				continue
 			}
@@ -222,11 +242,11 @@ func (p *Policy) ExcludedDocumentIDs(ctx context.Context, r contract.BeforeRetri
 				}
 			}
 			if d.IsAttachment {
-				if !validAttachmentParent(d, parent) || d.ParseStatus == "deleting" || d.EnableStatus == "disabled" {
+				if !validAttachmentParent(d, parent) {
 					blocked[id] = true
 					continue
 				}
-				permit, e := attachmentParentActive(ctx, tx, r.TenantID, d)
+				permit, e := attachmentParentActive(ctx, tx, r.TenantID, parent, now)
 				if e != nil {
 					return e
 				}

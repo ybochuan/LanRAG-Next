@@ -11,6 +11,12 @@ import (
 // SplitPublicationChannelPrefix identifies native drafts owned by the split publisher.
 const SplitPublicationChannelPrefix = "agentrag-split-"
 
+// RevisionPublicationChannelPrefix identifies native drafts owned by the ordinary publisher.
+const RevisionPublicationChannelPrefix = "agentrag-revision-"
+
+// RevisionPublicationTitlePrefix was the receipt marker used before draft channels.
+const RevisionPublicationTitlePrefix = "AgentRAG revision "
+
 // AttachmentDocument is the minimal native metadata used by attachment policy.
 type AttachmentDocument struct {
 	ID               string
@@ -18,6 +24,7 @@ type AttachmentDocument struct {
 	KnowledgeBaseID  string
 	FileName         string
 	Title            string
+	Description      string
 	Channel          string
 	FileHash         string
 	ParseStatus      string
@@ -29,8 +36,9 @@ type AttachmentDocument struct {
 }
 type nativeAttachmentDocument struct {
 	attachmentDocument
-	FileName string `json:"file_name"`
-	Channel  string `json:"channel"`
+	FileName    string `json:"file_name"`
+	Channel     string `json:"channel"`
+	Description string `json:"description"`
 }
 
 func (c *Client) decodeAttachmentDocument(d nativeAttachmentDocument, kbs map[string]bool) (AttachmentDocument, error) {
@@ -42,7 +50,7 @@ func (c *Client) decodeAttachmentDocument(d nativeAttachmentDocument, kbs map[st
 		return AttachmentDocument{}, errors.New("invalid attachment metadata")
 	}
 	out := AttachmentDocument{
-		ID: d.ID, TenantID: d.TenantID, KnowledgeBaseID: d.KBID, FileName: d.FileName, Title: d.Title, Channel: d.Channel,
+		ID: d.ID, TenantID: d.TenantID, KnowledgeBaseID: d.KBID, FileName: d.FileName, Title: d.Title, Description: d.Description, Channel: d.Channel,
 		FileHash: d.FileHash, ParseStatus: d.ParseStatus, EnableStatus: d.EnableStatus,
 		IsAttachment: flag == "true", ParentDocumentID: d.value("parent_document_id"), ImportID: d.value("attachment_import_id"),
 		ExtractedSHA256: d.value("attachment_sha256"),

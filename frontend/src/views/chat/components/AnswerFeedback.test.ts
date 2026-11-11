@@ -32,7 +32,7 @@ function setup(message: Record<string, unknown>, write: (...args: unknown[]) => 
       '@/utils/steerStreamFork': messageIdentity,
     } as Record<string, unknown>)[name],
   })
-  return exports.default!.setup({ message, sessionId: 'session-one' }, { expose() {} })
+  return exports.default!.setup({ message, sessionId: 'session-one', question: 'What is the effective date?' }, { expose() {} })
 }
 
 test('only a completed, non-fallback quick answer with a single referenced KB offers feedback', async () => {
@@ -62,7 +62,8 @@ test('an uncertain submission retries the original operation, answer, and feedba
   })
   state.topic.value = ' Check the effective date '
   state.details.value = 'The answer used the older revision.'
-  state.incorrect.value = true
+  state.rating.value = 'incorrect'
+  state.revision.value = 'Cite the currently published revision.'
   await state.submit()
   assert.equal(state.error.value, 'chat.answerFeedback.retry')
   assert.equal(state.submitted.value, false)
@@ -73,6 +74,7 @@ test('an uncertain submission retries the original operation, answer, and feedba
   assert.deepEqual(payload, {
     session_id: 'session-one', message_id: 'real-answer', topic: 'Check the effective date',
     text: 'The answer used the older revision.', negative: true,
+    feedback_context: { rating:'incorrect', question:'What is the effective date?', answer_excerpt:'Answer', suggested_revision:'Cite the currently published revision.' },
   })
   state.details.value = 'An unsent edit must not change the retried payload.'
   await state.submit()

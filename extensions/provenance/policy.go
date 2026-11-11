@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
-	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/dependencies"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
@@ -14,9 +13,9 @@ import (
 func (l *Ledger) sourceReason(ctx context.Context, tx *sql.Tx, s Scope, ref SourceRef) (string, error) {
 	var version, state string
 	var from, until sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT h.version_id,CASE WHEN `+store.LifecycleReadableSQL+` THEN c.state ELSE '' END,a.effective_from,a.effective_until
+	err := tx.QueryRowContext(ctx, `SELECT h.version_id,CASE WHEN `+store.LifecycleReadableSQL+` AND NOT `+store.PublicationTargetPendingSQL+` THEN c.state ELSE '' END,a.effective_from,a.effective_until
  FROM ext_provenance_source_heads h JOIN ext_lifecycle_current c ON c.tenant_id=h.tenant_id AND c.knowledge_base_id=h.knowledge_base_id AND c.document_id=h.document_id
- `+store.LifecycleEventJoinSQL+` LEFT JOIN ext_document_annotations a ON a.tenant_id=c.tenant_id AND a.knowledge_base_id=c.knowledge_base_id AND a.document_id=c.document_id
+ `+store.LifecycleEventJoinSQL+store.LifecycleAnnotationJoinSQL+`
  WHERE h.tenant_id=? AND h.knowledge_base_id=? AND h.document_id=?`, args(s, ref.DocumentID)...).Scan(&version, &state, &from, &until)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "source_unknown", nil
@@ -31,20 +30,12 @@ func (l *Ledger) sourceReason(ctx context.Context, tx *sql.Tx, s Scope, ref Sour
 		return "source_inactive", nil
 	}
 	now := l.now().UTC()
-	for _, deadline := range []struct {
-		value sql.NullString
-		start bool
-	}{{from, true}, {until, false}} {
-		if !deadline.value.Valid {
-			continue
-		}
-		date, e := time.Parse(time.RFC3339Nano, deadline.value.String)
-		if e != nil {
-			return "source_unknown", nil
-		}
-		if deadline.start && now.Before(date) || !deadline.start && now.After(date) {
-			return "source_not_effective", nil
-		}
+	effective, err := store.EffectiveAt(now, from, until)
+	if err != nil {
+		return "source_unknown", nil
+	}
+	if !effective {
+		return "source_not_effective", nil
 	}
 	a, err := dependencies.LoadTx(ctx, tx, dependencies.Scope{TenantID: s.TenantID, KnowledgeBaseID: s.KnowledgeBaseID, DocumentID: ref.DocumentID})
 	if err != nil {

@@ -132,23 +132,14 @@ func renditionGovernance(ctx context.Context, tx *sql.Tx, s provenance.Scope, do
 		AND evidence.version_node_id=?
 		LEFT JOIN ext_document_annotations a ON a.tenant_id=c.tenant_id AND a.knowledge_base_id=c.knowledge_base_id AND a.document_id=c.document_id
 		WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND c.state='active'
-		AND `+store.LifecycleReadableSQL+` AND NOT `+store.SplitTargetPendingSQL,
+		AND `+store.LifecycleReadableSQL+` AND NOT `+store.PublicationTargetPendingSQL,
 		append([]any{version}, scopeArgs(s, doc)...)...).Scan(&enabled, &from, &until)
 	if err != nil || enabled != sha([]byte(`"enabled"`)) {
 		return nil, ErrConflict
 	}
 	now := time.Now().UTC()
-	if from.Valid {
-		date, err := time.Parse(time.RFC3339Nano, from.String)
-		if err != nil || now.Before(date) {
-			return nil, ErrConflict
-		}
-	}
-	if until.Valid {
-		date, err := time.Parse(time.RFC3339Nano, until.String)
-		if err != nil || now.After(date) {
-			return nil, ErrConflict
-		}
+	if effective, _ := store.EffectiveAt(now, from, until); !effective {
+		return nil, ErrConflict
 	}
 	assessment, err := dependencies.LoadTx(ctx, tx, dependencies.Scope{TenantID: s.TenantID, KnowledgeBaseID: s.KnowledgeBaseID, DocumentID: doc})
 	if err != nil || assessment.ReadBlocked(now) {

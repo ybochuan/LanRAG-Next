@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"github.com/ybochuan/LanRAG-Next/extensions/contract"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
@@ -95,7 +96,7 @@ func TestAttachmentLinksApplySemanticOrderAndHashBoundary(t *testing.T) {
 	}
 }
 func TestAttachmentParentStateControlsRetrievalAndDownloadLinks(t *testing.T) {
-	for _, state := range []string{"active", "stale", "archived", "missing"} {
+	for _, state := range []string{"active", "stale", "archived", "missing", "expired-before-sweep"} {
 		t.Run(state, func(t *testing.T) {
 			ctx := context.Background()
 			db, e := store.Open(ctx, filepath.Join(t.TempDir(), "ext.db"))
@@ -107,8 +108,19 @@ func TestAttachmentParentStateControlsRetrievalAndDownloadLinks(t *testing.T) {
 				if item.state == "missing" {
 					continue
 				}
+				if item.state == "expired-before-sweep" {
+					item.state = "active"
+				}
 				_, e = lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: item.id, TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: item.id, ToState: lifecycle.State(item.state), Reason: "test", OccurredAt: time.Now()})
 				if e != nil {
+					t.Fatal(e)
+				}
+			}
+			if state == "expired-before-sweep" {
+				if e := db.Write(ctx, func(tx *sql.Tx) error {
+					_, err := tx.Exec(`INSERT INTO ext_document_annotations VALUES('7','kb-a','parent',1,NULL,'2000-01-01T00:00:00Z',NULL,'{}')`)
+					return err
+				}); e != nil {
 					t.Fatal(e)
 				}
 			}

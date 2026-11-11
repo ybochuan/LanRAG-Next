@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -92,6 +93,7 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 		}
 	}
 	entries := make([]knowledgeDownloadEntry, 0, len(ids))
+	selected := make([]*types.Knowledge, 0, len(ids))
 	// 在读取任何文件之前检查整批文档，防止混入其他知识库或租户的 ID。
 	for _, id := range ids {
 		item := byID[id]
@@ -103,9 +105,14 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 			continue
 		}
 		entries = append(entries, knowledgeDownloadEntry{ID: id, FolderPath: item.FolderPath})
+		selected = append(selected, item)
 	}
 	if len(entries) == 0 {
 		_ = c.Error(errors.NewBadRequestError("所选文档没有可下载的原始文件，请取消选择后重试"))
+		return
+	}
+	if err := extensionbridge.GuardAttachmentDownloads(ctx, tenantID, kbID, selected); err != nil {
+		_ = c.Error(errors.NewForbiddenError("Attachment unavailable under current lifecycle policy"))
 		return
 	}
 

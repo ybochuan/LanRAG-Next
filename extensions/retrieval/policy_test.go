@@ -7,6 +7,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/contract"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
+	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -115,5 +116,42 @@ func TestPolicyOnlyAllowsKnownActiveWithinScope(t *testing.T) {
 	db.Close()
 	if _, err = p.ExcludedDocumentIDs(ctx, req); err == nil {
 		t.Fatal("DB unavailable permitted")
+	}
+}
+
+func TestPolicyRejectsDatesAndDisabledDocumentsBeforeSweep(t *testing.T) {
+	ctx := t.Context()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "ext.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ids := []string{"valid", "expired", "future", "bad-date", "disabled"}
+	for _, id := range ids {
+		if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: id, TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: id, ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO ext_document_annotations VALUES
+		('7','kb-a','expired',1,NULL,'2000-01-01T00:00:00Z',NULL,'{}'),
+		('7','kb-a','future',1,'2099-01-01T00:00:00Z',NULL,NULL,'{}'),
+		('7','kb-a','bad-date',1,NULL,'malformed',NULL,'{}')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	docs := make([]weknora.AttachmentDocument, 0, len(ids))
+	for _, id := range ids {
+		docs = append(docs, weknora.AttachmentDocument{ID: id, KnowledgeBaseID: "kb-a", TenantID: 7, EnableStatus: "enabled"})
+	}
+	docs[len(docs)-1].EnableStatus = "disabled"
+	p, _ := NewPolicy(db, 7, []string{"kb-a"})
+	p.WithAttachments(attachmentSourceFixture{docs: docs})
+	for _, mode := range []string{"rag", "agent"} {
+		req := contract.BeforeRetrieveRequest{Context: contract.Context{RequestID: "r", SessionID: "s", Mode: mode, TenantID: 7, KnowledgeBaseIDs: []string{"kb-a"}, KnowledgeIDs: ids}}
+		if got, err := p.ExcludedDocumentIDs(ctx, req); err != nil || !reflect.DeepEqual(got, ids[1:]) {
+			t.Fatalf("%s excluded %v, %v; want %v", mode, got, err, ids[1:])
+		}
 	}
 }

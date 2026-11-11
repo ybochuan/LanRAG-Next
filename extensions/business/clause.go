@@ -65,7 +65,7 @@ func (s *Service) checkClause(ctx context.Context, tx *sql.Tx, scope provenance.
 			WHERE e.tenant_id=? AND e.knowledge_base_id=? AND e.version_node_id=?
 			AND json_extract(c.value,'$.id')=? AND json_extract(c.value,'$.content_hash')=?)
 			AND EXISTS(SELECT 1 FROM ext_lifecycle_current c WHERE c.tenant_id=? AND c.knowledge_base_id=?
-			AND c.document_id=? AND NOT `+store.RepealDueSQL+` AND NOT `+store.SplitTargetPendingSQL+`)`,
+			AND c.document_id=? AND NOT `+store.RepealDueSQL+` AND NOT `+store.PublicationTargetPendingSQL+`)`,
 			append(args(scope, pin.VersionID, pin.ChunkID, pin.ContentHash), args(scope, pin.DocumentID)...)...).Scan(&found)
 		if err != nil {
 			return err

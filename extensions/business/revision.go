@@ -47,7 +47,8 @@ type RemoteDocument struct {
 // Remote distinguishes authoritative absence (empty ID,nil) from an unknown result (error).
 type Remote interface {
 	Reconcile(context.Context, Publication) (RemoteDocument, error)
-	Create(context.Context, Publication) (RemoteDocument, error)
+	CreateDraft(context.Context, Publication) (RemoteDocument, error)
+	IndexDraft(context.Context, Publication) (RemoteDocument, error)
 }
 
 // WithRemote configures the native sidecar publisher, leaving the original unchanged.
@@ -195,39 +196,7 @@ func (s *Service) Publish(ctx context.Context, scope provenance.Scope, id string
 	}
 	remoteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if p.SplitID != "" {
-		return s.publishSplit(ctx, remoteCtx, p, r)
-	}
-	target, remoteErr := s.remote.Reconcile(remoteCtx, p)
-	if remoteErr == nil && target.ID == "" {
-		if p.TargetDocumentID != "" {
-			remoteErr = ErrConflict
-		} else {
-			target, remoteErr = s.remote.Create(remoteCtx, p)
-		}
-	}
-	if remoteErr != nil {
-		return s.publishFailure(ctx, p, r, remoteErr)
-	}
-	if !validID(target.ID) || target.ContentHash != p.ContentHash {
-		return s.publishMismatch(ctx, p, r)
-	}
-	status := "publishing"
-	if target.Indexed {
-		status = "indexed"
-	}
-	r, e = s.publishState(ctx, p, r, status, "", target.ID, "")
-	if e != nil {
-		return Result{}, e
-	}
-	if !target.Indexed {
-		return r, nil
-	}
-	targetVersion, e := s.verify(ctx, scope, target.ID)
-	if e != nil {
-		return r, nil
-	} // Observer may not yet have initialized target lifecycle.
-	return s.publishState(ctx, p, r, "published", "", target.ID, targetVersion)
+	return s.publishDraft(ctx, remoteCtx, p, r)
 }
 
 func (s *Service) publishFailure(ctx context.Context, p Publication, r Result, cause error) (Result, error) {
@@ -274,9 +243,6 @@ func (s *Service) publishState(ctx context.Context, p Publication, previous Resu
 			if e != nil {
 				return Result{}, e
 			}
-			if e := s.current(ctx, tx, p.Scope, target, version); e != nil {
-				return Result{}, e
-			}
 			published = s.now().UTC().Format(time.RFC3339Nano)
 			if p.SplitID != "" {
 				family, e = s.finalizeSplit(ctx, tx, p, target, version, first)
@@ -287,16 +253,33 @@ func (s *Service) publishState(ctx context.Context, p Publication, previous Resu
 				return Result{}, e
 			}
 		}
-		retainLease := p.SplitID != "" && code == "remote_result_unknown"
+		retainLease := code == "remote_result_unknown"
 		_, e := tx.ExecContext(ctx, `UPDATE ext_revision_proposals SET status=?,revision=?,target_document_id=?,publish_error=?,
 			published_at=COALESCE(?,published_at),family_id=?,publish_lease_until=CASE WHEN ? THEN publish_lease_until ELSE NULL END
 			WHERE tenant_id=? AND knowledge_base_id=? AND proposal_id=?`,
 			append([]any{out.Status, out.Revision, out.TargetDocumentID, code, published, family, retainLease}, args(p.Scope, p.ProposalID)...)...)
+		if e == nil && status == "published" {
+			// Check the new permit against the resulting state. Retiring the old
+			// document may invalidate a dependency of the proposed replacement.
+			e = s.current(ctx, tx, p.Scope, target, version)
+		}
 		return out, e
 	})
 }
 
 func (s *Service) finalizeRevision(ctx context.Context, tx *sql.Tx, p Publication, target, version string) error {
+	if target != p.TargetDocumentID || target == p.SourceDocumentID {
+		return ErrConflict
+	}
+	if s.registry != nil {
+		var metadata string
+		err := tx.QueryRowContext(ctx, `SELECT COALESCE(json_extract(snapshot_json,'$.header_fields.metadata'),'')
+			FROM ext_source_snapshot_evidence WHERE tenant_id=? AND knowledge_base_id=? AND version_node_id=?`,
+			args(p.Scope, version)...).Scan(&metadata)
+		if err != nil || metadata == "" || metadata != p.TargetMetadataHash {
+			return ErrConflict
+		}
+	}
 	now := s.now().UTC()
 	edge := textHash(p.Key + "supersedes")
 	if _, err := tx.ExecContext(ctx, `INSERT INTO ext_lineage_edge VALUES(?,?,?,?,?,'supersedes','governance_critical',?) ON CONFLICT DO NOTHING`,

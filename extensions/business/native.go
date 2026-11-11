@@ -64,11 +64,19 @@ func marker(p Publication) string {
 	if p.SplitID != "" {
 		return p.SplitTitle
 	}
-	return "AgentRAG revision " + p.Key
+	return weknora.RevisionPublicationTitlePrefix + p.Key
 }
 
-func splitChannel(p Publication) string {
-	return weknora.SplitPublicationChannelPrefix + p.ProposalID
+func publicationChannel(p Publication) string {
+	if p.SplitID != "" {
+		return weknora.SplitPublicationChannelPrefix + p.ProposalID
+	}
+	return weknora.RevisionPublicationChannelPrefix + p.ProposalID
+}
+
+// Pre-upgrade ordinary publications used the deterministic title and api channel.
+func legacyPublication(p Publication, d nativeDocument) bool {
+	return p.SplitID == "" && d.Channel == "api" && d.Title == marker(p)
 }
 
 func checkedNative(p Publication, d nativeDocument) (RemoteDocument, error) {
@@ -77,10 +85,10 @@ func checkedNative(p Publication, d nativeDocument) (RemoteDocument, error) {
 		d.Type != "manual" || d.Title != marker(p) || json.Unmarshal(d.Metadata, &meta) != nil || textHash(meta.Content) != p.ContentHash {
 		return RemoteDocument{}, ErrConflict
 	}
-	if p.SplitID != "" && d.Channel != splitChannel(p) {
+	if d.Channel != publicationChannel(p) && !legacyPublication(p, d) {
 		return RemoteDocument{}, ErrConflict
 	}
-	draft := meta.Status == "draft" && d.ParseStatus == "draft" && p.SplitID != ""
+	draft := meta.Status == "draft" && d.ParseStatus == "draft" && d.Channel == publicationChannel(p)
 	if !draft && meta.Status != "publish" {
 		return RemoteDocument{}, ErrConflict
 	}
@@ -130,7 +138,7 @@ func (n *NativePublisher) Reconcile(ctx context.Context, p Publication) (RemoteD
 			if d.TenantID != p.Scope.TenantID || d.KnowledgeBaseID != p.Scope.KnowledgeBaseID {
 				return RemoteDocument{}, ErrConflict
 			}
-			if p.SplitID == "" && d.Title != marker(p) || p.SplitID != "" && d.Channel != splitChannel(p) {
+			if d.Channel != publicationChannel(p) && !legacyPublication(p, d) {
 				continue
 			}
 			if found.ID != "" {
@@ -144,17 +152,6 @@ func (n *NativePublisher) Reconcile(ctx context.Context, p Publication) (RemoteD
 		page = next
 	}
 	return found, nil
-}
-
-// Create is called once only after a reconciled absence under the persistent Saga lease.
-func (n *NativePublisher) Create(ctx context.Context, p Publication) (RemoteDocument, error) {
-	if n == nil || n.client == nil || n.client.TenantID() != p.Scope.TenantID || !validID(p.Scope.KnowledgeBaseID) || textHash(p.Content) != p.ContentHash {
-		return RemoteDocument{}, ErrInvalid
-	}
-	if e := n.manualSource(ctx, p); e != nil {
-		return RemoteDocument{}, e
-	}
-	return n.writeManual(ctx, p, http.MethodPost, "/api/v1/knowledge-bases/"+url.PathEscape(p.Scope.KnowledgeBaseID)+"/knowledge/manual", "publish")
 }
 
 // ValidateSplitSource verifies the native source can enter the Markdown split flow.
@@ -186,7 +183,7 @@ func (n *NativePublisher) repealDocumentInactive(ctx context.Context, scope prov
 
 // CreateDraft creates a natively disabled document before the local target binding.
 func (n *NativePublisher) CreateDraft(ctx context.Context, p Publication) (RemoteDocument, error) {
-	if p.SplitID == "" || p.TargetDocumentID != "" {
+	if !validID(p.ProposalID) || p.TargetDocumentID != "" {
 		return RemoteDocument{}, ErrInvalid
 	}
 	if err := n.manualSource(ctx, p); err != nil {
@@ -197,7 +194,7 @@ func (n *NativePublisher) CreateDraft(ctx context.Context, p Publication) (Remot
 
 // IndexDraft asks Core to index the same target, after its gate has been committed.
 func (n *NativePublisher) IndexDraft(ctx context.Context, p Publication) (RemoteDocument, error) {
-	if p.SplitID == "" || !validID(p.TargetDocumentID) {
+	if !validID(p.ProposalID) || !validID(p.TargetDocumentID) {
 		return RemoteDocument{}, ErrInvalid
 	}
 	return n.writeManual(ctx, p, http.MethodPut, "/api/v1/knowledge/manual/"+url.PathEscape(p.TargetDocumentID), "publish")
@@ -208,10 +205,7 @@ func (n *NativePublisher) writeManual(ctx context.Context, p Publication, method
 		!validID(p.Scope.KnowledgeBaseID) || textHash(p.Content) != p.ContentHash {
 		return RemoteDocument{}, ErrInvalid
 	}
-	body := map[string]any{"title": marker(p), "content": p.Content, "status": status, "channel": "api"}
-	if p.SplitID != "" {
-		body["channel"] = splitChannel(p)
-	}
+	body := map[string]any{"title": marker(p), "content": p.Content, "status": status, "channel": publicationChannel(p)}
 	var out struct {
 		Data nativeDocument `json:"data"`
 	}

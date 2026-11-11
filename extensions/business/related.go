@@ -121,10 +121,7 @@ func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
 		}
 		edgeID := digest([]string{strconvScope(c.Scope), sv, tv, kind})
 		if out.Status == "active" {
-			if _, e = tx.ExecContext(ctx, `INSERT INTO ext_lineage_edge VALUES(?,?,?,?,?,?,'governance_critical',?) ON CONFLICT DO NOTHING`, append([]any{edgeID}, args(c.Scope, sv, tv, kind, s.now().UTC().Format(time.RFC3339Nano))...)...); e != nil {
-				return Result{}, e
-			}
-			_, e = tx.ExecContext(ctx, `UPDATE ext_document_relations SET edge_id=? WHERE tenant_id=? AND knowledge_base_id=? AND relation_id=?`, append([]any{edgeID}, args(c.Scope, out.ID)...)...)
+			e = s.activateRelationEdgeTx(ctx, tx, c.Scope, out.ID, sv, tv, kind, edgeID)
 		} else if out.Status == "revoked" {
 			if _, e = tx.ExecContext(ctx, `UPDATE ext_document_relations SET edge_id=NULL WHERE tenant_id=? AND knowledge_base_id=? AND relation_id=?`, args(c.Scope, out.ID)...); e != nil {
 				return Result{}, e
@@ -133,6 +130,16 @@ func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
 		}
 		return out, e
 	})
+}
+
+func (s *Service) activateRelationEdgeTx(ctx context.Context, tx *sql.Tx, scope provenance.Scope, id, source, target, kind, edgeID string) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO ext_lineage_edge VALUES(?,?,?,?,?,?,'governance_critical',?) ON CONFLICT DO NOTHING`,
+		append([]any{edgeID}, args(scope, source, target, kind, s.now().UTC().Format(time.RFC3339Nano))...)...); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE ext_document_relations SET edge_id=? WHERE tenant_id=? AND knowledge_base_id=? AND relation_id=?`,
+		append([]any{edgeID}, args(scope, id)...)...)
+	return err
 }
 func strconvScope(s provenance.Scope) string { return fmt.Sprint(s.TenantID, ":", s.KnowledgeBaseID) }
 
@@ -232,8 +239,15 @@ func (s *Service) QueryRelated(ctx context.Context, scope provenance.Scope, doc 
 	return out, nil
 }
 
-const relatedSQL = `SELECT target_document_id,edge_type,confidence,'outgoing',target_version_id FROM ext_document_relations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND source_version_id=? AND status='active' AND (edge_type<>'related_to' OR confidence>=0.7)
- UNION SELECT document_id,edge_type,confidence,'incoming',source_version_id FROM ext_document_relations WHERE tenant_id=? AND knowledge_base_id=? AND target_document_id=? AND target_version_id=? AND status='active' AND (edge_type<>'related_to' OR confidence>=0.7)
+// A confirmed family suggestion passed the scoring policy recorded at its
+// review. Manual relationship candidates retain the original global minimum.
+const relatedConfidenceSQL = `(r.edge_type<>'related_to' OR r.confidence>=0.7 OR EXISTS(
+	SELECT 1 FROM ext_family_suggestions s WHERE s.tenant_id=r.tenant_id AND s.knowledge_base_id=r.knowledge_base_id
+	AND s.applied_id=r.relation_id AND s.edge_type='related_to' AND s.status='confirmed'
+	AND s.source_version_id=r.source_version_id AND s.target_version_id=r.target_version_id))`
+
+const relatedSQL = `SELECT target_document_id,edge_type,confidence,'outgoing',target_version_id FROM ext_document_relations r WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND source_version_id=? AND status='active' AND ` + relatedConfidenceSQL + `
+ UNION SELECT document_id,edge_type,confidence,'incoming',source_version_id FROM ext_document_relations r WHERE tenant_id=? AND knowledge_base_id=? AND target_document_id=? AND target_version_id=? AND status='active' AND ` + relatedConfidenceSQL + `
  UNION SELECT p.parent_document_id,'supplements',1,'outgoing',p.parent_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.declaration_id=c.declaration_id AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.child_version_node_id=?
  UNION SELECT c.document_id,'supplements',1,'incoming',d.child_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.declaration_id=c.declaration_id AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND p.parent_document_id=? AND p.parent_version_node_id=? LIMIT 101`
 

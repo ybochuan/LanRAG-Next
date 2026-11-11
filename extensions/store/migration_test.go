@@ -3,9 +3,94 @@ package store
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestSchema28UpgradePreservesLegacyFeedbackAndBackup(t *testing.T) {
+	dir := t.TempDir()
+	backupPath := filepath.Join(dir, "extension-v27.db")
+	raw, err := sql.Open("sqlite", backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+	raw.SetMaxOpenConns(1)
+	if _, err := raw.Exec("PRAGMA foreign_keys=ON; CREATE TABLE ext_schema_migrations(version INTEGER PRIMARY KEY)"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := filepath.Glob("migrations/*.sql")
+	const previous = 27
+	if err != nil || len(migrations) < previous || filepath.Base(migrations[previous-1]) != "027_family_suggestions.sql" {
+		t.Fatalf("schema 27 fixture unavailable: %v", err)
+	}
+	for i, path := range migrations[:previous] {
+		migration, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.Exec(string(migration)); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if _, err := raw.Exec("INSERT INTO ext_schema_migrations VALUES(?)", i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`
+INSERT INTO ext_feedback_events VALUES('7','kb','qa','manual','fixture','original opinion',1,'2026-11-10T00:00:00Z');
+INSERT INTO ext_feedback_staging VALUES('7','kb','qa','fixture','original opinion','medium','active',2,'2026-11-10T00:00:00Z');
+INSERT INTO ext_feedback_guidances VALUES('7','kb','guidance','qa','feedback','fixture','prior guidance',1,'active',1,'2026-11-10T00:00:00Z');
+INSERT INTO ext_provenance_runs VALUES('7','kb','run',1,'sealed',lower(hex(zeroblob(32))),'{}');
+INSERT INTO ext_feedback_qa_bindings VALUES('7','kb','qa','run','["chunk"]');`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidatePath := filepath.Join(dir, "extension.db")
+	if err := os.WriteFile(candidatePath, backup, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	for i := 0; i < 2; i++ {
+		db, err := OpenDurable(ctx, candidatePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = db.View(ctx, func(tx *sql.Tx) error {
+			var version, contextCount, violations int
+			var integrity, opinion, status, guidance, chunks string
+			err := tx.QueryRow(`
+SELECT (SELECT max(version) FROM ext_schema_migrations),
+       (SELECT count(*) FROM ext_feedback_review_context),
+       (SELECT count(*) FROM pragma_foreign_key_check),
+       (SELECT * FROM pragma_integrity_check),
+       f.text,f.status,g.text,b.retrieved_chunk_ids
+FROM ext_feedback_staging f JOIN ext_feedback_guidances g USING(tenant_id,knowledge_base_id,feedback_id)
+JOIN ext_feedback_qa_bindings b USING(tenant_id,knowledge_base_id,feedback_id)
+WHERE f.tenant_id='7' AND f.knowledge_base_id='kb' AND f.feedback_id='qa'`).Scan(
+				&version, &contextCount, &violations, &integrity, &opinion, &status, &guidance, &chunks)
+			if err == nil && (version != LatestSchemaVersion || contextCount != 0 || violations != 0 || integrity != "ok" ||
+				opinion != "original opinion" || status != "active" || guidance != "prior guidance" || chunks != `["chunk"]`) {
+				t.Errorf("upgraded feedback or schema differs: version=%d contexts=%d FK=%d integrity=%s", version, contextCount, violations, integrity)
+			}
+			return err
+		})
+		_ = db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := os.ReadFile(backupPath)
+	if err != nil || string(after) != string(backup) {
+		t.Fatal("original schema 27 backup changed", err)
+	}
+}
 
 func TestMigrationUpgradesV1WithoutLosingData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agentrag_ext.db")

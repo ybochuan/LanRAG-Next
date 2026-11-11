@@ -5,10 +5,362 @@ import json
 import sqlite3
 import os
 import hashlib
+import subprocess
 import urllib.request
+from urllib.error import HTTPError
 from datetime import datetime, timedelta, timezone
 
 from startup_e2e import until as wait_until
+from e2e_test import new_password
+
+
+def read_family_management(http, kb, key, action, item_id=None, view=""):
+    payload = {"action": "business_" + action, "tenant_id": kb["tenant_id"], "knowledge_base_id": kb["id"]}
+    if item_id:
+        payload["business"] = {"id": item_id}
+    if view:
+        payload["state"] = view
+    req = urllib.request.Request("http://127.0.0.1:8090/management/lifecycle", data=json.dumps(payload).encode(), headers={
+        "Content-Type": "application/json", "X-AgentRAG-Bridge-Version": "1", "Authorization": "Bearer " + key,
+    })
+    try:
+        with http.opener.open(req, timeout=5) as response:
+            return response.status, json.load(response)["data"]
+    except HTTPError as error:
+        with error:
+            return error.code, None
+
+
+def check_family_jwt(http, kb, other_kb_id, family_id, emit):
+    route = "/knowledge-bases/" + kb["id"] + "/lifecycle/business/"
+    actions = ("family_list", "family_members", "family_workspace", "family_replacements", "family_suggestions")
+    for action in actions:
+        http.api("GET", route + action + "?id=" + family_id)
+    admin = http.api("GET", route + "family_workspace?id=" + family_id)["data"]
+    if not admin["can_write"] or admin["family"]["business_family_id"] != family_id:
+        raise RuntimeError("native family workspace did not preserve the administrator grant")
+
+    workspace_url = http.base_url + "/api/v1" + route + "family_workspace?id=" + family_id
+    anonymous = type(http)(http.base_url)
+    if anonymous.call("GET", workspace_url)[0] != 401:
+        raise RuntimeError("native family workspace accepted a missing JWT")
+    foreign = workspace_url.replace("/knowledge-bases/" + kb["id"] + "/", "/knowledge-bases/" + other_kb_id + "/", 1)
+    if http.call("GET", foreign)[0] not in (403, 404) or http.call("GET", workspace_url.replace(family_id, other_kb_id, 1))[0] != 404:
+        raise RuntimeError("native family workspace accepted a foreign scope or unknown family")
+
+    nonce = uuid.uuid4().hex[:12]
+    account = {"username": "fam_viewer_" + nonce, "email": "fam-viewer-" + nonce + "@example.invalid", "password": new_password()}
+    anonymous.api("POST", "/auth/register", account)
+    http.api("POST", "/tenants/" + str(kb["tenant_id"]) + "/members", {"email": account["email"], "role": "viewer"})
+    token = anonymous.api("POST", "/auth/login", {key: account[key] for key in ("email", "password")})["token"]
+
+    def viewer(method, url, payload=None):
+        request = urllib.request.Request(url, method=method, data=None if payload is None else json.dumps(payload).encode(), headers={
+            "Authorization": "Bearer " + token, "X-Tenant-ID": str(kb["tenant_id"]), "Content-Type": "application/json",
+        })
+        try:
+            response = http.opener.open(request, timeout=5)
+        except HTTPError as error:
+            response = error
+        with response:
+            return response.status, json.load(response)
+
+    for action in actions:
+        status, body = viewer("GET", http.base_url + "/api/v1" + route + action + "?id=" + family_id)
+        if status != 200 or body.get("success") is not True:
+            raise RuntimeError("native family read rejected the real viewer role: " + action)
+        if action == "family_workspace" and body["data"]["can_write"]:
+            raise RuntimeError("native family workspace granted write access to a viewer")
+    write_url = http.base_url + "/api/v1" + route + "family_suggestion_scan"
+    if viewer("PUT", write_url, {"expected_revision": 0, "operation_id": uuid.uuid4().hex, "business": {"id": family_id, "payload": {}}})[0] != 403:
+        raise RuntimeError("native family workspace accepted a viewer write")
+    if os.environ.get("AGENTRAG_QA_FEEDBACK_E2E") == "1":
+        rows = http.api("GET", route + "feedback_list?state=active")["data"]
+        reviewed = next(row for row in rows if row.get("topic") == "fixture-turn")
+        status, result = viewer("GET", http.base_url + "/api/v1" + route + "feedback_list?id=" + reviewed["id"])
+        if status != 200 or not result["data"] or any(key in result["data"][0] for key in (
+            "feedback_context", "citation_document_ids", "reviewed_guidance", "text", "topic",
+        )):
+            raise RuntimeError("read-only member could inspect private feedback content")
+    emit("[FAM-04-JWT] PASS: five scoped reads, administrator grant, real viewer role, write403, anonymous401 and cross-KB denial")
+    if node := os.environ.get("AGENTRAG_FAMILY_BROWSER_NODE"):
+        fixture = {"origin": http.base_url, "tenant": kb["tenant_id"], "kb": kb["id"], "other": other_kb_id,
+                   "family": family_id, "admin": http.token, "viewer": token,
+                   "hasFeedback": os.environ.get("AGENTRAG_QA_FEEDBACK_E2E") == "1",
+                   "chromium": os.environ["AGENTRAG_FAMILY_BROWSER_CHROMIUM"],
+                   "playwright": os.environ["AGENTRAG_FAMILY_BROWSER_PLAYWRIGHT"]}
+        check = subprocess.run([node, os.environ["AGENTRAG_FAMILY_BROWSER_SCRIPT"], "--native"],
+                               input=json.dumps(fixture), text=True, capture_output=True, timeout=90)
+        if check.returncode:
+            # Playwright emits a source line and locator diagnostics. Keep the
+            # fixture credentials out of stdout and any private log.
+            detail = check.stderr.replace(token, "[redacted]").replace(http.token, "[redacted]")
+            lines = [line.strip() for line in detail.splitlines() if "Error:" in line or "waiting for" in line]
+            summary = ". ".join(lines[:2])[:300] if lines else f"exit {check.returncode}"
+            raise RuntimeError("native family browser failed: " + summary)
+        emit("[FAM-04-BROWSER] PASS: built frontend, isolated Core/Host, native JWT roles and same-KB semantic suggestions")
+
+
+def run_families(http, kb, emit, management_key):
+    base = "/knowledge-bases/" + kb["id"]
+    route = base + "/lifecycle/business/"
+
+    def mutation(revision, payload, family_id=None):
+        business = {"payload": payload}
+        if family_id:
+            business["id"] = family_id
+        return {"expected_revision": revision, "operation_id": uuid.uuid4().hex, "business": business}
+
+    def read(action, family_id=None, key=management_key):
+        return read_family_management(http, kb, key, action, family_id)
+
+    def state(doc):
+        status, body = http.call("GET", http.base_url + "/api/v1" + base + "/lifecycle/documents/" + doc)
+        return json.loads(body)["data"]["snapshot"]["current"]["state"] if status == 200 else None
+
+    documents = []
+    for year in (2024, 2025, 2026):
+        title = "Employee handbook " + str(year)
+        documents.append(http.api("POST", base + "/knowledge/manual", {
+            "title": title, "content": "# " + title + "\n\nSynthetic family acceptance text.", "status": "publish",
+        })["data"]["id"])
+    wait_until(lambda: all(state(doc) == "active" for doc in documents), 35)
+
+    create = mutation(0, {"family_label": "Employee handbook"})
+    family = http.api("PUT", route + "family_create", create)["data"]
+    if http.api("PUT", route + "family_create", create)["data"] != family:
+        raise RuntimeError("family creation replay changed the receipt")
+    for doc in documents:
+        add = mutation(family["revision"], {"document_id": doc}, family["id"])
+        family = http.api("PUT", route + "family_member_add", add)["data"]
+
+    other_kb = http.api("POST", "/knowledge-bases", {
+        "name": "Family scope fixture", "type": "document", "embedding_model_id": kb["embedding_model_id"],
+    })["data"]["id"]
+    foreign = http.api("POST", "/knowledge-bases/" + other_kb + "/knowledge/manual", {
+        "title": "Foreign handbook", "content": "A document from a different knowledge base.", "status": "publish",
+    })["data"]["id"]
+    foreign_add = mutation(family["revision"], {"document_id": foreign}, family["id"])
+    status, _ = http.call("PUT", http.base_url + "/api/v1" + route + "family_member_add", foreign_add)
+    if status != 409:
+        raise RuntimeError(f"native family add accepted or misreported a foreign document: HTTP {status}")
+
+    status, items = read("family_members", family["id"])
+    if status != 200 or {item["document_id"] for item in items} != set(documents) or len(items) != 3:
+        raise RuntimeError("the three real documents are missing from the same business family")
+    if len({item["observation_chain_id"] for item in items}) != 3 or any(
+        item["business_family_id"] != family["id"] or not item["observed_head_version_node_id"] for item in items
+    ):
+        raise RuntimeError("business membership overwrote an observation chain")
+    if read("family_list", family["id"]) != (200, [{
+        "business_family_id": family["id"], "label": "Employee handbook", "revision": 4,
+    }]) or read("family_list", key="wrong")[0] != 401:
+        raise RuntimeError("family list scope or authorization is incorrect")
+
+    remove = mutation(family["revision"], {"document_id": documents[0]}, family["id"])
+    family = http.api("PUT", route + "family_member_remove", remove)["data"]
+    status, unassigned = read("family_members")
+    if status != 200 or not any(item["document_id"] == documents[0] for item in unassigned):
+        raise RuntimeError("removed member is missing from the observed unassigned list")
+    if any(state(doc) != "active" for doc in documents):
+        raise RuntimeError("membership changed native lifecycle")
+    emit("[FAM-01] PASS: native writes, scoped Host reads, cross-KB 409, three observation chains in one family, idempotent receipt, removal and unchanged lifecycle")
+    def workbench(view):
+        status, result = read_family_management(http, kb, management_key, "family_workspace", family["id"], view)
+        if status != 200 or result["family"]["business_family_id"] != family["id"] or result["can_write"]:
+            raise RuntimeError(f"read-only family workspace {view} returned HTTP {status} or the wrong scope")
+        return result
+
+    removed = workbench("removed").get("members", [])
+    if [row["document_id"] for row in removed] != documents[:1] or not removed[0]["removed_at"]:
+        raise RuntimeError("workbench omitted the removed member record")
+    relation = http.api("PUT", route + "relation_declare", mutation(0, {
+        "document_id": documents[0], "target_document_id": documents[2], "edge_type": "amends",
+    }))["data"]
+    scoped_query = "?document_id=" + documents[2]
+    record_path = route + "related" + scoped_query
+    doc_records = http.api("GET", record_path + "&state=workbench-relations")["data"]
+    graph = http.api("GET", route + "lineage_graph?mode=relations&id=" + documents[2])["data"]
+    graph_docs = {node["id"]: node["document_id"] for node in graph["nodes"]}
+    if {row["id"] for row in doc_records} != {relation["id"]} or not any(
+        (graph_docs[edge["from"]], graph_docs[edge["to"]], edge["type"]) == (documents[0], documents[2], "amends") for edge in graph["edges"]
+    ) or any("observation_chain_id" in node or "family_id" in node for node in graph["nodes"]):
+        raise RuntimeError("document workbench graph or records lost a directed, scoped relation")
+    overview = http.api("GET", base + "/lifecycle?title=Employee+handbook")["data"]
+    labels = {row["document_id"]: row.get("business_family") for row in overview["documents"]}
+    if labels.get(documents[0]) or (labels.get(documents[2]) or {}).get("label") != "Employee handbook":
+        raise RuntimeError("document workbench did not distinguish confirmed and unassigned documents")
+    links = workbench("relations").get("relations", [])
+    if len(links) != 1 or links[0]["id"] != relation["id"] or links[0]["scope"] != "external":
+        raise RuntimeError("workbench omitted the incoming external relation")
+    http.api("PUT", route + "relation_revoke", mutation(relation["revision"], {}, relation["id"]))
+    activity = http.api("GET", record_path + "&state=workbench-activity")["data"]
+    if not any(row["action"] == "relation_revoke" and row["aggregate_id"] == relation["id"] for row in activity):
+        raise RuntimeError("document workbench audit lost the revocation")
+    if http.call("GET", http.base_url + "/api/v1" + route + "related?state=workbench-relations&document_id=" + foreign)[0] != 404:
+        raise RuntimeError("document workbench accepted a document outside the active knowledge base")
+    emit("[DOCUMENT-WORKBENCH] PASS: current family, scoped graph, document audit and foreign document rejection")
+    if workbench("relations").get("relations") or not any(
+        row["id"] == relation["id"] and row["status"] == "revoked" for row in workbench("history").get("relations", [])
+    ):
+        raise RuntimeError("workbench did not separate current and revoked relations")
+    if not any(row["action"] == "relation_revoke" for row in workbench("activity").get("activity", [])):
+        raise RuntimeError("workbench omitted the relation audit receipt")
+    emit("[FAM-04-WORKSPACE] PASS: real native writes, read-only Host workbench, external relation, revocation history and scoped audit")
+    supplement_path = base + "/lifecycle/documents/" + documents[0] + "/supplements"
+    supplement = http.api("PUT", supplement_path, {
+        "expected_revision": 0, "operation_id": uuid.uuid4().hex, "parents": documents[1:],
+    })["data"]["supplements"]
+    for doc in documents:
+        path = route + "related?state=workbench-relations&document_id=" + doc
+        rows = [row for row in http.api("GET", path)["data"] if row["edge_type"] == "supplements"]
+        expected = {(documents[0], parent) for parent in documents[1:] if doc in (documents[0], parent)}
+        if {(row["document_id"], row["target_document_id"]) for row in rows} != expected or len(rows) != len(expected):
+            raise RuntimeError("document workbench omitted a directed supplement declaration")
+        for row in rows:
+            if http.api("GET", path + "&id=" + row["id"])["data"] != [row]:
+                raise RuntimeError("document workbench could not reopen a supplement record")
+    http.api("PUT", supplement_path, {
+        "expected_revision": supplement["revision"], "operation_id": uuid.uuid4().hex, "parents": [],
+    })
+    if any(row["edge_type"] == "supplements" for row in http.api("GET", record_path + "&state=workbench-relations")["data"]):
+        raise RuntimeError("revoked supplement remained in the current document relations")
+    if not any(row["action"] == "supplements_revoked" for row in http.api("GET", record_path + "&state=workbench-activity")["data"]):
+        raise RuntimeError("parent document omitted the supplement revocation audit")
+    emit("[WORKBENCH-SUPPLEMENTS] PASS: both endpoints list and reopen each declaration, and parent audit retains revocation")
+    if os.environ.get("AGENTRAG_FAMILY_SUGGESTION_E2E") == "1":
+        def scan():
+            request = mutation(0, {}, family["id"])
+            if http.api("PUT", route + "family_suggestion_scan", request)["data"]["status"] != "queued":
+                raise RuntimeError("native suggestion scan did not queue work")
+
+            def completed():
+                status, result = read("family_suggestions", family["id"])
+                if status != 200 or result["scan_status"] == "failed":
+                    raise RuntimeError("Host suggestion scan did not complete")
+                return result if result["scan_status"] == "completed" else None
+
+            wait_until(completed, 30)
+            return completed()
+
+        first = scan()
+        member = next((row for row in first["items"] if row["kind"] == "membership" and row["document_id"] == documents[0]), None)
+        replacement = next((row for row in first["items"] if row.get("edge_type") == "supersedes"), None)
+        if not member or "year_sequence" not in member["evidence"]["reasons"] or not replacement:
+            raise RuntimeError("native source data did not yield explainable family and relationship suggestions")
+        if os.environ.get("AGENTRAG_FAMILY_SEMANTIC_E2E") == "1" and (
+            replacement["evidence"].get("semantic_similarity") != 1
+            or replacement["evidence"].get("semantic_model") != "family-fixture-embedding"
+        ):
+            raise RuntimeError("replacement suggestion is missing the separate local vector evidence")
+        if (replacement["document_id"], replacement["target_document_id"]) != tuple(reversed(documents[1:])):
+            raise RuntimeError("automatic replacement suggestion reversed new and old")
+        if len(workbench("members").get("members", [])) != 2 or any(state(doc) != "active" for doc in documents):
+            raise RuntimeError("unconfirmed suggestions changed governance")
+        receipt = http.api("PUT", route + "family_suggestion_ignore", mutation(member["revision"], {}, member["id"]))["data"]
+        if receipt["status"] != "ignored" or any(row["id"] == member["id"] for row in scan()["items"]):
+            raise RuntimeError("rescan reopened a previously ignored suggestion")
+        for doc in {member["document_id"], member["target_document_id"]}:
+            path = route + "related?state=workbench-activity&document_id=" + doc
+            audits = [row for row in http.api("GET", path)["data"] if row["aggregate_id"] == receipt["id"]]
+            if len(audits) != 1 or audits[0]["action"] != "family_suggestion_ignore":
+                raise RuntimeError("document workbench omitted or duplicated the suggestion review receipt")
+        emit("[FAM-04-SUGGESTIONS] PASS: real worker scan with observed native titles, evidence and direction; ignored candidate suppressed on rescan")
+    if os.environ.get("AGENTRAG_FAMILY_JWT_E2E") == "1":
+        check_family_jwt(http, kb, other_kb, family["id"], emit)
+    if os.environ.get("AGENTRAG_FAMILY_REPLACEMENT_E2E") != "1":
+        return
+
+    old, new = documents[1:]
+    def permits(allowed, excluded):
+        for mode in ("rag", "agent"):
+            payload = {"request_id": uuid.uuid4().hex, "session_id": "family-fixture", "mode": mode,
+                       "tenant_id": kb["tenant_id"], "knowledge_base_ids": [kb["id"]], "knowledge_ids": [old, new]}
+            req = urllib.request.Request("http://127.0.0.1:8090/bridge/before-retrieve",
+                data=json.dumps(payload).encode(), headers={"Content-Type": "application/json", "X-AgentRAG-Bridge-Version": "1"})
+            with http.opener.open(req, timeout=5) as response:
+                permit = json.load(response)
+            if permit["knowledge_ids"] != allowed or permit["excluded_document_ids"] != excluded:
+                raise RuntimeError(f"{mode} family replacement permit does not match the committed state")
+
+    due = datetime.now(timezone.utc) + timedelta(seconds=6)
+    draft = http.api("PUT", route + "family_replace_create", mutation(0, {
+        "business_family_id": family["id"], "family_revision": family["revision"],
+        "document_id": new, "target_document_id": old, "effective_at": due.isoformat(),
+    }))["data"]
+    if draft["status"] != "pending_review":
+        raise RuntimeError("family replacement skipped review")
+    permits([old, new], [])
+    approval = mutation(draft["revision"], {"second_confirmation": True}, draft["id"])
+    scheduled = http.api("PUT", route + "family_replace_approve", approval)["data"]
+    if scheduled["status"] != "scheduled" or http.api("PUT", route + "family_replace_approve", approval)["data"] != scheduled:
+        raise RuntimeError("family replacement was not scheduled idempotently")
+    permits([old], [new])
+    def applied():
+        code, plans = read("family_replacements", family["id"])
+        if code != 200 or len(plans) != 1 or plans[0]["status"] == "needs_review":
+            raise RuntimeError("scheduled replacement could not verify its locked versions")
+        return plans[0] if plans[0]["status"] == "applied" else None
+    wait_until(applied, 25)
+    plan = applied()
+    permits([new], [old])
+    code, families = read("family_list", family["id"])
+    if (code != 200 or families[0]["published_document_id"] != new
+            or families[0]["published_version_node_id"] != plan["new_version_node_id"] or state(old) != "superseded"):
+        raise RuntimeError("business head and lifecycle did not cut over together")
+    graph = http.api("GET", route + "lineage_graph?mode=version-ancestry&id=" + plan["new_version_node_id"])["data"]
+    if not any(edge["from"] == plan["new_version_node_id"] and edge["to"] == plan["old_version_node_id"]
+               and edge["type"] == "supersedes" for edge in graph["edges"]):
+        raise RuntimeError("family cutover did not write the directed critical edge")
+    emit("[FAM-02] PASS: review, scheduled hold, real Host cutover, published version, supersedes direction and replay")
+
+
+def run_family_history(http, kb, emit):
+    base = "/knowledge-bases/" + kb["id"]
+    route = base + "/lifecycle/business/"
+
+    def put(action, revision, payload, item_id=None):
+        body = {"expected_revision": revision, "operation_id": uuid.uuid4().hex, "business": {"payload": payload}}
+        if item_id:
+            body["business"]["id"] = item_id
+        return http.api("PUT", route + action, body)["data"]
+
+    docs = [http.api("POST", base + "/knowledge/manual", {
+        "title": f"Historical chain fixture {i}", "content": f"# Historical chain {i}\n\nSynthetic policy.", "status": "publish",
+    })["data"]["id"] for i in range(3)]
+
+    def state(doc):
+        code, body = http.call("GET", http.base_url + "/api/v1" + base + "/lifecycle/documents/" + doc)
+        return json.loads(body)["data"]["snapshot"]["current"]["state"] if code == 200 else None
+
+    wait_until(lambda: all(state(doc) == "active" for doc in docs), 35)
+    family = put("family_create", 0, {"family_label": "Historical chain fixture"})
+    for doc in docs:
+        family = put("family_member_add", family["revision"], {"document_id": doc}, family["id"])
+    first_due = datetime.now(timezone.utc) - timedelta(days=2)
+    plans = [put("family_replace_create", 0, {
+        "business_family_id": family["id"], "family_revision": family["revision"],
+        "target_document_id": old, "document_id": new, "effective_at": (first_due + timedelta(days=i)).isoformat(),
+    }) for i, (old, new) in enumerate(zip(docs, docs[1:]))]
+    put("family_replace_approve", plans[0]["revision"], {"second_confirmation": True}, plans[0]["id"])
+    wait_until(lambda: state(docs[0]) == "superseded", 25)
+    path = route + "family_replacements?id=" + family["id"] + "&state="
+    preview = http.api("GET", path + "history-preview")["data"]
+    if preview.get("published_document_id") != docs[1] or preview.get("final_document_id") != docs[2] or not preview.get("fingerprint"):
+        raise RuntimeError("JWT history preview omitted the approved starting point or final member")
+    confirm = {"expected_revision": preview["family_revision"], "operation_id": uuid.uuid4().hex, "business": {
+        "id": family["id"], "payload": {"second_confirmation": True, "history_fingerprint": preview["fingerprint"],
+                                        "replacement_ids": [plans[1]["id"]]},
+    }}
+    result = http.api("PUT", route + "family_replace_history", confirm)["data"]
+    if result.get("target_document_id") != docs[2] or http.api("PUT", route + "family_replace_history", confirm)["data"] != result:
+        raise RuntimeError("JWT history confirmation did not retain its committed result")
+    timeline = http.api("GET", path + "timeline")["data"]
+    if [(row["id"], row["status"]) for row in timeline] != [(plan["id"], "applied") for plan in plans]:
+        raise RuntimeError("JWT timeline lost the committed chronology")
+    if [state(doc) for doc in docs] != ["superseded", "superseded", "active"]:
+        raise RuntimeError("historical cutover did not preserve the final active member")
+    emit("[WORKBENCH-HISTORY] PASS: real JWT preview, confirmed suffix, chronological timeline and replay")
 
 
 def run_repeal(http, kb, emit, ask):
@@ -224,6 +576,36 @@ def run(http, kb, source, emit, extension_db):
         raise RuntimeError("business receipt replay changed")
     proposal = put("revision_create", {"document_id": revision_source["id"], "guidance_ids": [feedback["id"]], "text": "# E2E revision\n\nThe controlled validation revision is effective for this fixture."})
     proposal = put("revision_approve", record=proposal)
+    proposal = put("revision_publish", record=proposal)
+    target_id = proposal.get("target_document_id")
+    if proposal["status"] != "publishing" or not target_id or target_id == revision_source["id"]:
+        raise RuntimeError("revision did not bind a distinct draft before indexing")
+    draft = http.api("GET", "/knowledge/" + target_id)["data"]
+    if draft["parse_status"] != "draft" or draft["enable_status"] != "disabled":
+        raise RuntimeError("revision draft is natively searchable before binding")
+    proposal = put("revision_publish", record=proposal)
+    if proposal["status"] != "publishing" or proposal["target_document_id"] != target_id:
+        raise RuntimeError("revision index submission changed its bound target")
+
+    def revision_target_ready(document_id):
+        if http.api("GET", "/knowledge/" + document_id)["data"]["parse_status"] != "completed":
+            return False
+        status, body = http.call("GET", http.base_url + "/api/v1" + base.removesuffix("/business/") + "/documents/" + document_id)
+        return status == 200 and json.loads(body)["data"]["snapshot"]["current"]["state"] == "active"
+
+    def revision_permits(allowed, excluded):
+        for mode in ("rag", "agent"):
+            payload = {"request_id": uuid.uuid4().hex, "session_id": "revision-fixture", "mode": mode,
+                       "tenant_id": kb["tenant_id"], "knowledge_base_ids": [kb["id"]], "knowledge_ids": allowed + excluded}
+            request = urllib.request.Request("http://127.0.0.1:8090/bridge/before-retrieve",
+                data=json.dumps(payload).encode(), headers={"Content-Type": "application/json", "X-AgentRAG-Bridge-Version": "1"})
+            with http.opener.open(request, timeout=5) as response:
+                result = json.load(response)
+            if result["knowledge_ids"] != allowed or result["excluded_document_ids"] != excluded:
+                raise RuntimeError(f"revision {mode} permit does not match the committed publication state")
+
+    wait_until(lambda: revision_target_ready(target_id), 35)
+    revision_permits([revision_source["id"]], [target_id])
     deadline = time.monotonic() + 35
     while True:
         proposal = put("revision_publish", record=proposal)
@@ -241,7 +623,36 @@ def run(http, kb, source, emit, extension_db):
     old_view = http.api("GET", "/knowledge-bases/" + kb["id"] + "/lifecycle/documents/" + revision_source["id"])["data"]
     if old_view["snapshot"]["current"]["state"] != "superseded":
         raise RuntimeError("published original remained active")
+    revision_permits([target_id], [revision_source["id"]])
+    emit("[M5-PUBLISH-GATE] PASS: indexed but unreleased target withheld in RAG and Agent; permit switched only after governance commit")
     emit("[M5-PUBLISH] PASS: activated feedback guidance -> reviewed proposal -> real native Markdown ingest/index -> supersedes; repeated publish retained target")
+
+    # Simulate the old Host's committed native POST with an unreceived ACK.
+    legacy_content = "# Legacy publication fixture\n\nUncommitted old-format sidecar."
+    legacy = put("revision_create", {"document_id": target_id, "guidance_ids": [feedback["id"]], "text": legacy_content})
+    legacy = put("revision_approve", record=legacy)
+    legacy_target = http.api("POST", "/knowledge-bases/" + kb["id"] + "/knowledge/manual", {
+        "title": "AgentRAG revision " + legacy["publication_key"], "content": legacy_content + "\n",
+        "status": "publish", "channel": "api",
+    })["data"]["id"]
+    wait_until(lambda: revision_target_ready(legacy_target), 35)
+    revision_permits([target_id], [legacy_target])
+    bound_legacy = put("revision_publish", record=legacy)
+    if bound_legacy["status"] != "publishing" or bound_legacy["target_document_id"] != legacy_target:
+        raise RuntimeError("legacy receipt was not reconciled to the existing native target")
+    revision_permits([target_id], [legacy_target])
+    emit("[M5-PUBLISH-LEGACY] PASS: indexed old-format sidecar withheld before binding; retry reconciled the same native target")
+    http.api("PUT", base.removesuffix("/business/") + "/documents/" + legacy_target + "/supplements", {
+        "expected_revision": 0, "operation_id": uuid.uuid4().hex, "parents": [target_id],
+    })
+    status, _ = http.call("PUT", http.base_url + "/api/v1" + base + "revision_publish", {
+        "expected_revision": bound_legacy["revision"], "operation_id": uuid.uuid4().hex,
+        "business": {"id": bound_legacy["id"], "payload": {}},
+    })
+    if status != 409:
+        raise RuntimeError(f"publishing a replacement that depends on its retiring source returned HTTP {status}")
+    revision_permits([target_id], [legacy_target])
+    emit("[M5-PUBLISH-DEPENDENCY] PASS: an ineligible replacement rolls back cutover and the old document remains retrievable")
     keep_user_tag(target)
     with sqlite3.connect(extension_db) as db:
         family, = db.execute("SELECT family_id FROM ext_revision_proposals WHERE tenant_id=? AND knowledge_base_id=? AND proposal_id=?", (str(kb["tenant_id"]), kb["id"], proposal["id"])).fetchone()
@@ -297,7 +708,73 @@ def run(http, kb, source, emit, extension_db):
     http.api("PUT", target_route, {
         "expected_revision": current["revision"], "annotations": {"effective_until": "2000-01-01T00:00:00Z"},
     })
-    return guidance["id"]
+    return guidance["id"], (family, revision_source["id"], target["id"], user_tag["id"])
+
+
+def run_family_cutover(http, kb, emit, management_key, history, extension_db):
+    legacy, old, new, user_tag = history
+    base = "/knowledge-bases/" + kb["id"] + "/lifecycle/business/"
+
+    def read(action, item_id=None):
+        status, data = read_family_management(http, kb, management_key, action, item_id)
+        if status != 200:
+            raise RuntimeError(f"{action} failed: HTTP {status}")
+        return data
+
+    def write(action, revision, payload, item_id=None):
+        body = {"expected_revision": revision, "operation_id": uuid.uuid4().hex, "business": {"payload": payload}}
+        if item_id:
+            body["business"]["id"] = item_id
+        response = http.api("PUT", base + action, body)["data"]
+        if http.api("PUT", base + action, body)["data"] != response:
+            raise RuntimeError(f"{action} was not idempotent")
+        return response
+
+    def check_native_tags(expected):
+        for doc in (old, new):
+            tags = http.api("GET", "/knowledge/" + doc)["data"]["tags"]
+            if user_tag not in {tag["id"] for tag in tags} or {tag["name"] for tag in tags if tag["name"].startswith("gov:family:")} != {expected}:
+                raise RuntimeError("cutover changed unrelated labels or left a stale family tag")
+
+    def check_graph(family_id, version):
+        graph = http.api("GET", base + "lineage_graph?mode=version-ancestry&id=" + version)["data"]
+        nodes = {node["document_id"]: node for node in graph["nodes"]}
+        if set(nodes) != {old, new} or any(node.get("business_family_id", "") != family_id
+                or node["observation_chain_id"] != node["family_id"] for node in nodes.values()):
+            raise RuntimeError("scope cutover misrepresented the two family identities")
+
+    def settled():
+        status = read("family_projection")
+        if status["failed"]:
+            raise RuntimeError("a family projection entered terminal failure")
+        return status["pending"] == 0
+
+    plans = read("family_backfill_plans", legacy)
+    if len(plans) != 1 or plans[0]["status"] != "ready" or set(plans[0]["document_ids"]) != {old, new}:
+        raise RuntimeError("published history did not produce a complete backfill preview")
+    plan = plans[0]
+    check_graph("", plan["head_version_node_id"])
+    family = write("family_create", 0, {"family_label": "Reviewed historical family"})
+    applied = write("family_backfill_apply", family["revision"], {
+        "legacy_family_id": legacy, "backfill_fingerprint": plan["fingerprint"], "second_confirmation": True,
+    }, family["id"])
+    if applied["status"] != "applied" or read("family_list", family["id"])[0]["published_version_node_id"] != plan["head_version_node_id"]:
+        raise RuntimeError("historical publish head was not preserved")
+    if read("family_backfill_plans", legacy)[0]["mapped_business_family_id"] != family["id"]:
+        raise RuntimeError("legacy ID mapping was not recorded")
+    check_native_tags("gov:family:" + legacy)
+    enabled = write("family_projection_set", 0, {"projection_enabled": True, "second_confirmation": True})
+    wait_until(settled, 30)
+    check_graph(family["id"], plan["head_version_node_id"])
+    check_native_tags("gov:family:" + family["id"])
+    write("family_projection_set", enabled["revision"], {"projection_enabled": False, "second_confirmation": True})
+    wait_until(settled, 30)
+    check_graph("", plan["head_version_node_id"])
+    check_native_tags("gov:family:" + legacy)
+    with sqlite3.connect(extension_db) as db:
+        if db.execute("PRAGMA foreign_key_check").fetchone():
+            raise RuntimeError("family cutover left invalid foreign keys")
+    emit("[FAM-03] PASS: historical receipt, explicit replay-safe backfill, business head, reversible graph/tag cutover and preserved user labels")
 
 
 def run_split(http, kb, emit, extension_db, guidance_id):
@@ -431,6 +908,9 @@ def run_split(http, kb, emit, extension_db, guidance_id):
     if first["status"] != "publishing" or first.get("target_document_id") != first_id:
         raise RuntimeError("split reconciliation must bind the existing indexed document")
     permits([old], [first_id])
+    revision_path = business + "related?state=workbench-revisions&document_id="
+    if http.api("GET", revision_path + first_id)["data"]:
+        raise RuntimeError("an unpublished split target received the batch history")
     if lifecycle(old) != "active":
         raise RuntimeError("old split source was disabled before a first publication committed")
     emit("[REL-05-PREPARE] PASS: RAG/Agent reject the native-indexed draft before target binding, even after rename; reconcile binds the existing ID")
@@ -457,6 +937,14 @@ def run_split(http, kb, emit, extension_db, guidance_id):
             or {part["target_document_id"] for part in final["split_parts"] if part["status"] == "published"}
             != {first_id, second_id}):
         raise RuntimeError("split batch lost a published member or changed its locked source")
+    for doc in (old, first_id, second_id):
+        path = revision_path + doc
+        rows = http.api("GET", path)["data"]
+        if [row["id"] for row in rows] != [batch["id"]]:
+            raise RuntimeError("document workbench omitted or duplicated the published split batch")
+        if http.api("GET", path + "&id=" + batch["id"])["data"] != [final]:
+            raise RuntimeError("document workbench could not reopen a scoped split batch")
+    emit("[WORKBENCH-SPLIT] PASS: one batch opens from the original and each published child")
 
     graph = http.api("GET", business + "lineage_graph?mode=version-ancestry")["data"]
     nodes = {node["id"]: node for node in graph["nodes"]}

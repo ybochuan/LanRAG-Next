@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { defineComponent } from 'vue'
-import type { RouteLocationNormalized } from 'vue-router'
+import type { RouteLocationNormalized, RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { autoSetup, userInfoFromApi } from '@/api/auth'
@@ -98,11 +98,11 @@ const router = createRouter({
       component: () => import("../views/platform/index.vue"),
       meta: { requiresInit: true, requiresAuth: true },
       children: [
-        { path: "lifecycle", name: "lifecycle", component: () => import("../views/lifecycle/LifecycleView.vue"), meta: { requiresInit: true, requiresAuth: true } },
-        { path: "lineage", name: "lineage", component: () => import("../views/lineage/LineageView.vue"), meta: { requiresInit: true, requiresAuth: true } },
-        { path: "associations", name: "associations", component: () => import("../views/business/BusinessView.vue"), props: { section: 'associations' }, meta: { requiresInit: true, requiresAuth: true } },
-        { path: "feedback-governance", name: "feedback-governance", component: () => import("../views/business/BusinessView.vue"), props: { section: 'feedback-governance' }, meta: { requiresInit: true, requiresAuth: true } },
-        { path: "revisions", name: "revisions", component: () => import("../views/business/BusinessView.vue"), props: { section: 'revisions' }, meta: { requiresInit: true, requiresAuth: true } },
+        { path: "documents", name: "documents", component: () => import("../views/lifecycle/LifecycleView.vue"), meta: { requiresInit: true, requiresAuth: true } },
+        { path: "lifecycle", name: "lifecycle", redirect: to => ({ name: 'documents', query: to.query }) },
+        ...(['families', 'lineage', 'associations', 'feedback-governance', 'revisions'] as const).map<RouteRecordRaw>(view => ({
+          path: view, name: view, redirect: to => ({ name: 'documents', query: { ...to.query, view } }),
+        })),
         { path: "model-supervisor", name: "model-supervisor", component: () => import("../views/model-supervisor/ModelSupervisorView.vue"), meta: { requiresInit: true, requiresAuth: true } },
         {
           path: "tenant",

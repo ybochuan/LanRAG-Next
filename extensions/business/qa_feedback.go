@@ -61,5 +61,63 @@ WHERE i.tenant_id=? AND i.knowledge_base_id=? AND i.run_id=? AND s.kind IN ('mod
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO ext_feedback_qa_bindings(tenant_id,knowledge_base_id,feedback_id,run_id,retrieved_chunk_ids) VALUES(?,?,?,?,?)`, args(c.Scope, feedbackID, runID, string(ids))...)
+	if err != nil || c.Payload.FeedbackContext == nil {
+		return err
+	}
+	details := *c.Payload.FeedbackContext
+	switch details.Rating {
+	case "incorrect", "suggestion", "helpful":
+	default:
+		return ErrInvalid
+	}
+	if len(details.Question) > 2048 || len(details.AnswerExcerpt) > 8192 || len(details.SuggestedRevision) > 4096 {
+		return ErrInvalid
+	}
+	body, err := json.Marshal(details)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO ext_feedback_review_context(tenant_id,knowledge_base_id,feedback_id,submitted_context) VALUES(?,?,?,?)`,
+		args(c.Scope, feedbackID, string(body))...)
 	return err
+}
+
+func feedbackReviewContext(ctx context.Context, tx *sql.Tx, c Command, record map[string]any) error {
+	var submitted string
+	var reviewed string
+	err := tx.QueryRowContext(ctx, `SELECT submitted_context,reviewed_guidance FROM ext_feedback_review_context
+WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, args(c.Scope, c.ID)...).Scan(&submitted, &reviewed)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil {
+		var details FeedbackContext
+		if err := json.Unmarshal([]byte(submitted), &details); err != nil {
+			return err
+		}
+		record["feedback_context"] = details
+		record["reviewed_guidance"] = reviewed
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT json_extract(ref.value,'$.document_id')
+FROM ext_feedback_qa_bindings b
+JOIN ext_provenance_inputs i USING(tenant_id,knowledge_base_id,run_id)
+JOIN ext_provenance_steps s USING(tenant_id,knowledge_base_id,run_id,step_id)
+JOIN json_each(i.refs_json) ref
+WHERE b.tenant_id=? AND b.knowledge_base_id=? AND b.feedback_id=? AND i.retrieved_chunk_id<>''
+AND s.kind IN ('model','tool') AND s.state='success'
+ORDER BY 1 LIMIT 100`, args(c.Scope, c.ID)...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	record["citation_document_ids"] = ids
+	return rows.Err()
 }

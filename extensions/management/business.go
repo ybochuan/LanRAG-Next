@@ -13,7 +13,15 @@ import (
 )
 
 func businessRead(action string) bool {
-	return action == "business_lineage_graph" || action == "business_related" || action == "business_relation_list" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
+	switch action {
+	case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
+		"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
+		"business_family_replacements", "business_family_backfill_plans", "business_family_projection", "business_family_workspace",
+		"business_family_suggestions":
+		return true
+	default:
+		return false
+	}
 }
 func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	b := s.business
@@ -38,11 +46,53 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	c.Page = r.Page
 	c.PageSize = r.PageSize
 	switch c.Action {
+	case "family_list":
+		return b.Families(ctx, c)
+	case "family_members":
+		return b.FamilyMembers(ctx, c)
+	case "family_workspace":
+		workspace, err := b.FamilyWorkspace(ctx, c, r.State)
+		return struct {
+			business.FamilyWorkspace
+			CanWrite bool `json:"can_write"`
+		}{workspace, r.CanWrite}, err
+	case "family_replacements":
+		if r.State == "history-preview" {
+			return b.FamilyReplacementHistory(ctx, c)
+		}
+		c.ListStatus = r.State
+		return b.FamilyReplacements(ctx, c)
+	case "family_suggestions":
+		c.Payload.DocumentID = r.State
+		return b.FamilySuggestions(ctx, c)
+	case "family_backfill_plans":
+		return b.FamilyBackfillPlans(ctx, c)
+	case "family_projection":
+		return b.FamilyProjection(ctx, c.Scope)
 	case "rendition_bind":
 		return s.renditions.Bind(ctx, c.Scope, c.Payload.DocumentID, c.ID)
 	case "related":
+		switch r.State {
+		case "workbench-activity":
+			c.Payload.DocumentID = r.DocumentID
+			return b.DocumentActivity(ctx, c)
+		case "workbench-relations", "workbench-revisions":
+			if r.DocumentID == "" {
+				return nil, business.ErrInvalid
+			}
+			c.Payload.DocumentID = r.DocumentID
+			c.Action = "relation_list"
+			if r.State == "workbench-revisions" {
+				c.Action = "revision_list"
+			}
+			return b.List(ctx, c)
+		}
 		return b.QueryRelated(ctx, c.Scope, r.DocumentID)
 	case "relation_list", "feedback_list", "guidance_list", "revision_list":
+		if c.Action == "feedback_list" {
+			c.ListStatus = r.State
+			c.IncludeFeedbackContext = r.CanWrite
+		}
 		return b.List(ctx, c)
 	case "revision_publish":
 		return b.Publish(ctx, c.Scope, c.ID)

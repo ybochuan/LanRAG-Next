@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"time"
 )
 
 // ErrLifecycleInconsistent refuses to treat a corrupted projection as a new fact.
@@ -12,6 +13,27 @@ var ErrLifecycleInconsistent = errors.New("lifecycle current does not match late
 
 // LifecycleEventJoinSQL binds the aliases c (current) and e (event) in scoped queries.
 const LifecycleEventJoinSQL = ` LEFT JOIN ext_lifecycle_events e ON e.tenant_id=c.tenant_id AND e.knowledge_base_id=c.knowledge_base_id AND e.document_id=c.document_id AND e.event_id=c.last_event_id `
+
+// LifecycleAnnotationJoinSQL binds the optional dates for the same current row.
+const LifecycleAnnotationJoinSQL = ` LEFT JOIN ext_document_annotations a ON a.tenant_id=c.tenant_id AND a.knowledge_base_id=c.knowledge_base_id AND a.document_id=c.document_id `
+
+// EffectiveAt checks persisted RFC3339 bounds, preserving the state machine's
+// inclusive deadline. Missing bounds are open and malformed bounds never allow.
+func EffectiveAt(now time.Time, from, until sql.NullString) (bool, error) {
+	if from.Valid {
+		start, err := time.Parse(time.RFC3339Nano, from.String)
+		if err != nil || now.Before(start) {
+			return false, err
+		}
+	}
+	if until.Valid {
+		end, err := time.Parse(time.RFC3339Nano, until.String)
+		if err != nil || now.After(end) {
+			return false, err
+		}
+	}
+	return true, nil
+}
 
 // LifecycleCurrentVerifiedSQL checks existing rows as well as new writes guarded
 // by schema7. It must be evaluated in the same snapshot as the permission decision.

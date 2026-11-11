@@ -44,6 +44,8 @@ type getRouteRegistrar interface {
 	GET(string, ...gin.HandlerFunc) gin.IRoutes
 }
 
+type storedAttachmentGuard func(*gin.Context, uint64, string) (bool, error)
+
 type (
 	messageFileLookup        = access.MessageFileLookup
 	sharedAgentFileLookup    = access.SharedAgentFileLookup
@@ -163,7 +165,15 @@ func newFileServeHandler(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalogs ...interfaces.ResourceCatalog,
 ) gin.HandlerFunc {
-	resourceCatalog := firstResourceCatalog(resourceCatalogs)
+	return newRawFileServeHandler(globalFileService, storageResolver, firstResourceCatalog(resourceCatalogs), nil)
+}
+
+func newRawFileServeHandler(
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+	guard storedAttachmentGuard,
+) gin.HandlerFunc {
 	absDir := localStorageAbsDir()
 	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
 		if err := os.MkdirAll(absDir, 0o755); err != nil {
@@ -200,6 +210,19 @@ func newFileServeHandler(
 			}
 		}
 
+		cacheControl := "public, max-age=86400"
+		if guard != nil {
+			managed, err := guard(c, tenant.ID, filePath)
+			if err != nil {
+				c.Header("Cache-Control", "private, no-store")
+				c.JSON(http.StatusForbidden, gin.H{"error": "attachment unavailable under current lifecycle policy"})
+				return
+			}
+			if managed {
+				cacheControl = "private, no-store"
+			}
+		}
+
 		backendID, provider := parseStorageTarget(filePath)
 		fileSvc, resolvedProvider, ok := filesvc.ResolveTenantFileServiceWithFallback(
 			c.Request.Context(), "/files", tenant, backendID, provider, absDir, storageResolver, globalFileService)
@@ -217,7 +240,7 @@ func newFileServeHandler(
 		}
 
 		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
-		streamStoredFile(c, reader, contentType, inline, "public, max-age=86400", "/files", filePath)
+		streamStoredFile(c, reader, contentType, inline, cacheControl, "/files", filePath)
 	}
 }
 
@@ -240,7 +263,12 @@ func serveFilesWithResources(
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
+	guards ...storedAttachmentGuard,
 ) {
+	var guard storedAttachmentGuard
+	if len(guards) > 0 {
+		guard = guards[0]
+	}
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
 	// /files sits outside the /api/v1 APIKeyGate, so it carries its own
 	// API-key guard. A KB-restricted key is denied (a raw storage path cannot
@@ -251,7 +279,7 @@ func serveFilesWithResources(
 	r.GET(
 		"/files",
 		middleware.AllowFileServeAPIKey(),
-		newFileServeHandler(globalFileService, storageResolver, resourceCatalog),
+		newRawFileServeHandler(globalFileService, storageResolver, resourceCatalog, guard),
 	)
 }
 

@@ -11,7 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -137,18 +140,59 @@ func EnrichAttachmentResults(ctx context.Context, tenant uint64, kbs []string, r
 	}
 }
 
-// GuardAttachmentDownload keeps the original native download authorization and
-// reuses the Host permit at click time for attachment documents only.
+// StoredDocumentID recognizes the tenant/document/file layout used by native
+// uploads. Derived exports have a separate namespace. Clean local path aliases
+// before matching so they cannot evade the document lookup.
+func StoredDocumentID(tenantID uint64, storagePath string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(storagePath)), "/")
+	n := len(parts)
+	if n < 3 || parts[n-3] != strconv.FormatUint(tenantID, 10) {
+		return ""
+	}
+	id, err := uuid.Parse(parts[n-2])
+	if err != nil {
+		return ""
+	}
+	return id.String()
+}
+
+// IsAttachmentDocument identifies native documents subject to the attachment permit.
+func IsAttachmentDocument(k *types.Knowledge) bool {
+	return k != nil && k.GetMetadata()["is_attachment"] == "true"
+}
+
+// GuardAttachmentDownload keeps the original native authorization and checks
+// the Host permit for an attachment before opening its file.
 func GuardAttachmentDownload(ctx context.Context, k *types.Knowledge) error {
 	if k == nil {
 		return ErrDocumentUnavailable
 	}
-	if k.GetMetadata()["is_attachment"] != "true" {
+	return GuardAttachmentDownloads(ctx, k.TenantID, k.KnowledgeBaseID, []*types.Knowledge{k})
+}
+
+// GuardAttachmentDownloads checks the attachments in an authorized single-KB
+// selection in one request, before any caller begins streaming bytes.
+func GuardAttachmentDownloads(ctx context.Context, tenantID uint64, kbID string, documents []*types.Knowledge) error {
+	var ids []string
+	for _, k := range documents {
+		if k == nil || k.TenantID != tenantID || k.KnowledgeBaseID != kbID {
+			return ErrDocumentUnavailable
+		}
+		if IsAttachmentDocument(k) {
+			ids = append(ids, k.ID)
+		}
+	}
+	if len(ids) == 0 {
 		return nil
 	}
-	allowed, e := AllowedDocuments(ctx, k.TenantID, k.KnowledgeBaseID, []string{k.ID})
-	if e != nil || !allowed[k.ID] {
+	allowed, err := AllowedDocuments(ctx, tenantID, kbID, ids)
+	if err != nil {
 		return ErrDocumentUnavailable
+	}
+	for _, id := range ids {
+		if !allowed[id] {
+			return ErrDocumentUnavailable
+		}
 	}
 	return nil
 }

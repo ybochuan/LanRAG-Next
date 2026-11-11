@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/contract"
@@ -35,6 +36,10 @@ type nativeScope struct {
 	WholeKBs []string `json:"whole_kb_ids"`
 }
 
+func (scope nativeScope) allows(kb, id string) bool {
+	return slices.Contains(scope.KBs, kb) && (slices.Contains(scope.IDs, id) || slices.Contains(scope.WholeKBs, kb))
+}
+
 func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[string]any, error) {
 	if !weknora.ValidID(id) || scope.Tenant != s.Tenant || len(scope.KBs) == 0 {
 		return nil, errors.New("invalid scope")
@@ -53,14 +58,7 @@ func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[s
 		return nil, errors.New("document unavailable")
 	}
 	kb := docs[0].KnowledgeBaseID
-	authorized := false
-	for _, doc := range scope.IDs {
-		authorized = authorized || doc == id
-	}
-	for _, whole := range scope.WholeKBs {
-		authorized = authorized || whole == kb
-	}
-	if !authorized {
+	if !scope.allows(kb, id) {
 		return nil, errors.New("document outside native scope")
 	}
 	req := contract.BeforeRetrieveRequest{Context: contract.Context{RequestID: "query-related", SessionID: "mcp", Mode: "agent", TenantID: s.Tenant, KnowledgeBaseIDs: []string{kb}, KnowledgeIDs: []string{id}}}
@@ -86,7 +84,9 @@ func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[s
 			if e = rows.Scan(&doc); e != nil {
 				return e
 			}
-			ids = append(ids, doc)
+			if scope.allows(kb, doc) {
+				ids = append(ids, doc)
+			}
 		}
 		return rows.Err()
 	})
@@ -119,9 +119,33 @@ func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[s
 	if e != nil {
 		return nil, e
 	}
-	attachments := links[id]
-	if attachments == nil {
-		attachments = []contract.RelatedAttachment{}
+	attachments := []contract.RelatedAttachment{}
+	var inherited []string
+	for _, item := range links[id] {
+		if !scope.allows(item.KnowledgeBaseID, item.KnowledgeID) && item.KnowledgeBaseID == kb && item.ParentDocumentID == id {
+			inherited = append(inherited, item.KnowledgeID)
+		}
+	}
+	var owners map[string]store.AttachmentOwnership
+	if len(inherited) > 0 {
+		if e = s.DB.View(ctx, func(tx *sql.Tx) error {
+			owners, e = store.AttachmentOwnershipsTx(ctx, tx, s.Tenant, inherited)
+			return e
+		}); e != nil {
+			return nil, e
+		}
+	}
+	for _, item := range links[id] {
+		owner, owned := owners[item.KnowledgeID]
+		if scope.allows(item.KnowledgeBaseID, item.KnowledgeID) ||
+			(owned && !owner.Historical && item.KnowledgeBaseID == kb && owner.KnowledgeBaseID == kb && item.ParentDocumentID == id && owner.ParentDocumentID == id) {
+			if !scope.allows(item.KnowledgeBaseID, item.ParentDocumentID) {
+				// Selecting a child authorizes its link, but not parent-derived text.
+				item = contract.RelatedAttachment{KnowledgeID: item.KnowledgeID, KnowledgeBaseID: item.KnowledgeBaseID,
+					FileName: item.FileName, DownloadURL: item.DownloadURL}
+			}
+			attachments = append(attachments, item)
+		}
 	}
 	all := append(append([]contract.RelatedAttachment{}, notices...), attachments...)
 	return map[string]any{"document_id": id, "supplements": notices, "attachments": attachments, "related_attachments": all}, nil

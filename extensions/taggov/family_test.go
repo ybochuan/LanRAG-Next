@@ -116,3 +116,79 @@ INSERT INTO ext_revision_split_parts VALUES('7','kb-a','batch','split-part',1,'P
 		t.Fatalf("non-idempotent reconciliation: creates=%d replacements=%d", creates, replaces)
 	}
 }
+
+func TestBusinessFamilyProjectionReconcilesOnlyFamilyNamespace(t *testing.T) {
+	ctx := t.Context()
+	db := tagDatabase(t)
+	tags := fixtureStore()
+	tags.tags["legacy"] = Tag{ID: "legacy", Name: "gov:family:legacy"}
+	tags.tags["new"] = Tag{ID: "new", Name: "gov:family:business"}
+	tags.ids = append(tags.ids, "legacy")
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO ext_lineage_node VALUES('observed','7','kb-a','document_version','doc-a','now');
+			INSERT INTO ext_document_version_family VALUES('chain','7','kb-a','doc-a','','observed','observed',1,'now','now');
+			INSERT INTO ext_business_document_families VALUES('7','kb-a','business','Business',1,'now','now');
+			INSERT INTO ext_business_document_family_members VALUES('7','kb-a','doc-a','business');
+			INSERT INTO ext_business_family_projection_scopes VALUES('7','kb-a',1,1)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewWriter(tags, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	p := NewProjector(db, lifecycle.NewStore(db), NewMapping(db, staticCatalog{[]Tag{tags.tags["new"]}}), writer)
+	intent := outbox.Item{ID: "cutover", TenantID: 7, KnowledgeBaseID: "kb-a", ProjectionType: "family_tag",
+		AggregateType: "document", AggregateID: "doc-a", CausationType: "business_operation", CausationID: "scope-switch",
+		Payload: json.RawMessage(`{"family_id":"ignored"}`), CreatedAt: time.Now()}
+	unknown := intent
+	unknown.ID, unknown.AggregateID, unknown.CausationType = "unmapped-old-intent", "doc-b", "document_version"
+	if err := db.Write(ctx, func(tx *sql.Tx) error { return outbox.EnqueueTx(ctx, tx, unknown) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Handle(ctx, unknown); err != nil || tags.writes != 0 {
+		t.Fatal("unmapped document must preserve its existing labels", err, tags.ids)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error { return outbox.EnqueueTx(ctx, tx, intent) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Handle(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	if !equalIDs(tags.ids, []string{"business-a", "business-b", "old-state", "finance", "new"}) {
+		t.Fatal("cutover changed unrelated labels", tags.ids)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE ext_business_family_projection_scopes SET enabled=0,revision=2`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Handle(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	if !equalIDs(tags.ids, []string{"business-a", "business-b", "old-state", "finance"}) {
+		t.Fatal("rollback changed unrelated labels or left a new family label", tags.ids)
+	}
+	// An explicit removal while projection is disabled remains actionable
+	// even though there is no dedicated projection intent for that removal.
+	tags.ids = append(tags.ids, "legacy")
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`DELETE FROM ext_business_document_family_members WHERE document_id='doc-a';
+			INSERT INTO ext_business_family_member_history
+			(tenant_id,knowledge_base_id,business_family_id,document_id,status,removed_at,reason)
+			VALUES('7','kb-a','business','doc-a','removed','now','explicit removal');
+			UPDATE ext_business_family_projection_scopes SET enabled=1,revision=3`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Handle(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	if !equalIDs(tags.ids, []string{"business-a", "business-b", "old-state", "finance"}) {
+		t.Fatal("re-enabled projection did not reconcile the explicit removal", tags.ids)
+	}
+}

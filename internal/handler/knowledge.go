@@ -2114,12 +2114,16 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 		return
 	}
 
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
+	if err := extensionbridge.GuardAttachmentDownload(effCtx, knowledge); err != nil {
+		c.Error(errors.NewForbiddenError("Attachment unavailable under current lifecycle policy"))
+		return
+	}
 	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -2131,6 +2135,30 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to stream preview: %v", err)
 	}
+}
+
+// GuardStoredAttachment checks a resolved upload path under the raw file proxy's
+// authenticated tenant. Attachment reads also require native KB access.
+func (h *KnowledgeHandler) GuardStoredAttachment(c *gin.Context, tenantID uint64, storagePath string) (bool, error) {
+	id := extensionbridge.StoredDocumentID(tenantID, storagePath)
+	if id == "" {
+		return false, nil
+	}
+	if h == nil || h.kgService == nil {
+		return true, extensionbridge.ErrDocumentUnavailable
+	}
+	k, err := h.kgService.GetRepository().GetKnowledgeByID(c.Request.Context(), tenantID, id)
+	if err != nil || k == nil {
+		return true, extensionbridge.ErrDocumentUnavailable
+	}
+	if !extensionbridge.IsAttachmentDocument(k) {
+		return false, nil
+	}
+	grant, err := resolveHandlerKBAccessFor(c, k.KnowledgeBaseID, h.kbService, h.kbShareService, h.agentShareService, types.OrgRoleViewer)
+	if err != nil || grant.EffectiveTenantID != tenantID {
+		return true, extensionbridge.ErrDocumentUnavailable
+	}
+	return true, extensionbridge.GuardAttachmentDownload(grant.Context(c.Request.Context()), k)
 }
 
 // GetKnowledgeBatchRequest defines parameters for batch knowledge retrieval

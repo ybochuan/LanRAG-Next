@@ -5,10 +5,11 @@ export type LifecycleState = 'pending'|'scheduled'|'active'|'stale'|'archived'|'
 export interface Annotations { revision:number; effective_from?:string|null; effective_until?:string|null; review_due?:string|null; labels:Record<string,string> }
 export interface Rules {effective_delay_days:number;valid_days:number;review_days:number}
 export interface ResolvedRules {rules:Rules;source:{tenant_id:number;knowledge_base_id:string};revision:number;token:string}
-export interface DocumentRow {document_id:string;title?:string;state:LifecycleState;last_event_id:string;annotations:Annotations}
+export interface DocumentFamily {id:string;label:string}
+export interface DocumentRow {document_id:string;title?:string;state:LifecycleState;last_event_id:string;annotations:Annotations;business_family?:DocumentFamily}
 export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean}
 export interface LifecycleEvent {event_id:string;from_state:string;to_state:string;reason:string;occurred_at:string;source_event_id?:string}
-export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string}
+export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null}
 export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string}
 export interface DependencyParent {document_id:string;version_id:string;state:LifecycleState;effective_until?:string;review_due?:string}
 export interface SupplementView {revision:number;declaration_id:string;status:string;parents:string[];assessment:{configured:boolean;reason?:string;parents:DependencyParent[];review_due?:string}}

@@ -11,6 +11,25 @@ import (
 
 const prefix = "【回答指导】\n"
 
+// qaSourceMatch leaves legacy manual/seed guidance alone. Answer-derived
+// guidance requires a verified citation to the same chunk and source version.
+const qaSourceMatch = ` AND (NOT EXISTS (
+ SELECT 1 FROM ext_feedback_qa_bindings b
+ WHERE b.tenant_id=g.tenant_id AND b.knowledge_base_id=g.knowledge_base_id AND b.feedback_id=g.feedback_id
+) OR EXISTS (
+ SELECT 1 FROM ext_feedback_qa_bindings b
+ JOIN ext_provenance_inputs previous USING(tenant_id,knowledge_base_id,run_id)
+ JOIN ext_provenance_steps done ON done.tenant_id=previous.tenant_id AND done.knowledge_base_id=previous.knowledge_base_id
+  AND done.run_id=previous.run_id AND done.step_id=previous.step_id AND done.state='success'
+ JOIN ext_provenance_inputs current ON current.tenant_id=b.tenant_id AND current.knowledge_base_id=b.knowledge_base_id
+  AND current.run_id=? AND current.step_id=? AND current.retrieved_chunk_id=previous.retrieved_chunk_id
+ JOIN json_each(previous.refs_json) oldref
+ JOIN json_each(current.refs_json) ref ON json_extract(ref.value,'$.document_id')=json_extract(oldref.value,'$.document_id')
+  AND json_extract(ref.value,'$.version_id')=json_extract(oldref.value,'$.version_id')
+ WHERE b.tenant_id=g.tenant_id AND b.knowledge_base_id=g.knowledge_base_id AND b.feedback_id=g.feedback_id
+ AND previous.retrieved_chunk_id<>''
+))`
+
 // Scope is supplied only from an authenticated native run.
 type Scope struct {
 	TenantID        uint64
@@ -18,6 +37,7 @@ type Scope struct {
 	UserID          string
 	SessionID       string
 	RunID           string
+	StepID          string
 }
 
 // Item pins an issued instruction to its governance revision.
@@ -67,10 +87,10 @@ func SelectTx(ctx context.Context, tx *sql.Tx, s Scope, callID string) (Selectio
 		return out, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT g.guidance_id,g.revision,g.text FROM ext_feedback_guidances g
-WHERE g.tenant_id=? AND g.knowledge_base_id=? AND g.status='active'
+WHERE g.tenant_id=? AND g.knowledge_base_id=? AND g.status='active'`+qaSourceMatch+`
 AND (SELECT count(*) FROM ext_guidance_call_items i JOIN ext_guidance_calls c USING(tenant_id,knowledge_base_id,run_id,call_id)
  WHERE i.tenant_id=g.tenant_id AND i.knowledge_base_id=g.knowledge_base_id AND i.guidance_id=g.guidance_id AND c.user_id=? AND c.session_id=?)<2
-ORDER BY g.confidence DESC,g.created_at,g.guidance_id`, tenant, s.KnowledgeBaseID, s.UserID, s.SessionID)
+ORDER BY g.confidence DESC,g.created_at,g.guidance_id`, tenant, s.KnowledgeBaseID, s.RunID, s.StepID, s.UserID, s.SessionID)
 	if err != nil {
 		return out, err
 	}
@@ -121,7 +141,8 @@ func currentTx(ctx context.Context, tx *sql.Tx, s Scope, selection Selection) (b
 	content := ""
 	for _, item := range selection.Items {
 		var text string
-		err := tx.QueryRowContext(ctx, "SELECT text FROM ext_feedback_guidances WHERE tenant_id=? AND knowledge_base_id=? AND guidance_id=? AND revision=? AND status='active'", strconv.FormatUint(s.TenantID, 10), s.KnowledgeBaseID, item.ID, item.Revision).Scan(&text)
+		err := tx.QueryRowContext(ctx, "SELECT g.text FROM ext_feedback_guidances g WHERE g.tenant_id=? AND g.knowledge_base_id=? AND g.guidance_id=? AND g.revision=? AND g.status='active'"+qaSourceMatch,
+			strconv.FormatUint(s.TenantID, 10), s.KnowledgeBaseID, item.ID, item.Revision, s.RunID, s.StepID).Scan(&text)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}

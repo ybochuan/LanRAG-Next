@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/business"
 	"github.com/ybochuan/LanRAG-Next/extensions/parser"
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
@@ -19,8 +20,9 @@ import (
 // Config enables background side effects only in explicit worker mode. APIKey
 // must never be logged; formatting and JSON serialization redact the credential.
 type Config struct {
-	ManagementKey     string               `json:"-"`
-	Parser            *parser.NativeConfig `json:"-"` // Optional authenticated native PDF route.
+	ManagementKey     string                        `json:"-"`
+	Parser            *parser.NativeConfig          `json:"-"` // Optional authenticated native PDF route.
+	FamilyEmbedder    *business.LocalFamilyEmbedder `json:"-"`
 	Mode              string
 	DBPath            string
 	NativeDBPath      string
@@ -50,6 +52,11 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return c, errors.New("environment reader required")
 	}
 	c.ManagementKey = getenv("AGENTRAG_MANAGEMENT_KEY")
+	embedder, err := business.LoadFamilyEmbedder(getenv)
+	if err != nil {
+		return c, err
+	}
+	c.FamilyEmbedder = embedder
 	if c.ManagementKey != "" && len(c.ManagementKey) < 32 {
 		return c, errors.New("management credential must contain at least 32 bytes")
 	}
@@ -179,7 +186,7 @@ func (c Config) Validate() error {
 		return errors.New("outbox attempts must be 1..100")
 	}
 	if c.Mode == "probe" {
-		if c.DBPath != "" || c.UpstreamURL != "" || c.APIKey != "" || c.TenantID != 0 || len(c.KnowledgeBaseIDs) != 0 {
+		if c.DBPath != "" || c.UpstreamURL != "" || c.APIKey != "" || c.TenantID != 0 || len(c.KnowledgeBaseIDs) != 0 || c.FamilyEmbedder != nil {
 			return errors.New("probe configuration contains worker options")
 		}
 		return nil

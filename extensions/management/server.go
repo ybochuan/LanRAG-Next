@@ -136,6 +136,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errNotFound) {
 			status, code = 404, "document_not_found"
 		}
+		if errors.Is(err, business.ErrNotFound) {
+			status, code = 404, "not_found"
+		}
 		if errors.Is(err, errDatabase) || errors.Is(err, lineage.ErrUnavailable) || errors.Is(err, business.ErrUnavailable) {
 			status, code = 503, "management_unavailable"
 		}
@@ -215,7 +218,11 @@ func (s *Server) execute(ctx context.Context, r Request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"snapshot": snap, "events": events, "events_truncated": truncated, "evaluation_status": evaluation}, nil
+		docs := []document{{DocumentID: scope.DocumentID}}
+		if err := s.enrichDocumentFamilies(ctx, r, docs); err != nil {
+			return nil, errDatabase
+		}
+		return map[string]any{"snapshot": snap, "events": events, "events_truncated": truncated, "evaluation_status": evaluation, "business_family": docs[0].BusinessFamily}, nil
 	case "rules", "put_rules":
 		if r.Action == "put_rules" {
 			if err := c.PutRules(ctx, lifecycle.PolicyScope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, r.Rules, r.ExpectedRevision); err != nil {

@@ -12,15 +12,18 @@ import (
 
 // GraphNode describes registered metadata. State is the document's current lifecycle.
 type GraphNode struct {
-	ID         string    `json:"id"`
-	Type       string    `json:"type"`
-	DocumentID string    `json:"document_id"`
-	FamilyID   string    `json:"family_id"`
-	Sequence   int64     `json:"sequence"`
-	Current    bool      `json:"current"`
-	State      string    `json:"state"`
-	CreatedAt  time.Time `json:"created_at"`
-	Title      string    `json:"title,omitempty"`
+	ID                 string    `json:"id"`
+	Type               string    `json:"type"`
+	DocumentID         string    `json:"document_id"`
+	FamilyID           string    `json:"family_id,omitempty"`
+	ObservationChainID string    `json:"observation_chain_id,omitempty"`
+	BusinessFamilyID   string    `json:"business_family_id,omitempty"`
+	Sequence           int64     `json:"sequence"`
+	Current            bool      `json:"current"`
+	State              string    `json:"state"`
+	Availability       string    `json:"availability,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	Title              string    `json:"title,omitempty"`
 }
 
 // GraphEdge preserves the stored direction, including derived node to source.
@@ -46,7 +49,7 @@ type GraphSnapshot struct {
 // provenance or version ancestry using the existing cycle-guarded traversal.
 func (r *Registry) Graph(ctx context.Context, s provenance.Scope, mode, root string) (GraphSnapshot, error) {
 	out := GraphSnapshot{Mode: mode, RootID: root, Nodes: []GraphNode{}, Edges: []GraphEdge{}}
-	if r == nil || r.db == nil || s.TenantID == 0 || !validID(s.KnowledgeBaseID) || root != "" && (!validID(root) || mode == "relations") {
+	if r == nil || r.db == nil || s.TenantID == 0 || !validID(s.KnowledgeBaseID) || root != "" && !validID(root) {
 		return out, ErrEvidence
 	}
 	edges, condition, edgeStatus := "ext_lineage_edge", "", "''"
@@ -60,20 +63,39 @@ func (r *Registry) Graph(ctx context.Context, s provenance.Scope, mode, root str
 	case "relations":
 		edgeStatus = "e.status"
 		edges = `(
-			SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at,'' AS status
-			FROM ext_lineage_edge WHERE edge_type IN ('supplements','amends','interprets','related_to')
+			SELECT e.edge_id,e.tenant_id,e.knowledge_base_id,e.from_node_id,e.to_node_id,e.edge_type,e.created_at,'' AS status
+			FROM ext_lineage_edge e WHERE e.edge_type IN ('amends','interprets','related_to')
+			UNION ALL
+			SELECT e.edge_id,e.tenant_id,e.knowledge_base_id,e.from_node_id,e.to_node_id,e.edge_type,e.created_at,'' AS status
+			FROM ext_lineage_edge e WHERE e.edge_type='supplements' AND EXISTS(
+				SELECT 1 FROM ext_supplement_edge_facts f
+				JOIN ext_supplement_current c USING(tenant_id,knowledge_base_id,document_id,declaration_id)
+				JOIN ext_supplement_declarations d USING(tenant_id,knowledge_base_id,document_id,declaration_id,revision)
+				WHERE f.tenant_id=e.tenant_id AND f.knowledge_base_id=e.knowledge_base_id AND f.edge_id=e.edge_id
+				AND d.status='active')
 			UNION ALL
 			SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at,'' FROM ext_repeal_edges
 			UNION ALL
 			SELECT edge_id,tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type,created_at,status FROM ext_clause_edges
 		)`
+		if root != "" {
+			edges = "(SELECT * FROM " + edges + " UNION ALL SELECT v.*,'' AS status FROM " + versionAncestryEdges + " v)"
+		}
 	default:
 		return out, ErrEvidence
 	}
 	err := r.db.View(ctx, func(tx *sql.Tx) error {
 		where := ""
 		params := scopeArgs(s)
-		if root != "" {
+		if root != "" && mode == "relations" {
+			nodes, err := documentGraphNodes(ctx, tx, s, root, edges)
+			if err != nil {
+				return err
+			}
+			body, _ := json.Marshal(nodes)
+			where = " AND n.node_id IN (SELECT value FROM json_each(?))"
+			params = append(params, string(body))
+		} else if root != "" {
 			ancestors, err := traverse(ctx, tx, s, root, mode)
 			if err != nil {
 				return err
@@ -90,12 +112,15 @@ func (r *Registry) Graph(ctx context.Context, s provenance.Scope, mode, root str
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT n.node_id,n.node_type,
 CASE WHEN n.node_type='document_version' THEN coalesce(v.document_id,n.native_id) ELSE '' END,
-coalesce(v.family_id,''),coalesce(v.observation_sequence,0),
-coalesce(f.current_version_node_id=n.node_id,0),coalesce(c.state,''),n.created_at
+coalesce(v.family_id,''),coalesce(m.business_family_id,''),coalesce(v.observation_sequence,0),
+coalesce(f.current_version_node_id=n.node_id,0),coalesce(c.state,''),coalesce(av.status,''),n.created_at
 FROM ext_lineage_node n
 LEFT JOIN ext_document_version v ON v.tenant_id=n.tenant_id AND v.knowledge_base_id=n.knowledge_base_id AND v.version_node_id=n.node_id
 LEFT JOIN ext_document_version_family f ON f.tenant_id=v.tenant_id AND f.knowledge_base_id=v.knowledge_base_id AND f.family_id=v.family_id
 LEFT JOIN ext_lifecycle_current c ON c.tenant_id=v.tenant_id AND c.knowledge_base_id=v.knowledge_base_id AND c.document_id=v.document_id
+LEFT JOIN ext_document_availability av ON av.tenant_id=v.tenant_id AND av.knowledge_base_id=v.knowledge_base_id AND av.document_id=v.document_id
+LEFT JOIN ext_business_family_projection_scopes p ON p.tenant_id=v.tenant_id AND p.knowledge_base_id=v.knowledge_base_id AND p.enabled=1
+LEFT JOIN ext_business_document_family_members m ON m.tenant_id=p.tenant_id AND m.knowledge_base_id=p.knowledge_base_id AND m.document_id=v.document_id
 WHERE n.tenant_id=? AND n.knowledge_base_id=?`+where+" ORDER BY n.created_at DESC,n.node_id LIMIT 257", params...)
 		if err != nil {
 			return err
@@ -103,7 +128,7 @@ WHERE n.tenant_id=? AND n.knowledge_base_id=?`+where+" ORDER BY n.created_at DES
 		for rows.Next() {
 			var node GraphNode
 			var created string
-			if err := rows.Scan(&node.ID, &node.Type, &node.DocumentID, &node.FamilyID, &node.Sequence, &node.Current, &node.State, &created); err != nil {
+			if err := rows.Scan(&node.ID, &node.Type, &node.DocumentID, &node.FamilyID, &node.BusinessFamilyID, &node.Sequence, &node.Current, &node.State, &node.Availability, &created); err != nil {
 				rows.Close()
 				return err
 			}
@@ -113,6 +138,10 @@ WHERE n.tenant_id=? AND n.knowledge_base_id=?`+where+" ORDER BY n.created_at DES
 				return ErrUnavailable
 			}
 			node.CreatedAt = createdAt.UTC()
+			node.ObservationChainID = node.FamilyID
+			if mode == "relations" && root != "" {
+				node.FamilyID, node.ObservationChainID = "", ""
+			}
 			if len(out.Nodes) == 256 {
 				out.Truncated = true
 				break
@@ -163,6 +192,47 @@ ORDER BY e.created_at,e.edge_id LIMIT 513`, params...)
 		return nil
 	})
 	return out, err
+}
+
+// documentGraphNodes seeds a document's neighbourhood before the graph limit
+// is applied, including both ends of its publication and current attachment links.
+func documentGraphNodes(ctx context.Context, tx *sql.Tx, s provenance.Scope, doc, edges string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `WITH
+scope(tenant_id,knowledge_base_id,document_id) AS (VALUES(?,?,?)),
+versions AS (SELECT v.version_node_id FROM ext_document_version v JOIN scope USING(tenant_id,knowledge_base_id,document_id)),
+neighbours AS (
+ SELECT from_node_id AS id FROM `+edges+` e JOIN scope USING(tenant_id,knowledge_base_id)
+ WHERE to_node_id IN (SELECT version_node_id FROM versions)
+ UNION
+ SELECT to_node_id FROM `+edges+` e JOIN scope USING(tenant_id,knowledge_base_id)
+ WHERE from_node_id IN (SELECT version_node_id FROM versions)
+ UNION
+ SELECT r.source_version_id FROM ext_document_relations r JOIN scope s USING(tenant_id,knowledge_base_id)
+ WHERE r.target_document_id=s.document_id AND r.status='active'
+ UNION
+ SELECT r.target_version_id FROM ext_document_relations r JOIN scope s USING(tenant_id,knowledge_base_id)
+ WHERE r.document_id=s.document_id AND r.status='active'
+ UNION
+ SELECT f.current_version_node_id FROM ext_attachment_links a JOIN scope s USING(tenant_id,knowledge_base_id)
+ JOIN ext_document_version_family f ON f.tenant_id=s.tenant_id AND f.knowledge_base_id=s.knowledge_base_id
+ AND f.document_id=CASE WHEN a.attachment_id=s.document_id THEN a.parent_document_id ELSE a.attachment_id END
+ WHERE (a.attachment_id=s.document_id OR a.parent_document_id=s.document_id)
+ AND a.removed_at IS NULL AND a.retired_at IS NULL
+)
+SELECT version_node_id FROM versions UNION SELECT id FROM neighbours`, scopeArgs(s, doc)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func appendNavigationEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, ids string, out *GraphSnapshot) error {

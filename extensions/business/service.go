@@ -30,39 +30,61 @@ var (
 
 // Payload contains business data only; native authorization supplies Command scope/actor.
 type Payload struct {
-	DocumentID         string           `json:"document_id,omitempty"`
-	TargetDocumentID   string           `json:"target_document_id,omitempty"`
-	SessionID          string           `json:"session_id,omitempty"`
-	MessageID          string           `json:"message_id,omitempty"`
-	EdgeType           string           `json:"edge_type,omitempty"`
-	Text               string           `json:"text,omitempty"`
-	Topic              string           `json:"topic,omitempty"`
-	Risk               string           `json:"risk,omitempty"`
-	Negative           bool             `json:"negative,omitempty"`
-	SecondConfirmation bool             `json:"second_confirmation,omitempty"`
-	GuidanceIDs        []string         `json:"guidance_ids,omitempty"`
-	SplitParts         []SplitPartInput `json:"split_parts,omitempty"`
-	EffectiveAt        *time.Time       `json:"effective_at,omitempty"`
-	SourceClause       *ClauseAnchor    `json:"source_clause,omitempty"`
-	TargetClause       *ClauseAnchor    `json:"target_clause,omitempty"`
-	AppliesWhen        string           `json:"applies_when,omitempty"`
-	Resolution         string           `json:"resolution,omitempty"`
-	Similarity         float64          `json:"similarity,omitempty"`
-	Declaration        float64          `json:"declaration,omitempty"`
-	Structure          float64          `json:"structure,omitempty"`
+	DocumentID          string            `json:"document_id,omitempty"`
+	FamilyLabel         string            `json:"family_label,omitempty"`
+	BusinessFamilyID    string            `json:"business_family_id,omitempty"`
+	FamilyRevision      int64             `json:"family_revision,omitempty"`
+	LegacyFamilyID      string            `json:"legacy_family_id,omitempty"`
+	BackfillFingerprint string            `json:"backfill_fingerprint,omitempty"`
+	ReplacementIDs      []string          `json:"replacement_ids,omitempty"`
+	HistoryFingerprint  string            `json:"history_fingerprint,omitempty"`
+	ProjectionEnabled   *bool             `json:"projection_enabled,omitempty"`
+	TargetDocumentID    string            `json:"target_document_id,omitempty"`
+	SessionID           string            `json:"session_id,omitempty"`
+	MessageID           string            `json:"message_id,omitempty"`
+	FeedbackContext     *FeedbackContext  `json:"feedback_context,omitempty"`
+	EdgeType            string            `json:"edge_type,omitempty"`
+	Text                string            `json:"text,omitempty"`
+	Reason              string            `json:"reason,omitempty"`
+	SuggestionPolicy    *SuggestionPolicy `json:"suggestion_policy,omitempty"`
+	Topic               string            `json:"topic,omitempty"`
+	Risk                string            `json:"risk,omitempty"`
+	Negative            bool              `json:"negative,omitempty"`
+	SecondConfirmation  bool              `json:"second_confirmation,omitempty"`
+	GuidanceIDs         []string          `json:"guidance_ids,omitempty"`
+	SplitParts          []SplitPartInput  `json:"split_parts,omitempty"`
+	EffectiveAt         *time.Time        `json:"effective_at,omitempty"`
+	SourceClause        *ClauseAnchor     `json:"source_clause,omitempty"`
+	TargetClause        *ClauseAnchor     `json:"target_clause,omitempty"`
+	AppliesWhen         string            `json:"applies_when,omitempty"`
+	Resolution          string            `json:"resolution,omitempty"`
+	Similarity          float64           `json:"similarity,omitempty"`
+	Declaration         float64           `json:"declaration,omitempty"`
+	Structure           float64           `json:"structure,omitempty"`
+}
+
+// FeedbackContext contains the excerpts a submitter explicitly shares with reviewers.
+// Only the sealed run supplies authoritative citation identity.
+type FeedbackContext struct {
+	Rating            string `json:"rating"`
+	Question          string `json:"question,omitempty"`
+	AnswerExcerpt     string `json:"answer_excerpt,omitempty"`
+	SuggestedRevision string `json:"suggested_revision,omitempty"`
 }
 
 // Command is a native-authorized, idempotent business operation.
 type Command struct {
-	Scope            provenance.Scope `json:"scope"`
-	ActorID          string           `json:"actor_id"`
-	Action           string           `json:"action"`
-	OperationID      string           `json:"operation_id"`
-	ID               string           `json:"id,omitempty"`
-	ExpectedRevision int64            `json:"expected_revision"`
-	Payload          Payload          `json:"payload"`
-	Page             int              `json:"page,omitempty"`
-	PageSize         int              `json:"page_size,omitempty"`
+	Scope                  provenance.Scope `json:"scope"`
+	ActorID                string           `json:"actor_id"`
+	Action                 string           `json:"action"`
+	OperationID            string           `json:"operation_id"`
+	ID                     string           `json:"id,omitempty"`
+	ExpectedRevision       int64            `json:"expected_revision"`
+	Payload                Payload          `json:"payload"`
+	Page                   int              `json:"page,omitempty"`
+	PageSize               int              `json:"page_size,omitempty"`
+	ListStatus             string           `json:"-"`
+	IncludeFeedbackContext bool             `json:"-"`
 }
 
 // Result describes a committed governance state, not a current retrieval permit.
@@ -76,11 +98,12 @@ type Result struct {
 
 // Service shares the existing extension writer; it owns no goroutines or DB lifetime.
 type Service struct {
-	db       *store.DB
-	registry *lineage.Registry
-	now      func() time.Time
-	remote   Remote
-	verify   func(context.Context, provenance.Scope, string) (string, error)
+	db             *store.DB
+	registry       *lineage.Registry
+	now            func() time.Time
+	remote         Remote
+	familyEmbedder *LocalFamilyEmbedder
+	verify         func(context.Context, provenance.Scope, string) (string, error)
 }
 
 // New uses real source snapshots when a Registry is configured.
@@ -101,7 +124,7 @@ func New(db *store.DB, registry *lineage.Registry, now func() time.Time) *Servic
 		if e != nil {
 			return "", e
 		}
-		excluded, e := policy.WithSources(registry).ExcludedDocumentIDs(ctx, contract.BeforeRetrieveRequest{Context: contract.Context{RequestID: newID(), SessionID: "business", Mode: "rag", TenantID: scope.TenantID, KnowledgeBaseIDs: []string{scope.KnowledgeBaseID}, KnowledgeIDs: []string{doc}}})
+		excluded, e := policy.WithSources(registry).WithNow(s.now).ExcludedDocumentIDs(ctx, contract.BeforeRetrieveRequest{Context: contract.Context{RequestID: newID(), SessionID: "business", Mode: "rag", TenantID: scope.TenantID, KnowledgeBaseIDs: []string{scope.KnowledgeBaseID}, KnowledgeIDs: []string{doc}}})
 		if e != nil || len(excluded) != 0 {
 			return "", ErrConflict
 		}
@@ -194,7 +217,9 @@ func (s *Service) transact(ctx context.Context, c Command, f func(*sql.Tx) (Resu
 		if _, e = tx.ExecContext(ctx, `INSERT INTO ext_business_receipts VALUES(?,?,?,?,?)`, args(c.Scope, c.OperationID, hash, string(body))...); e != nil {
 			return e
 		}
-		payload, _ := json.Marshal(c)
+		audit := c
+		audit.Payload.FeedbackContext = nil
+		payload, _ := json.Marshal(audit)
 		_, e = tx.ExecContext(ctx, `INSERT INTO ext_business_audit(tenant_id,knowledge_base_id,operation_id,actor_id,action,aggregate_id,revision,status,occurred_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, args(c.Scope, c.OperationID, c.ActorID, c.Action, out.ID, out.Revision, out.Status, s.now().UTC().Format(time.RFC3339Nano), string(payload))...)
 		return e
 	})
@@ -204,6 +229,31 @@ func (s *Service) transact(ctx context.Context, c Command, f func(*sql.Tx) (Resu
 	return
 }
 func (s *Service) current(ctx context.Context, tx *sql.Tx, scope provenance.Scope, doc, version string) error {
+	return s.currentWithPublicationGate(ctx, tx, scope, doc, version, store.PublicationTargetPendingSQL)
+}
+
+func (s *Service) currentWithPublicationGate(ctx context.Context, tx *sql.Tx, scope provenance.Scope, doc, version, gateSQL string) error {
+	verify := s.currentVersionEvidence
+	if s.registry != nil {
+		verify = s.currentEnabled
+	}
+	if err := verify(ctx, tx, scope, doc, version); err != nil {
+		return err
+	}
+	var held bool
+	err := tx.QueryRowContext(ctx, `SELECT (`+store.RepealDueSQL+` OR `+gateSQL+`)
+		FROM ext_lifecycle_current c WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`,
+		args(scope, doc)...).Scan(&held)
+	if err != nil {
+		return err
+	}
+	if held {
+		return ErrConflict
+	}
+	return nil
+}
+
+func (s *Service) currentVersionEvidence(ctx context.Context, tx *sql.Tx, scope provenance.Scope, doc, version string) error {
 	state, _, e := store.ReadLifecycleCurrentTx(ctx, tx, scope.TenantID, scope.KnowledgeBaseID, doc)
 	if e != nil || state != "active" {
 		return ErrConflict
@@ -213,7 +263,7 @@ func (s *Service) current(ctx context.Context, tx *sql.Tx, scope provenance.Scop
 		return ErrConflict
 	}
 	a, e := dependencies.LoadTx(ctx, tx, dependencies.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, DocumentID: doc})
-	if e != nil || a.Invalid(s.now()) {
+	if e != nil || a.ReadBlocked(s.now()) {
 		return ErrConflict
 	}
 	var from, until sql.NullString
@@ -221,22 +271,14 @@ func (s *Service) current(ctx context.Context, tx *sql.Tx, scope provenance.Scop
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
 		return e
 	}
-	for _, date := range []struct {
-		v     sql.NullString
-		start bool
-	}{{from, true}, {until, false}} {
-		if date.v.Valid {
-			t, e := time.Parse(time.RFC3339Nano, date.v.String)
-			if e != nil || date.start && s.now().Before(t) || !date.start && s.now().After(t) {
-				return ErrConflict
-			}
-		}
+	if effective, _ := store.EffectiveAt(s.now(), from, until); !effective {
+		return ErrConflict
 	}
 	return nil
 }
 
 func (s *Service) currentEnabled(ctx context.Context, tx *sql.Tx, scope provenance.Scope, doc, version string) error {
-	if err := s.current(ctx, tx, scope, doc, version); err != nil {
+	if err := s.currentVersionEvidence(ctx, tx, scope, doc, version); err != nil {
 		return err
 	}
 	var enabled sql.NullString
@@ -259,6 +301,24 @@ func (s *Service) currentEnabled(ctx context.Context, tx *sql.Tx, scope provenan
 // Execute dispatches writes without touching native documents or search indexes.
 func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 	switch c.Action {
+	case "family_create", "family_member_add", "family_member_remove":
+		return s.family(ctx, c)
+	case "family_head_recover":
+		return s.recoverFamilyHead(ctx, c)
+	case "family_replace_create", "family_replace_approve", "family_replace_cancel":
+		return s.replaceFamilyMember(ctx, c)
+	case "family_replace_history":
+		return s.applyFamilyReplacementHistory(ctx, c)
+	case "family_backfill_apply":
+		return s.applyLegacyFamily(ctx, c)
+	case "family_projection_set":
+		return s.setFamilyProjection(ctx, c)
+	case "family_suggestion_policy_set":
+		return s.setFamilySuggestionPolicy(ctx, c)
+	case "family_suggestion_scan":
+		return s.queueFamilySuggestionScan(ctx, c)
+	case "family_suggestion_ignore", "family_suggestion_confirm":
+		return s.reviewFamilySuggestion(ctx, c)
 	case "relation_declare", "relation_confirm", "relation_revoke":
 		return s.relation(ctx, c)
 	case "feedback_create", "feedback_capture", "feedback_approve", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "guidance_seed", "guidance_quarantine_topic":

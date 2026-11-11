@@ -77,6 +77,11 @@ func TestSupplementDeclarationReplayCASAndRetainedRevocation(t *testing.T) {
 	if e != nil || len(view.Parents) != 1 || view.Assessment.Invalid(time.Now()) {
 		t.Fatal(view, e)
 	}
+	scope := provenance.Scope{TenantID: cmd.Scope.TenantID, KnowledgeBaseID: cmd.Scope.KnowledgeBaseID}
+	registry := NewRegistry(db, nil)
+	if graph, err := registry.Graph(ctx, scope, "relations", ""); err != nil || len(graph.Edges) != 1 || graph.Edges[0].Type != "supplements" {
+		t.Fatal("active supplement did not appear in the relation graph", graph.Edges, err)
+	}
 	revoke := cmd
 	revoke.Parents = []string{}
 	revoke.OperationID = "revoke"
@@ -87,6 +92,9 @@ func TestSupplementDeclarationReplayCASAndRetainedRevocation(t *testing.T) {
 	view, e = s.Get(ctx, cmd.Scope)
 	if e != nil || view.Revision != 2 || view.Assessment.Configured {
 		t.Fatal(view, e)
+	}
+	if graph, err := registry.Graph(ctx, scope, "relations", ""); err != nil || len(graph.Edges) != 0 {
+		t.Fatal("revoked supplement leaked into the current relation graph", graph.Edges, err)
 	}
 	e = db.View(ctx, func(tx *sql.Tx) error {
 		for _, entry := range []struct {

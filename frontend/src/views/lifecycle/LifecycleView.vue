@@ -1,13 +1,25 @@
 <template>
  <main class="lifecycle-page" aria-labelledby="lifecycle-title">
-  <header class="page-heading"><div><span class="eyebrow">知识治理 · M2</span><h1 id="lifecycle-title">生命周期</h1><p>查看文档状态、管理有效期，让问答只使用当前有效的知识。</p></div><button class="secondary" :disabled="busy || !kb" @click="loadAll">刷新</button></header>
-  <section class="scope-bar"><label for="lifecycle-kb">知识库</label><select id="lifecycle-kb" v-model="kb" :disabled="loadingKB"><option value="">选择知识库</option><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option></select><span v-if="data" class="access-badge">{{ data.can_write?'可管理':'只读' }}</span></section>
+  <header class="page-heading">
+   <div><span class="eyebrow">知识治理 / 文档</span><h1 id="lifecycle-title">文档工作台</h1><p>集中管理生命周期、版本和文档关系。</p></div>
+   <button v-if="!workspaceView" class="secondary" :disabled="busy || !kb" @click="loadAll">刷新</button>
+  </header>
+  <section class="scope-bar"><label for="lifecycle-kb">知识库</label><select id="lifecycle-kb" v-model="kb" :disabled="loadingKB || detailLocked || viewLocked"><option value="">选择知识库</option><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option></select><span v-if="data" class="access-badge">{{ data.can_write?'可管理':'只读' }}</span></section>
   <div v-if="error" class="notice error" role="alert">{{ error }} <button class="text-button" @click="loadAll">重新载入</button></div>
   <div v-if="loadingKB" class="empty" role="status">正在加载知识库…</div>
-  <div v-else-if="!knowledgeBases.length && !error" class="empty">还没有可访问的知识库。创建或加入知识库后即可查看生命周期。</div>
+  <div v-else-if="!knowledgeBases.length && !error" class="empty">还没有可访问的知识库。创建或加入知识库后即可管理文档。</div>
   <div v-else-if="!kb" class="empty">请选择一个知识库。</div>
   <template v-if="kb">
-   <div class="tabs" role="tablist" aria-label="生命周期视图"><button v-for="item in tabs" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="tab===item.key" :class="{selected:tab===item.key}" @click="tab=item.key">{{ item.label }}</button></div>
+   <div class="tabs" role="tablist" aria-label="工作台视图">
+    <button v-for="item in tabs" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">{{ item.label }}</button>
+    <button role="tab" :aria-selected="workspaceView==='feedback-governance'" :class="{selected:workspaceView==='feedback-governance'}" :disabled="viewLocked" @click="showFeedback">反馈审核</button>
+   </div>
+   <template v-if="workspaceView">
+    <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" @changed="loadAll" @locked="viewLocked=$event" />
+    <LineageView v-else-if="workspaceView==='lineage'" :key="kb+String(route.query.mode)+String(route.query.node||route.query.id)" :scope="kb" @open="openDocument" />
+    <BusinessView v-else :key="kb+workspaceView" :section="workspaceView" :scope="kb" @locked="viewLocked=$event" @open="openDocument" />
+   </template>
+   <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
     <label for="lifecycle-title-search">文档标题</label>
     <input id="lifecycle-title-search" v-model="titleQuery" type="search" maxlength="160" placeholder="搜索标题" />
@@ -18,9 +30,19 @@
    <template v-else-if="data || tab==='reviews'">
     <template v-if="data">
     <section v-if="tab==='documents'" class="document-panel" role="tabpanel" aria-labelledby="tab-documents">
-     <div class="state-grid"><button class="state-card" :class="{chosen:!filter}" @click="setFilter('')"><span>全部文档</span><strong>{{ totalCount }}</strong><small>已建立生命周期记录</small></button><button v-for="state in states" :key="state" class="state-card" :class="[{chosen:filter===state},state]" @click="setFilter(state)"><span><i :class="state"/>{{ stateLabels[state] }}</span><strong>{{ data.counts[state] || 0 }}</strong><small>{{ state==='active'?'可参与检索':'不参与检索' }}</small></button></div>
-     <div class="section-heading"><h2>{{ filter?stateLabels[filter]:'全部文档' }} <span>{{ data.total }}</span></h2><p>尚无生命周期记录的文档默认不参与检索。</p></div>
-     <div class="table-wrap"><table><thead><tr><th>文档</th><th>状态</th><th>生效时间</th><th>失效时间</th><th>复核时间</th><th><span class="sr-only">操作</span></th></tr></thead><tbody><tr v-for="doc in data.documents" :key="doc.document_id"><td><button class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</button><small class="doc-id">{{ doc.document_id }}</small></td><td><span class="state-badge" :class="doc.state">{{ stateLabels[doc.state] || doc.state }}</span></td><td>{{ date(doc.annotations.effective_from) }}</td><td>{{ date(doc.annotations.effective_until) }}</td><td>{{ date(doc.annotations.review_due) }}</td><td><button class="text-button" @click="openDocument(doc.document_id,doc.title)">查看</button></td></tr><tr v-if="!data.documents.length"><td colspan="6" class="empty">当前状态下没有文档。</td></tr></tbody></table></div>
+     <div class="table-wrap">
+      <table>
+       <thead><tr><th>文档</th><th>生命周期</th><th>版本族</th><th>有效至</th></tr></thead>
+       <tbody>
+        <tr v-for="doc in data.documents" :key="doc.document_id">
+         <td><button class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</button></td>
+         <td><span class="state-badge" :class="doc.state">{{ stateLabels[doc.state] || doc.state }}</span></td>
+         <td>{{ doc.business_family?.label || '未归族' }}</td><td>{{ date(doc.annotations.effective_until) }}</td>
+        </tr>
+        <tr v-if="!data.documents.length"><td colspan="4" class="empty">当前没有匹配的文档。</td></tr>
+       </tbody>
+      </table>
+     </div>
      <footer class="pagination"><span>第 {{ page }} 页 · 共 {{ data.total }} 项</span><button class="secondary" :disabled="page<=1" @click="changePage(-1)">上一页</button><button class="secondary" :disabled="page*20>=data.total" @click="changePage(1)">下一页</button></footer>
     </section>
     </template>
@@ -28,36 +50,134 @@
     <template v-if="data"><section v-if="tab==='rules'" class="panel rules-panel" role="tabpanel" aria-labelledby="tab-rules"><span class="eyebrow">仅应用于后续初始化的文档</span><h2>知识库默认规则</h2><p>已存在文档的日期保持原值。0 表示不设置该项默认日期；未设置失效日期即永久有效。</p><p class="source-note">当前来源：{{ ruleSourceLabel(data.rules) }} · 本库版本 {{ data.rule_revision }}</p><form @submit.prevent="submitRules"><label>延迟生效天数<input v-model.number="ruleForm.effective_delay_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><label>有效天数<input v-model.number="ruleForm.valid_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><label>复核间隔天数<input v-model.number="ruleForm.review_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><p v-if="ruleError" class="notice error" role="alert">{{ ruleError }}</p><p v-if="ruleSuccess" class="notice success" role="status">规则已保存，将用于后续初始化的文档。</p><button v-if="data.can_write" class="primary" :disabled="savingRules || !validRules(ruleForm)">{{ savingRules?'正在保存…':'保存规则' }}</button><p v-else class="source-note">当前账号仅有查看权限。</p></form></section></template>
    </template>
   </template>
-  <div v-if="selectedID" class="drawer-backdrop" @click.self="closeDocument" @keydown.esc="closeDocument" @keydown.tab="trapFocus"><aside class="document-drawer" role="dialog" aria-modal="true" aria-labelledby="document-title" tabindex="-1" ref="drawer"><header><div><span class="eyebrow">文档生命周期</span><h2 id="document-title">{{ selectedTitle || selectedID }}</h2><p class="doc-id">{{ selectedID }}</p></div><button class="close" aria-label="关闭文档详情" @click="closeDocument">×</button></header><p v-if="detailBusy" role="status">正在加载文档…</p><p v-if="detailError" class="notice error" role="alert">{{ detailError }} <button class="text-button" :disabled="savingDocument" @click="reloadDocument">重新载入</button></p><template v-if="detail"><span class="state-badge" :class="detail.snapshot.current.state">{{ stateLabels[detail.snapshot.current.state] }}</span><h3>有效期与复核</h3><p class="source-note">时间按本机时区显示（{{ timezone }}），保存为 UTC。过期立即失效；清空日期不会复活已失效文档。生效中文档不能改为未来生效，待生效文档须保留生效时间。</p><form @submit.prevent="submitDocument"><label>生效时间<input v-model="dateForm.effective_from" type="datetime-local" :disabled="!data?.can_write || savingDocument || supplementBusy" /></label><label>失效时间<input v-model="dateForm.effective_until" type="datetime-local" :disabled="!data?.can_write || savingDocument || supplementBusy" /></label><label>复核时间<input v-model="dateForm.review_due" type="datetime-local" :disabled="!data?.can_write || savingDocument || supplementBusy" /></label><p v-if="documentSuccess" class="notice success" role="status">{{ documentSuccess }}</p><button v-if="data?.can_write" class="primary" :disabled="savingDocument || supplementBusy || documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</button><p v-else class="source-note">当前账号仅有查看权限。</p></form><SupplementEditor :kb="kb" :document-id="selectedID" :can-write="!!data?.can_write" :parent-busy="savingDocument" @busy="supplementBusy=$event" @saved="supplementSaved" /><h3>事件时间线</h3><ol v-if="detail.events.length" class="timeline"><li v-for="event in detail.events" :key="event.event_id"><strong>{{ label(event.from_state) }} → {{ label(event.to_state) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ event.reason }}</p><small>{{ event.event_id }}</small></li></ol><p v-else class="source-note">暂无事件。</p><p v-if="detail.events_truncated" class="source-note">仅展示最近 100 条事件。</p></template></aside></div>
+  </template>
+  <div v-if="selectedID" class="drawer-backdrop" @click.self="closeDocument" @keydown.esc="escapeDrawer" @keydown.tab="trapFocus">
+   <aside class="document-drawer" role="dialog" aria-modal="true" aria-labelledby="document-title" tabindex="-1" ref="drawer">
+    <header>
+     <div><span class="eyebrow">文档详情</span><h2 id="document-title">{{ selectedTitle || selectedID }}</h2>
+      <div v-if="detail" class="drawer-meta"><span class="state-badge" :class="detail.snapshot.current.state">{{ label(detail.snapshot.current.state) }}</span>
+       <span>{{ detail.business_family?.label || '未归族' }}</span></div>
+     </div>
+     <button class="close" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument">×</button>
+    </header>
+    <nav class="tabs detail-tabs" aria-label="文档详情标签">
+     <button v-for="item in detailTabs" :key="item.key" type="button" :disabled="detailLocked" :aria-pressed="detailTab===item.key" :class="{selected:detailTab===item.key}" @click="detailTab=item.key">{{ item.label }}</button>
+    </nav>
+    <p v-if="detailBusy && !detail" role="status">正在加载文档…</p>
+    <p v-if="detailError" class="notice error" role="alert">{{ detailError }} <button class="text-button" :disabled="detailLocked" @click="reloadDocument">重新载入</button></p>
+    <template v-if="detail">
+     <template v-if="detailTab==='life'">
+      <h3>有效期与复核</h3>
+      <p class="source-note">时间按本机时区显示（{{ timezone }}），保存为 UTC。清空日期不会恢复已失效文档。</p>
+      <form @submit.prevent="submitDocument">
+       <label>生效时间<input v-model="dateForm.effective_from" type="datetime-local" :disabled="!data?.can_write || detailLocked" /></label>
+       <label>失效时间<input v-model="dateForm.effective_until" type="datetime-local" :disabled="!data?.can_write || detailLocked" /></label>
+       <label>复核时间<input v-model="dateForm.review_due" type="datetime-local" :disabled="!data?.can_write || detailLocked" /></label>
+       <p v-if="documentSuccess" class="notice success" role="status">{{ documentSuccess }}</p>
+       <button v-if="data?.can_write" class="primary" :disabled="detailLocked || documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</button>
+      </form>
+     </template>
+     <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedID+detailTab" :scope="kb" :document-id="selectedID"
+      :current-family="detail.business_family?.id" :initial-view="detailTab==='suggestions'?'suggestions':'members'"
+      @open="openDocument" @changed="refreshDocumentMembership" @locked="childLocked=$event" />
+     <template v-else-if="detailTab==='relations'">
+      <SupplementEditor :kb="kb" :document-id="selectedID" :can-write="!!data?.can_write" :parent-busy="childLocked" @busy="supplementBusy=$event" @saved="supplementSaved" />
+      <BusinessView :key="selectedID+':'+supplementRevision" :scope="kb" :document="{id:selectedID,title:selectedTitle||selectedID}" section="associations" @open="openRelatedDocument" @locked="childLocked=$event" />
+     </template>
+     <LineageView v-else-if="detailTab==='graph'" :key="selectedID" :scope="kb" :document-id="selectedID" @open="openGraphDocument" />
+     <template v-else-if="detailTab==='audit'">
+      <h3>生命周期事件</h3>
+      <ol v-if="detail.events.length" class="timeline"><li v-for="event in detail.events" :key="event.event_id">
+       <strong>{{ label(event.from_state) }} → {{ label(event.to_state) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ event.reason }}</p>
+      </li></ol><p v-else class="source-note">暂无事件。</p>
+      <p v-if="detail.events_truncated" class="source-note">仅展示最近 100 条事件。</p>
+     <h3>关联与版本操作</h3>
+     <p v-if="activityError" role="alert">{{ activityError }} <button class="text-button" @click="loadActivity">重试</button></p>
+     <p v-else-if="activityBusy" role="status">正在读取治理记录…</p>
+     <ol v-else-if="activity.length" class="timeline"><li v-for="event in activity" :key="event.operation_id">
+      <strong>{{ governanceAction(event.action) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ statusLabels[event.status] || event.status }}</p>
+     </li></ol>
+     <p v-else class="source-note">暂无关联与版本操作。</p>
+     <div v-if="activityPage>1 || activity.length===20" class="pagination">
+      <button class="secondary" :disabled="activityBusy || activityPage<=1" @click="activityPage--">上一页</button>
+      <button class="secondary" :disabled="activityBusy || activity.length<20" @click="activityPage++">下一页</button>
+     </div>
+      <button type="button" class="secondary" @click="closeDocument(); showFeedback()">查看反馈审核</button>
+     </template>
+     <BusinessView v-else-if="detailTab==='revisions'" :key="selectedID" :scope="kb" :document="{id:selectedID,title:selectedTitle||selectedID}" section="revisions" @locked="childLocked=$event" />
+    </template>
+   </aside>
+  </div>
  </main>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { documentActivity, documentTitle, type BusinessAction } from '@/api/business'
+import type { FamilyActivity } from '@/api/families'
+import { actionLabels, statusLabels } from '../business/model'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import * as api from '@/api/lifecycle'
 import SupplementEditor from './SupplementEditor.vue'
 import { useAuthStore } from '@/stores/auth'
 import { annotationsForSave, errorMessage, requestFence, ruleSourceLabel, stateLabels, states, toLocalInput, validRules } from './model'
-const tabs=[{key:'documents',label:'文档状态'},{key:'reviews',label:'待复核'},{key:'rules',label:'库级规则'}]
+const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
+const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
+const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
+const tabs=[{key:'documents',label:'全部文档'},{key:'reviews',label:'待复核'},{key:'rules',label:'库级规则'}] as const
+const detailTabs=[
+ {key:'life',label:'生命周期'},{key:'family',label:'版本族'},{key:'relations',label:'关联关系'},
+ {key:'graph',label:'关系图'},{key:'audit',label:'治理记录'},{key:'suggestions',label:'关联建议'},{key:'revisions',label:'修订发布'},
+] as const
+const route=useRoute(), router=useRouter()
+const workspaceView=computed(()=>{
+ const view=route.query.view
+ return view==='families'||view==='lineage'||view==='associations'||view==='feedback-governance'||view==='revisions' ? view : ''
+})
 const auth=useAuthStore()
 const kbFence=requestFence()
-const tab=ref('documents'),kb=ref(''),knowledgeBases=ref<{id:string;name:string}[]>([]),loadingKB=ref(true)
+const tab=ref<(typeof tabs)[number]['key']>('documents'),kb=ref(''),knowledgeBases=ref<{id:string;name:string}[]>([]),loadingKB=ref(true)
 const data=ref<api.Overview>(),busy=ref(false),error=ref(''),filter=ref<api.LifecycleState|''>(''),titleQuery=ref(''),page=ref(1)
 const reviewItems=ref<api.ReviewAlert[]>([]),reviewError=ref(''),reviewBusy=ref(false),reviewsTruncated=ref(false),reviewsLoaded=ref(false)
 const ruleForm=reactive<api.Rules>({effective_delay_days:0,valid_days:0,review_days:0}),ruleError=ref(''),ruleSuccess=ref(false),savingRules=ref(false)
 const selectedID=ref(''),selectedTitle=ref(''),detail=ref<api.Detail>(),detailBusy=ref(false),detailError=ref(''),documentSuccess=ref(''),savingDocument=ref(false),documentConflict=ref(false),drawer=ref<HTMLElement>()
-const supplementBusy=ref(false)
+const supplementBusy=ref(false), childLocked=ref(false), viewLocked=ref(false)
+const supplementRevision=ref(0)
+const detailLocked=computed(()=>savingDocument.value||supplementBusy.value||childLocked.value)
+const detailTab=ref<(typeof detailTabs)[number]['key']>('life')
+const activity=ref<FamilyActivity[]>([]), activityBusy=ref(false), activityError=ref(''), activityPage=ref(1)
+const activityFence=requestFence()
+const governanceActions:Record<string,string>={family_member_add:'加入版本族',family_member_remove:'移出版本族',
+ family_replace_create:'登记替代计划',family_replace_approve:'批准替代',family_replace_apply:'替代生效',family_replace_cancel:'撤回替代',
+ supplements_active:'登记补充关系',supplements_revoked:'撤销补充关系',
+ family_suggestion_confirm:'确认关联建议',family_suggestion_ignore:'忽略关联建议',family_replace_history:'补录历史版本链'}
+const governanceAction=(action:string)=>governanceActions[action]||actionLabels[action as BusinessAction]||action
 const dateForm=reactive({effective_from:'',effective_until:'',review_due:''})
 const listFence=requestFence(),detailFence=requestFence(),reviewFence=requestFence(),ruleFence=requestFence()
 const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone
-const totalCount=computed(()=>Object.values(data.value?.counts||{}).reduce((sum,n)=>sum+n,0))
+
 const date=(value?:string|null)=>value?new Date(value).toLocaleString():'未设置'
 const label=(state:string)=>stateLabels[state as api.LifecycleState]||state||'初始'
 let previousFocus:HTMLElement|null=null
 let searchTimer:ReturnType<typeof setTimeout>|undefined
-function trapFocus(event:KeyboardEvent){const items=drawer.value?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),[tabindex="0"]');if(!items?.length)return;const first=items[0]!,last=items[items.length-1]!;if(event.shiftKey&&(document.activeElement===first||document.activeElement===drawer.value)){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
-function closeDocument(){if(savingDocument.value||supplementBusy.value)return;detailFence.invalidate();selectedID.value='';detail.value=undefined;detailError.value='';documentSuccess.value='';previousFocus?.focus()}
+function escapeDrawer(event:KeyboardEvent){
+ if(!(event.target instanceof Element) || !event.target.closest('dialog[open]'))closeDocument()
+}
+async function loadActivity(){
+ const token=activityFence.begin(),scope=kb.value,id=selectedID.value
+ activity.value=[];activityError.value='';activityBusy.value=!!scope&&!!id&&detailTab.value==='audit'
+ if(!activityBusy.value)return
+ try{
+  const rows=await documentActivity(scope,id,activityPage.value)
+  if(activityFence.current(token))activity.value=rows
+ }catch{if(activityFence.current(token))activityError.value='无法读取治理记录。'}
+ finally{if(activityFence.current(token))activityBusy.value=false}
+}
+watch(selectedID,()=>{activityPage.value=1})
+watch([selectedID,detailTab,activityPage],loadActivity)
+function trapFocus(event:KeyboardEvent){const items=drawer.value?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]');if(!items?.length)return;const first=items[0]!,last=items[items.length-1]!;if(event.shiftKey&&(document.activeElement===first||document.activeElement===drawer.value)){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
+function closeDocument(){if(detailLocked.value)return;detailFence.invalidate();selectedID.value='';detail.value=undefined;detailError.value='';documentSuccess.value='';previousFocus?.focus()}
 async function loadOverview(){
  clearTimeout(searchTimer)
  const token=listFence.begin(),scope=kb.value;if(!scope)return
@@ -66,24 +186,53 @@ async function loadOverview(){
 }
 async function loadReviews(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;reviewBusy.value=true;reviewError.value='';reviewItems.value=[];try{const result=await api.reviews(scope);if(reviewFence.current(token)){reviewItems.value=result.alerts||[];reviewsTruncated.value=result.truncated;reviewsLoaded.value=true}}catch(e){if(reviewFence.current(token))reviewError.value=errorMessage(e)}finally{if(reviewFence.current(token))reviewBusy.value=false}}
 function loadAll(){if(!kb.value){void loadKnowledgeBases();return}ruleError.value='';ruleSuccess.value=false;void loadOverview();if(tab.value==='reviews')void loadReviews()}
-function setFilter(state:api.LifecycleState|''){filter.value=state}
+function showList(value:(typeof tabs)[number]['key']){
+ tab.value=value
+ if(workspaceView.value)void router.replace({name:'documents',query:kb.value?{kb:kb.value}:{}})
+}
+function showFeedback(){void router.push({name:'documents',query:{kb:kb.value,view:'feedback-governance'}})}
+function openGraphDocument(id:string,title:string){void openDocument(id,title,'graph')}
+function openRelatedDocument(id:string,title:string){void openDocument(id,title,'relations')}
 function changePage(delta:number){page.value+=delta;void loadOverview()}
 function applyDetail(value:api.Detail){detail.value=value;dateForm.effective_from=toLocalInput(value.snapshot.annotations.effective_from);dateForm.effective_until=toLocalInput(value.snapshot.annotations.effective_until);dateForm.review_due=toLocalInput(value.snapshot.annotations.review_due)}
-async function openDocument(id:string,title?:string){previousFocus=document.activeElement as HTMLElement;selectedID.value=id;selectedTitle.value=title||'';await nextTick();drawer.value?.focus();await reloadDocument()}
-async function reloadDocument(){const token=detailFence.begin(),scope=kb.value,id=selectedID.value;detail.value=undefined;detailError.value='';documentSuccess.value='';documentConflict.value=false;detailBusy.value=true;try{const value=await api.documentDetail(scope,id);if(detailFence.current(token))applyDetail(value)}catch(e){if(detailFence.current(token))detailError.value=errorMessage(e)}finally{if(detailFence.current(token))detailBusy.value=false}}
+async function openDocument(id:string,title?:string,nextTab:(typeof detailTabs)[number]['key']='life'){
+ if(detailLocked.value || !kb.value)return
+ if(!selectedID.value)previousFocus=document.activeElement as HTMLElement
+ selectedID.value=id;selectedTitle.value=title||'';detailTab.value=nextTab
+ await nextTick();drawer.value?.focus();await reloadDocument()
+}
+async function refreshDocumentMembership(){
+ void loadOverview()
+ const id=selectedID.value,scope=kb.value
+ if(!id||!detail.value)return
+ try{
+  const result=await api.documentDetail(scope,id)
+  if(scope===kb.value && id===selectedID.value && detail.value)detail.value.business_family=result.business_family
+ }catch{}
+}
+async function reloadDocument(){const token=detailFence.begin(),scope=kb.value,id=selectedID.value;detail.value=undefined;detailError.value='';documentSuccess.value='';documentConflict.value=false;detailBusy.value=true;try{const value=await api.documentDetail(scope,id);if(detailFence.current(token)){applyDetail(value);if(!selectedTitle.value)void documentTitle(scope,id).then(title=>{if(detailFence.current(token))selectedTitle.value=title}).catch(()=>{})}}catch(e){if(detailFence.current(token))detailError.value=errorMessage(e)}finally{if(detailFence.current(token))detailBusy.value=false}}
 async function submitDocument(){if(!detail.value||!data.value?.can_write||savingDocument.value||supplementBusy.value||documentConflict.value)return;const token=detailFence.begin(),scope=kb.value,id=selectedID.value,original=detail.value.snapshot.annotations;savingDocument.value=true;detailError.value='';documentSuccess.value='';try{const result=await api.saveAnnotations(scope,id,original.revision,annotationsForSave(original,dateForm));if(!detailFence.current(token))return;applyDetail(result);documentSuccess.value=result.evaluation_status==='pending'?'日期已保存；状态待后台扫描确认，请稍后刷新。':'日期已保存，状态已重新核验。';void loadOverview();void loadReviews()}catch(e){if(detailFence.current(token)){detailError.value=errorMessage(e);documentConflict.value=true}}finally{if(detailFence.current(token))savingDocument.value=false}}
-function supplementSaved(){void loadOverview();void loadReviews()}
+function supplementSaved(){supplementRevision.value++;void loadOverview();void loadReviews()}
 async function submitRules(){if(!data.value?.can_write||!validRules(ruleForm)||savingRules.value)return;const token=ruleFence.begin(),scope=kb.value,revision=data.value.rule_revision;savingRules.value=true;ruleError.value='';ruleSuccess.value=false;try{const result=await api.saveRules(scope,revision,{...ruleForm});if(ruleFence.current(token)&&data.value){data.value.rules=result.rules;data.value.rule_revision=result.rule_revision;ruleSuccess.value=true}}catch(e){if(ruleFence.current(token))ruleError.value=errorMessage(e)}finally{if(ruleFence.current(token))savingRules.value=false}}
 watch([titleQuery,filter],([,state],[,previousState])=>{clearTimeout(searchTimer);listFence.invalidate();page.value=1;if(!kb.value)return;if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
-watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';reviewItems.value=[];reviewsLoaded.value=false;page.value=1;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
+watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';reviewItems.value=[];reviewsLoaded.value=false;page.value=1;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
 watch(tab,value=>{if(value==='reviews'&&!reviewsLoaded.value)void loadReviews()})
-async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];if(knowledgeBases.value[0])kb.value=knowledgeBases.value[0].id}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
+async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];kb.value=knowledgeBases.value.find(row=>row.id===route.query.kb)?.id||knowledgeBases.value[0]?.id||''}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
 watch(()=>auth.effectiveTenantId,()=>void loadKnowledgeBases())
+watch(()=>route.query.kb,value=>{if(typeof value==='string' && knowledgeBases.value.some(row=>row.id===value))kb.value=value})
+watch(workspaceView,()=>{viewLocked.value=false})
+function allowNavigation(){return !detailLocked.value && !viewLocked.value}
+onBeforeRouteLeave(allowNavigation)
+onBeforeRouteUpdate(allowNavigation)
 onMounted(loadKnowledgeBases)
 onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.invalidate();detailFence.invalidate();reviewFence.invalidate();ruleFence.invalidate()})
 </script>
 
 <style scoped>
+.drawer-meta { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.detail-tabs { flex-wrap:wrap; margin-top:14px; }
+.document-drawer :deep(.business-page form) { display:block; }
+.document-drawer :deep(.business-page form label) { margin-block:8px; }
 .document-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0; }
 .document-filters input,.document-filters select { padding:8px 10px; border:1px solid var(--td-component-stroke); border-radius:6px; background:var(--td-bg-color-container); color:var(--td-text-color-primary); }
 .document-filters input { width:min(240px,100%); }
@@ -215,56 +364,6 @@ button:disabled {
   color:var(--td-brand-color);
   border-color:var(--td-brand-color);
   font-weight:600;
-}
-.state-grid {
-  display:grid;
-  grid-template-columns:repeat(4,minmax(130px,1fr));
-  gap:12px;
-  margin:20px 0 28px;
-}
-.state-card {
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  gap:10px;
-  padding:18px;
-  background:var(--td-bg-color-container);
-  border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-lg);
-  color:inherit;
-}
-.state-card.chosen {
-  border-color:var(--td-brand-color);
-  box-shadow:0 0 0 1px var(--td-brand-color);
-}
-.state-card span {
-  font-size:var(--app-text-xs);
-  color:var(--td-text-color-secondary);
-}
-.state-card strong {
-  font-size:var(--app-text-4xl);
-  font-weight:600;
-}
-.state-card small {
-  font-size:var(--app-text-xs);
-  color:var(--td-text-color-placeholder);
-}
-i {
-  display:inline-block;
-  width:6px;
-  height:6px;
-  border-radius:50%;
-  background:var(--td-text-color-placeholder);
-  margin-right:7px;
-}
-i.active {
-  background:var(--td-brand-color);
-}
-i.stale,i.failed {
-  background:var(--td-warning-color);
-}
-i.scheduled {
-  background:var(--td-brand-color);
 }
 .section-heading {
   margin:16px 0;
@@ -422,7 +521,7 @@ form label {
   justify-content:flex-end;
 }
 .document-drawer {
-  width:min(580px,100%);
+  width:min(860px,100%);
   height:100%;
   overflow:auto;
   background:var(--td-bg-color-container);
@@ -480,9 +579,6 @@ form label {
   .lifecycle-page {
     padding:24px;
   }
-  .state-grid {
-    grid-template-columns:repeat(2,minmax(110px,1fr));
-  }
   .section-heading {
     align-items:flex-start;
     flex-direction:column;
@@ -498,9 +594,6 @@ form label {
   }
   .page-heading {
     align-items:flex-start;
-  }
-  .state-card {
-    padding:14px;
   }
   .scope-bar {
     padding:12px;

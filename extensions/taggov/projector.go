@@ -36,7 +36,8 @@ func (p *Projector) Handle(ctx context.Context, item outbox.Item) (err error) {
 	if !validScope(scope) || item.ID == "" || item.AggregateType != "document" {
 		return errors.New("unsupported tag projection intent")
 	}
-	family := item.ProjectionType == FamilyProjectionType && item.CausationType == "document_version"
+	family := item.ProjectionType == FamilyProjectionType &&
+		(item.CausationType == "document_version" || item.CausationType == BusinessFamilyCausation)
 	if !family && (item.ProjectionType != "tag_projection" || item.CausationType != "lifecycle_event") {
 		return errors.New("unsupported tag projection intent")
 	}

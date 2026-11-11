@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 import uuid
 from contextlib import closing
+from pathlib import Path
 
 import startup_e2e as startup
 
@@ -37,19 +38,21 @@ def seed_v16(path, migrations):
 
 
 def check_upgrade(path, emit):
+    migrations = Path(__file__).resolve().parents[1] / "store" / "migrations"
+    expected_versions = sorted(int(file.name.split("_", 1)[0]) for file in migrations.glob("*.sql"))
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
-        version, = db.execute("SELECT MAX(version) FROM ext_schema_migrations").fetchone()
+        versions = [version for version, in db.execute("SELECT version FROM ext_schema_migrations ORDER BY version")]
         integrity = db.execute("PRAGMA integrity_check").fetchall()
         violations = db.execute("PRAGMA foreign_key_check").fetchall()
         row = db.execute("SELECT edge_type,revision,edge_id FROM ext_document_relations WHERE relation_id='v16-rel'").fetchone()
         owner = db.execute("SELECT attachment_id,evidence_kind,retired_at FROM ext_attachment_links WHERE import_id='v16-receipt'").fetchone()
     with closing(sqlite3.connect(path.with_name("ext-v16-backup.db").as_uri() + "?mode=ro", uri=True)) as db:
         backup_version, = db.execute("SELECT MAX(version) FROM ext_schema_migrations").fetchone()
-    if version not in (18, 19, 20, 21, 22) or (backup_version, integrity, violations, row, owner) != (
+    if versions != expected_versions or (backup_version, integrity, violations, row, owner) != (
         16, [("ok",)], [], ("amends", 4, "v16-edge"), ("v16-child", "upload_receipt", None),
     ):
         raise RuntimeError("schema upgrade, preservation or rollback snapshot verification failed")
-    emit(f"[REL04-MIGRATION] PASS: candidate migrated schema 16 to {version}; preserved relation and attachment rows; integrity/FK clean; v16 backup preserved")
+    emit(f"[REL04-MIGRATION] PASS: candidate migrated schema 16 to {versions[-1]}; preserved relation and attachment rows; integrity/FK clean; v16 backup preserved")
 
 
 def run(http, kb, work, original, replacement, ask, emit):

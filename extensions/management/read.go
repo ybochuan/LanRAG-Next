@@ -12,11 +12,53 @@ import (
 )
 
 type document struct {
-	DocumentID  string                `json:"document_id"`
-	Title       string                `json:"title,omitempty"`
-	State       string                `json:"state"`
-	LastEventID string                `json:"last_event_id"`
-	Annotations lifecycle.Annotations `json:"annotations"`
+	DocumentID     string                `json:"document_id"`
+	Title          string                `json:"title,omitempty"`
+	State          string                `json:"state"`
+	LastEventID    string                `json:"last_event_id"`
+	Annotations    lifecycle.Annotations `json:"annotations"`
+	BusinessFamily *documentFamily       `json:"business_family,omitempty"`
+}
+
+type documentFamily struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// enrichDocumentFamilies uses confirmed membership, independently of legacy projections.
+func (s *Server) enrichDocumentFamilies(ctx context.Context, r Request, documents []document) error {
+	if len(documents) == 0 {
+		return nil
+	}
+	ids := make([]string, len(documents))
+	for i := range documents {
+		ids[i] = documents[i].DocumentID
+	}
+	body, _ := json.Marshal(ids)
+	return s.db.View(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT m.document_id,m.business_family_id,f.label
+FROM ext_business_document_family_members m
+JOIN ext_business_document_families f USING(tenant_id,knowledge_base_id,business_family_id)
+WHERE m.tenant_id=? AND m.knowledge_base_id=? AND m.document_id IN (SELECT value FROM json_each(?))`,
+			strconv.FormatUint(r.TenantID, 10), r.KnowledgeBaseID, string(body))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		families := make(map[string]*documentFamily)
+		for rows.Next() {
+			var id string
+			family := new(documentFamily)
+			if err := rows.Scan(&id, &family.ID, &family.Label); err != nil {
+				return err
+			}
+			families[id] = family
+		}
+		for i := range documents {
+			documents[i].BusinessFamily = families[documents[i].DocumentID]
+		}
+		return rows.Err()
+	})
 }
 
 func (s *Server) rules(ctx context.Context, r Request) (map[string]any, error) {
@@ -69,6 +111,9 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 		return nil, errDatabase
 	}
 	// Bounded page snapshots reuse the canonical date decoder and scoped policy read.
+	if err := s.enrichDocumentFamilies(ctx, r, ids); err != nil {
+		return nil, errDatabase
+	}
 	m := lifecycle.NewMachine(s.db, nil)
 	for i := range ids {
 		snap, err := m.Snapshot(ctx, lifecycle.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID, DocumentID: ids[i].DocumentID})

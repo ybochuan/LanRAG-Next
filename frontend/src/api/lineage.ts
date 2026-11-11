@@ -5,7 +5,7 @@ export interface LineageNode {
   id: string
   type: string
   document_id: string
-  family_id: string
+  business_family_id?: string
   sequence: number
   current: boolean
   state: string

@@ -216,7 +216,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
-	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog)
+	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog, params.KnowledgeHandler.GuardStoredAttachment)
 
 	// Presigned file access: no auth required, signature-verified.
 	servePresignedFiles(r, params.TenantService, params.StorageBackendResolver)

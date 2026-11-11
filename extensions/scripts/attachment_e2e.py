@@ -21,6 +21,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
@@ -306,17 +308,59 @@ def main():
             if children[0]["id"] not in agent_links or not agent_links.issubset(child_ids):
                 raise RuntimeError("Agent search metadata missing attachment download")
             emit("[RETRIEVAL] PASS: real RAG parent hit, direct attachment hit and Agent search emitted native download metadata")
-            old_url = http.base_url + "/api/v1/knowledge/" + children[0]["id"] + "/download"
-            def download_status():
-                request = urllib.request.Request(old_url, headers={"Authorization": "Bearer " + http.token})
+            child = children[0]
+            child_api = "/api/v1/knowledge/" + child["id"]
+            batch_path = "/api/v1/knowledge-bases/" + kb["id"] + "/knowledge/batch-download"
+            def raw_path(ref):
+                return "/files?" + urllib.parse.urlencode({"file_path": ref})
+            def access(path, ids=None):
+                headers = {"Authorization": "Bearer " + http.token}
+                body = None
+                if ids is not None:
+                    headers["Content-Type"] = "application/json"
+                    body = json.dumps({"ids": ids}).encode()
+                request = urllib.request.Request(http.base_url + path, data=body, headers=headers)
                 try:
                     response = http.opener.open(request, timeout=15)
                 except urllib.error.HTTPError as error:
                     response = error
                 with response:
-                    return response.status
-            if download_status() != 200:
+                    return response.status, response.headers, response.read()
+            with sqlite3.connect((work / "core.db").as_uri() + "?mode=ro", uri=True) as db:
+                physical, = db.execute("SELECT physical_path FROM resources WHERE handle=?",
+                                       (child["file_path"].removeprefix("resource://"),)).fetchone()
+            alias = physical.replace("/" + child["id"] + "/", "/./" + child["id"] + "/")
+            if alias == physical:
+                raise RuntimeError("fixture did not exercise a storage path alias")
+            paths = {
+                "download": child_api + "/download", "preview": child_api + "/preview",
+                "raw resource": raw_path(child["file_path"]), "raw physical": raw_path(physical),
+                "raw alias": raw_path(alias),
+            }
+            status, _, original = access(paths["download"])
+            if status != 200 or not original:
                 raise RuntimeError("active attachment download denied")
+            for name, path in paths.items():
+                status, headers, file_bytes = access(path)
+                if status != 200 or file_bytes != original:
+                    raise RuntimeError(f"active attachment {name} returned incorrect bytes")
+                if name.startswith("raw") and headers.get("Cache-Control") != "private, no-store":
+                    raise RuntimeError(f"attachment {name} was cacheable")
+            status, _, archive = access(batch_path, [parent, child["id"]])
+            if status != 200:
+                raise RuntimeError("active attachment batch denied")
+            with zipfile.ZipFile(io.BytesIO(archive)) as packaged:
+                if not any(packaged.read(entry) == original for entry in packaged.namelist()):
+                    raise RuntimeError("active attachment missing from batch ZIP")
+            def blocked_access(include_parent=True):
+                for name, path in paths.items():
+                    status, _, body = access(path)
+                    if status != 403 or body == original:
+                        raise RuntimeError(f"forbidden attachment remains accessible via {name}: HTTP {status}")
+                ids = [parent, child["id"]] if include_parent else [child["id"]]
+                status, headers, body = access(batch_path, ids)
+                if status != 403 or "zip" in headers.get("Content-Type", "") or body.startswith(b"PK"):
+                    raise RuntimeError(f"forbidden attachment batch was not rejected before ZIP: HTTP {status}")
             with sqlite3.connect(work / "ext.db") as db:
                 changed = db.execute("UPDATE ext_document_annotations SET effective_until='2000-01-01T00:00:00Z', revision=revision+1 WHERE document_id=?", (parent,)).rowcount
                 if changed != 1:
@@ -325,13 +369,16 @@ def main():
             startup.until(lambda: lifecycle_state(parent) == "stale", 15)
             if any(lifecycle_state(d["id"]) != "active" for d in children):
                 raise RuntimeError("test requires child active while parent stale")
-            if ask(children[0]["id"]) or download_status() != 403:
-                raise RuntimeError("stale parent leaked attachment link/download")
-            emit("[PARENT-STALE] PASS: actual expiry scan made parent stale; child remained active; links absent and old native download URL returned 403")
+            if ask(child["id"]):
+                raise RuntimeError("stale parent leaked attachment links")
+            blocked_access()
+            emit("[PARENT-STALE] PASS: child remains active; retrieval links, download, preview, batch and raw aliases denied")
             helpers.stop_owned(host); host = None
-            if download_status() != 403:
-                raise RuntimeError("Host outage allowed attachment download")
-            emit("[HOST-OFFLINE] PASS: previously issued attachment download URL blocked; HTTP 403")
+            blocked_access()
+            parent_ref = next(row["file_path"] for row in docs if row["id"] == parent)
+            if access(batch_path, [parent])[0] != 200 or access(raw_path(parent_ref))[0] != 200:
+                raise RuntimeError("ordinary document access unexpectedly depended on the Host")
+            emit("[HOST-OFFLINE] PASS: all tested attachment reads return 403; ordinary batch and raw file still work")
         if args.cleanup:
             def native_row(doc):
                 with sqlite3.connect((work / "core.db").as_uri() + "?mode=ro", uri=True) as db:
@@ -374,8 +421,9 @@ def main():
             with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
                 if not db.execute("SELECT 1 FROM ext_attachment_delete_intents WHERE document_id=?", (parent,)).fetchone():
                     raise RuntimeError("parent deleted without durable intent")
-            if any(removed(child) for child in child_ids) or download_status() != 403:
-                raise RuntimeError("restart window not established or orphan download allowed")
+            if any(removed(child) for child in child_ids):
+                raise RuntimeError("restart window not established")
+            blocked_access(include_parent=False)
             helpers.stop_owned(host); host = None
             with sqlite3.connect(work / "ext.db") as db:
                 db.execute("UPDATE ext_attachment_links SET cleanup_next_at=0 WHERE parent_document_id=?", (parent,))

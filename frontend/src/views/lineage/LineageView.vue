@@ -1,10 +1,10 @@
 <template>
-  <main class="lineage-page">
+  <section class="lineage-page" :class="{ 'embedded-lineage': scope }">
     <header class="lineage-heading">
-      <div><span class="eyebrow">文档治理</span><h1>血缘图谱</h1><p>沿着真实关系，查看内容来源与版本演变。</p></div>
+      <div><h2>{{ documentId ? '文档关系图' : '关系与溯源' }}</h2></div>
       <span class="readonly">只读图谱</span>
     </header>
-    <section class="scope-bar">
+    <section v-if="!scope" class="scope-bar">
       <label for="lineage-kb">知识库</label>
       <select id="lineage-kb" v-model="kb" :disabled="catalogLoading" @change="root = ''">
         <option value="">选择知识库</option><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option>
@@ -12,11 +12,12 @@
       <span class="scope-note">仅当前知识库</span>
       <button :disabled="busy || !kb" @click="loadGraph">刷新</button>
     </section>
-    <div class="view-tabs" role="tablist" aria-label="血缘视图">
+    <div v-if="!documentId" class="view-tabs" role="tablist" aria-label="血缘视图">
       <button v-for="item in modes" :key="item.key" role="tab" :aria-selected="mode === item.key" :class="{ selected: mode === item.key }" @click="switchMode(item.key)">{{ item.label }}</button>
     </div>
     <p class="view-description">{{ modes.find(item => item.key === mode)?.description }}</p>
-    <button v-if="root" class="return-all" @click="root = ''">返回全库视图</button>
+    <button v-if="documentId && mode!=='relations'" class="return-all" @click="switchMode('relations')">返回文档关系图</button>
+    <button v-else-if="root && !documentId" class="return-all" @click="root = ''">返回全库视图</button>
     <p v-if="error" class="notice error" role="alert">{{ error }} <button @click="knowledgeBases.length ? loadGraph() : loadCatalog()">重试</button></p>
     <div v-if="catalogLoading || busy" class="empty" role="status">正在读取血缘关系…</div>
     <div v-else-if="!kb" class="empty">选择一个有查看权限的知识库，即可浏览已登记的血缘。</div>
@@ -42,16 +43,24 @@
       </div>
       <section v-if="selected" class="node-detail" aria-label="节点详情">
         <div class="detail-title"><div><span class="eyebrow">{{ typeLabels[selected.type] || selected.type }}</span><h2>{{ nodeTitle(selected) }}</h2></div><button @click="selectedID = ''">关闭详情</button></div>
-        <dl><div><dt>节点编号</dt><dd>{{ selected.id }}</dd></div><div v-if="selected.document_id"><dt>文档编号</dt><dd>{{ selected.document_id }}</dd></div><div v-if="selected.sequence"><dt>观测版本</dt><dd>V{{ selected.sequence }}{{ selected.current ? ' · 当前观测版本' : '' }}</dd></div><div v-if="selected.state"><dt>文档当前状态</dt><dd>{{ stateLabels[selected.state] || selected.state }}</dd></div><div v-if="selected.family_id"><dt>观测版本族</dt><dd>{{ selected.family_id }}</dd></div><div><dt>登记时间</dt><dd>{{ formatDate(selected.created_at) }}</dd></div></dl>
-        <div class="detail-actions"><button @click="expandNode('provenance')">内容溯源</button><button @click="expandNode('version-ancestry')">版本历史</button><RouterLink v-if="selected.document_id" :to="{ path: '/platform/lifecycle', query: { kb } }">查看库内生命周期</RouterLink></div>
+        <dl>
+          <div><dt>节点编号</dt><dd>{{ selected.id }}</dd></div>
+          <div v-if="selected.document_id"><dt>文档编号</dt><dd>{{ selected.document_id }}</dd></div>
+          <div v-if="selected.sequence"><dt>观测版本</dt><dd>V{{ selected.sequence }}{{ selected.current ? ' · 当前观测版本' : '' }}</dd></div>
+          <div v-if="selected.state"><dt>文档当前状态</dt><dd>{{ stateLabels[selected.state] || selected.state }}</dd></div>
+          <div><dt>登记时间</dt><dd>{{ formatDate(selected.created_at) }}</dd></div>
+        </dl>
+        <div class="detail-actions"><button @click="expandNode('provenance')">内容溯源</button><button @click="expandNode('version-ancestry')">版本历史</button>
+          <button v-if="selected.document_id" type="button" @click="$emit('open',selected.document_id,nodeTitle(selected))">打开文档详情</button>
+        </div>
       </section>
     </template>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { loadLineageGraph, type GraphMode, type LineageGraph } from '@/api/lineage'
@@ -59,7 +68,9 @@ import { requestFence } from '../lifecycle/model'
 import { graphError, layoutGraph, modes, nodeTitle, stateLabels, typeLabels } from './model'
 import LineageCanvas from './LineageCanvas.vue'
 
-const route = useRoute(), router = useRouter(), auth = useAuthStore()
+const props = defineProps<{ scope?:string; documentId?:string }>()
+defineEmits<{ open:[id:string,title:string] }>()
+const route = useRoute(), auth = useAuthStore()
 const knowledgeBases = ref<{ id: string; name: string }[]>([])
 const kb = ref(''), mode = ref<GraphMode>('version-ancestry'), root = ref(''), search = ref(''), selectedID = ref('')
 const data = ref<LineageGraph>(), busy = ref(false), catalogLoading = ref(true), error = ref('')
@@ -71,7 +82,7 @@ const matches = computed(() => {
   return data.value?.nodes.filter(node => !query || [nodeTitle(node), node.id, node.document_id].some(value => value.toLocaleLowerCase().includes(query))) || []
 })
 function selectNode(id: string) { selectedID.value = id; if (id) canvas.value?.focus(id) }
-function switchMode(value: GraphMode) { mode.value = value; root.value = '' }
+function switchMode(value: GraphMode) { mode.value = value; root.value = value==='relations' ? props.documentId || '' : '' }
 function expandNode(value: GraphMode) { if (selectedID.value) { root.value = selectedID.value; mode.value = value } }
 function formatDate(value: string) { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : value }
 async function loadGraph() {
@@ -88,6 +99,14 @@ async function loadGraph() {
 async function loadCatalog() {
   const token = catalogFence.begin()
   graphFence.invalidate(); kb.value = ''; data.value = undefined; knowledgeBases.value = []; error.value = ''; catalogLoading.value = true
+  if (props.scope) {
+    kb.value = props.scope
+    mode.value = props.documentId ? 'relations' : modes.find(item => item.key === route.query.mode)?.key || 'version-ancestry'
+    const requested = route.query.node || route.query.id
+    root.value = props.documentId || (typeof requested==='string' && mode.value!=='relations' ? requested : '')
+    catalogLoading.value = false
+    return
+  }
   try {
     const response = await listKnowledgeBases()
     if (!catalogFence.current(token)) return
@@ -100,12 +119,10 @@ async function loadCatalog() {
   } catch { if (catalogFence.current(token)) error.value = '无法读取知识库，请检查登录状态后重试。' }
   finally { if (catalogFence.current(token)) catalogLoading.value = false }
 }
-watch([kb, mode, root], () => {
-  void loadGraph()
-  if (kb.value) void router.replace({ query: { kb: kb.value, mode: mode.value, ...(root.value ? { node: root.value } : {}) } })
-})
+watch([kb, mode, root], loadGraph)
 watch(() => auth.effectiveTenantId, () => void loadCatalog())
 watch(() => route.query, query => {
+  if (props.scope) return
   if (typeof query.kb === 'string' && knowledgeBases.value.some(item => item.id === query.kb)) kb.value = query.kb
   mode.value = modes.find(item => item.key === query.mode)?.key || 'version-ancestry'
   root.value = typeof query.node === 'string' && mode.value !== 'relations' ? query.node : ''
@@ -115,6 +132,9 @@ onBeforeUnmount(() => { graphFence.invalidate(); catalogFence.invalidate() })
 </script>
 
 <style scoped>
+.embedded-lineage { height:auto; overflow:visible; padding:0; background:transparent; }
+.embedded-lineage .graph-workspace { grid-template-columns:minmax(145px, .35fr) minmax(0,1fr); }
+.embedded-lineage :deep(.lineage-canvas) { height:420px; }
 .lineage-page { height: 100%; overflow: auto; padding: 32px; color: var(--td-text-color-primary); background: var(--td-bg-color-page); box-sizing: border-box; }
 .lineage-heading, .scope-bar, .detail-title, .graph-toolbar, .detail-actions, .zoom-actions { display: flex; align-items: center; gap: 12px; }
 .lineage-heading, .detail-title, .graph-toolbar { justify-content: space-between; }

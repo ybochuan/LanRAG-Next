@@ -18,8 +18,8 @@ func TestNativePublisherReconcilesExactMarkerAndContent(t *testing.T) {
 	var exists atomic.Bool
 	var badPage atomic.Bool
 	var binary atomic.Bool
-	p := Publication{Scope: provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}, SourceDocumentID: "source", Key: textHash("publication"), Content: "replacement\n", ContentHash: textHash("replacement\n")}
-	doc := map[string]any{"id": "target", "tenant_id": 7, "knowledge_base_id": "kb", "type": "manual", "title": "AgentRAG revision " + p.Key, "parse_status": "completed", "metadata": map[string]any{"content": p.Content, "status": "publish", "format": "markdown"}}
+	p := Publication{Scope: provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}, ProposalID: "proposal", SourceDocumentID: "source", Key: textHash("publication"), Content: "replacement\n", ContentHash: textHash("replacement\n")}
+	doc := map[string]any{"id": "target", "tenant_id": 7, "knowledge_base_id": "kb", "type": "manual", "channel": weknora.RevisionPublicationChannelPrefix + p.ProposalID, "title": "AgentRAG revision " + p.Key, "parse_status": "draft", "metadata": map[string]any{"content": p.Content, "status": "draft", "format": "markdown"}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-API-Key") != "test-api-key" {
 			w.WriteHeader(401)
@@ -33,6 +33,11 @@ func TestNativePublisherReconcilesExactMarkerAndContent(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"id": "source", "tenant_id": 7, "knowledge_base_id": "kb", "type": typ, "metadata": map[string]string{"status": "publish"}}})
 		case r.Method == "POST":
+			var body map[string]string
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body["status"] != "draft" || body["channel"] != doc["channel"] {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			creates.Add(1)
 			exists.Store(true)
 			json.NewEncoder(w).Encode(map[string]any{"success": true, "data": doc})
@@ -60,8 +65,8 @@ func TestNativePublisherReconcilesExactMarkerAndContent(t *testing.T) {
 	if e != nil || got.ID != "" {
 		t.Fatal(got, e)
 	}
-	got, e = remote.Create(context.Background(), p)
-	if e != nil || !got.Indexed || got.ContentHash != p.ContentHash {
+	got, e = remote.CreateDraft(context.Background(), p)
+	if e != nil || !got.Draft || got.Indexed || got.ContentHash != p.ContentHash {
 		t.Fatal(got, e)
 	}
 	got, e = remote.Reconcile(context.Background(), p)
@@ -74,7 +79,7 @@ func TestNativePublisherReconcilesExactMarkerAndContent(t *testing.T) {
 	}
 	badPage.Store(false)
 	binary.Store(true)
-	if _, e = remote.Create(context.Background(), p); e == nil || creates.Load() != 1 {
+	if _, e = remote.CreateDraft(context.Background(), p); e == nil || creates.Load() != 1 {
 		t.Fatal("binary source was automatically published", e, creates.Load())
 	}
 }

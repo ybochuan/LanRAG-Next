@@ -21,7 +21,7 @@ test('late graph response cannot restore the previous knowledge base', async () 
     },
     '../lifecycle/model': { requestFence }, './model': model, './LineageCanvas.vue': {},
   }
-  const state = scope.run(() => new Function('require', 'exports', `${code}\nreturn {kb,data,loadGraph};`)((id: string) => modules[id], {}))
+  const state = scope.run(() => new Function('require', 'exports', 'defineProps', 'defineEmits', `${code}\nreturn {kb,data,loadGraph};`)((id: string) => modules[id], {}, () => ({}), () => () => {}))
   try {
     state.kb.value = 'old'
     await vue.nextTick()

@@ -70,8 +70,29 @@ var clauseRelationsMigration string
 //go:embed migrations/022_parser_renditions.sql
 var parserRenditionsMigration string
 
+//go:embed migrations/023_business_families.sql
+var businessFamiliesMigration string
+
+//go:embed migrations/024_family_replacements.sql
+var familyReplacementsMigration string
+
+//go:embed migrations/025_family_cutover.sql
+var familyCutoverMigration string
+
+//go:embed migrations/026_family_member_history.sql
+var familyMemberHistoryMigration string
+
+//go:embed migrations/027_family_suggestions.sql
+var familySuggestionsMigration string
+
+//go:embed migrations/028_feedback_review_context.sql
+var feedbackReviewContextMigration string
+
+//go:embed migrations/029_document_availability.sql
+var documentAvailabilityMigration string
+
 // LatestSchemaVersion is the last published migration supported by this Host.
-const LatestSchemaVersion = 22
+const LatestSchemaVersion = 29
 
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
@@ -270,6 +291,62 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(22)"); err != nil {
+				return err
+			}
+		}
+		if version < 23 {
+			if _, err := tx.ExecContext(ctx, businessFamiliesMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(23)"); err != nil {
+				return err
+			}
+		}
+		if version < 24 {
+			if _, err := tx.ExecContext(ctx, familyReplacementsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(24)"); err != nil {
+				return err
+			}
+		}
+		if version < 25 {
+			if _, err := tx.ExecContext(ctx, familyCutoverMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(25)"); err != nil {
+				return err
+			}
+		}
+		if version < 26 {
+			if _, err := tx.ExecContext(ctx, familyMemberHistoryMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(26)"); err != nil {
+				return err
+			}
+		}
+		if version < 27 {
+			if _, err := tx.ExecContext(ctx, familySuggestionsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(27)"); err != nil {
+				return err
+			}
+		}
+		if version < 28 {
+			if _, err := tx.ExecContext(ctx, feedbackReviewContextMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(28)"); err != nil {
+				return err
+			}
+		}
+		if version < 29 {
+			if _, err := tx.ExecContext(ctx, documentAvailabilityMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(29)"); err != nil {
 				return err
 			}
 		}

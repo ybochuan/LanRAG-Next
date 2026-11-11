@@ -22,8 +22,8 @@ function mountSetup(api: Record<string, unknown>, lifecycle: Record<string, unkn
     '@/api/business': { documentTitle: async () => '', ...api },
     './CreateForm.vue': {}, './DocumentPicker.vue': {}, '../lifecycle/model': { requestFence }, './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated};`)(
-    (id: string) => modules[id], () => props, () => 0, () => {}, { addEventListener() {}, removeEventListener() {} }, {},
+  const state = scope.run(() => new Function('require', 'defineProps', 'defineEmits', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated};`)(
+    (id: string) => modules[id], () => props, () => () => {}, () => 0, () => {}, { addEventListener() {}, removeEventListener() {} }, {},
   ))
   return { state, guards, props, stop: () => scope.stop() }
 }

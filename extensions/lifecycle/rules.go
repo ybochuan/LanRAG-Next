@@ -163,6 +163,36 @@ func (c *Configuration) PutAnnotations(ctx context.Context, s Scope, a Annotatio
 	return c.putAnnotations(ctx, s, a, expected, nil)
 }
 
+// ReadAnnotationsTx reads the complete annotation record inside a caller-owned
+// transaction. A missing row is returned with Revision zero.
+func ReadAnnotationsTx(ctx context.Context, tx *sql.Tx, s Scope) (Annotations, error) {
+	if err := s.validate(); err != nil {
+		return Annotations{}, err
+	}
+	return annotationsTx(ctx, tx, s)
+}
+
+// SaveAnnotationsTx replaces annotations inside a caller-owned transaction.
+// It preserves the same revision CAS semantics as PutAnnotations.
+func SaveAnnotationsTx(ctx context.Context, tx *sql.Tx, s Scope, a Annotations, expected int64) error {
+	if err := s.validate(); err != nil {
+		return err
+	}
+	old, err := annotationsTx(ctx, tx, s)
+	if err != nil {
+		return err
+	}
+	if old.Revision != expected {
+		return ErrConfigurationConflict
+	}
+	a, err = normalizeAnnotations(a)
+	if err != nil {
+		return err
+	}
+	a.Revision = expected + 1
+	return saveAnnotationsTx(ctx, tx, s, a)
+}
+
 // PutManagementAnnotations refuses date edits requiring transitions absent from the frozen matrix.
 // The state check shares the annotation CAS write transaction, including concurrent timer scans.
 func (c *Configuration) PutManagementAnnotations(ctx context.Context, s Scope, a Annotations, expected int64, now time.Time) error {

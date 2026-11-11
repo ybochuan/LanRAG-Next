@@ -10,8 +10,10 @@
           <option value="split">拆分为多份新制度</option>
         </select>
       </label>
-      <DocumentPicker v-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
-      <DocumentPicker v-if="kind==='relation'" v-model="form.target_document_id" :kb="kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
+      <p v-if="fixedDocument?.end==='source'" class="subtle">源文档 · {{ fixedDocument.title }}</p>
+      <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
+      <p v-if="fixedDocument?.end==='target'" class="subtle">关联文档 · {{ fixedDocument.title }}</p>
+      <DocumentPicker v-else-if="kind==='relation'" v-model="form.target_document_id" :kb="kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
       <template v-if="kind==='relation'">
         <label>关系类型<select v-model="form.edge_type" :disabled="disabled"><option v-for="item in relationChoices" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
         <p class="subtle">{{ relationChoices.find(item => item.key === form.edge_type)?.direction }}</p>
@@ -61,7 +63,7 @@ import DocumentPicker from './DocumentPicker.vue'
 import ClausePicker from './ClausePicker.vue'
 import { requestFence } from '../lifecycle/model'
 import { clauseRelation, relationChoices } from './model'
-const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;initialGuidance?:string}>()
+const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;initialGuidance?:string;fixedDocument?:{id:string;title:string;end:'source'|'target'}}>()
 const emit=defineEmits<{submit:[action:api.BusinessAction,payload:api.BusinessPayload]}>()
 const form=reactive({document_id:'',target_document_id:'',edge_type:'amends',effective_at:'',topic:'',risk:'medium',text:'',negative:false,similarity:0.8,declaration:0.8,structure:0.8})
 const clauses=reactive({source_clause:undefined as api.ClauseAnchor|undefined,target_clause:undefined as api.ClauseAnchor|undefined,applies_when:''})
@@ -98,6 +100,11 @@ function submit(){
   else emit('submit',props.kind==='guidance'?'guidance_seed':'feedback_create',{topic:form.topic.trim(),text:form.text,...(props.kind==='feedback'?{risk:form.risk,negative:form.negative}:{})})
 }
 watch(()=>props.kb,()=>{if(props.kind==='revision')void loadGuidances()},{immediate:true})
+watch(()=>props.fixedDocument,(fixed)=>{
+  if(!fixed)return
+  form.document_id=fixed.end==='source'?fixed.id:''
+  form.target_document_id=fixed.end==='target'?fixed.id:''
+},{immediate:true})
 watch(()=>props.initialGuidance,async id=>{if(!id||props.kind!=='revision')return;const kb=props.kb;try{const rows=await api.list(kb,'guidance',1,id);if(kb!==props.kb)return;const item=rows.find(v=>v.id===id&&v.status==='active');if(item){selected.value=[id];selectedLabels.value.set(id,item.topic||id)}else guidanceError.value='选中的指导已经停用，请选择其他生效指导。'}catch{if(kb===props.kb)guidanceError.value='无法核对选中的指导。'}},{immediate:true})
 onBeforeUnmount(()=>fence.invalidate())
 </script>

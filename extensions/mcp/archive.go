@@ -44,16 +44,21 @@ SELECT c.document_id, ch.id, coalesce(k.title,'') AS title, c.state, ch.content,
 FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
 JOIN weknora.knowledges k ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id
 JOIN weknora.chunks ch ON ch.knowledge_id=k.id AND ch.tenant_id=k.tenant_id AND ch.knowledge_base_id=k.knowledge_base_id
-WHERE c.tenant_id=?2 AND c.state IN ('stale','archived') AND (`+store.LifecycleCurrentVerifiedSQL+`)
+WHERE c.tenant_id=?2 AND c.state IN ('stale','archived','superseded') AND (`+store.LifecycleCurrentVerifiedSQL+`)
   AND c.knowledge_base_id IN (SELECT value FROM json_each(?3))
   AND (c.knowledge_base_id IN (SELECT value FROM json_each(?4)) OR c.document_id IN (SELECT value FROM json_each(?5)))
-  AND NOT `+store.SplitTargetPendingSQL+`
-  AND (substr(coalesce(k.channel,''),1,length(?6))<>?6 OR k.channel=?6||`+store.PublishedSplitProposalSQL+`)
+  AND NOT `+store.PublicationTargetPendingSQL+`
+  AND ((substr(coalesce(k.channel,''),1,length(?6))<>?6 AND substr(coalesce(k.channel,''),1,length(?7))<>?7)
+       OR k.channel=`+store.PublishedPublicationChannelSQL+`)
+  AND NOT (coalesce(k.channel,'')='api' AND substr(k.title,1,length(?8))=?8 AND EXISTS(
+    SELECT 1 FROM ext_revision_proposals r WHERE r.tenant_id=c.tenant_id AND r.knowledge_base_id=c.knowledge_base_id
+    AND r.publication_key=substr(k.title,length(?8)+1) AND `+store.LegacyPublicationUnreleasedSQL+`))
   AND k.deleted_at IS NULL AND k.parse_status='completed'
   AND ch.deleted_at IS NULL AND ch.is_enabled=1 AND ch.chunk_type='text'
 )
 SELECT document_id,id,title,state,substr(content,max(1,hit-200),1200) FROM matches
-WHERE hit>0 OR title_hit>0 ORDER BY hit>0 DESC, document_id, chunk_index, id LIMIT 8`, query, strconv.FormatUint(s.Tenant, 10), string(kbs), string(whole), string(ids), weknora.SplitPublicationChannelPrefix)
+WHERE hit>0 OR title_hit>0 ORDER BY hit>0 DESC, document_id, chunk_index, id LIMIT 8`, query, strconv.FormatUint(s.Tenant, 10), string(kbs), string(whole), string(ids),
+			weknora.SplitPublicationChannelPrefix, weknora.RevisionPublicationChannelPrefix, weknora.RevisionPublicationTitlePrefix)
 		if err != nil {
 			return err
 		}

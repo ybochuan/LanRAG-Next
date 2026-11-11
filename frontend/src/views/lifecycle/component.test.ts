@@ -13,6 +13,8 @@ function mountSetup(api: Record<string, unknown>) {
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const modules: Record<string, unknown> = {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
+    'vue-router': { useRoute:()=>({query:{}}), useRouter:()=>({}), onBeforeRouteLeave(){}, onBeforeRouteUpdate(){} },
+    '@/api/business': {},
     '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }) },
     '@/api/lifecycle': {
       overview: async () => ({

@@ -142,6 +142,7 @@ func TestFeedbackIdempotencyAndGuidanceIsolation(t *testing.T) {
 type remoteFixture struct {
 	mu      sync.Mutex
 	creates int
+	indexes int
 	target  RemoteDocument
 	unknown bool
 }
@@ -151,19 +152,29 @@ func (r *remoteFixture) Reconcile(_ context.Context, _ Publication) (RemoteDocum
 	defer r.mu.Unlock()
 	return r.target, nil
 }
-func (r *remoteFixture) Create(_ context.Context, p Publication) (RemoteDocument, error) {
+func (r *remoteFixture) CreateDraft(_ context.Context, p Publication) (RemoteDocument, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.creates++
-	r.target = RemoteDocument{ID: "target", ContentHash: p.ContentHash, Indexed: true}
+	r.target = RemoteDocument{ID: "target", ContentHash: p.ContentHash, Draft: true}
 	if r.unknown {
 		r.unknown = false
 		return RemoteDocument{}, errors.New("remote committed but ACK lost")
 	}
 	return r.target, nil
 }
+func (r *remoteFixture) IndexDraft(_ context.Context, p Publication) (RemoteDocument, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p.TargetDocumentID != r.target.ID || !r.target.Draft {
+		return RemoteDocument{}, ErrConflict
+	}
+	r.indexes++
+	r.target.Draft, r.target.Indexed = false, true
+	return r.target, nil
+}
 func TestPublishUnknownResultReconcilesWithoutRecreating(t *testing.T) {
-	s, db, _ := fixture(t)
+	s, db, clock := fixture(t)
 	ctx := context.Background()
 	scope := provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}
 	// Registry-less fixture supplies immutable versions directly; production requires Registry.
@@ -220,6 +231,23 @@ func TestPublishUnknownResultReconcilesWithoutRecreating(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	s = New(db, nil, s.now).WithRemote(remote)
 	s.verify = verifiedSource
+	if _, e = s.Publish(ctx, scope, p.ID); !errors.Is(e, ErrConflict) || remote.creates != 1 || remote.indexes != 0 {
+		t.Fatal("uncertain draft result bypassed its lease", e, remote.creates, remote.indexes)
+	}
+	*clock = clock.Add(3 * time.Minute)
+	bound, e := s.Publish(ctx, scope, p.ID)
+	if e != nil || bound.Status != "publishing" || bound.TargetDocumentID != "target" || remote.creates != 1 || remote.indexes != 0 {
+		t.Fatal("recovery did not bind the existing draft before indexing", bound, e)
+	}
+	indexed, e := s.Publish(ctx, scope, p.ID)
+	if e != nil || indexed.Status != "publishing" || indexed.TargetDocumentID != bound.TargetDocumentID || remote.indexes != 1 {
+		t.Fatal("index did not use the persisted target", indexed, e)
+	}
+	if e = db.View(ctx, func(tx *sql.Tx) error {
+		return s.current(ctx, tx, scope, "target", "version-target")
+	}); !errors.Is(e, ErrConflict) {
+		t.Fatal("indexed target acquired ordinary governance access before release", e)
+	}
 	if e = db.Write(ctx, func(tx *sql.Tx) error {
 		_, e := tx.Exec(`CREATE TRIGGER fail_publish_audit BEFORE INSERT ON ext_business_audit WHEN NEW.action='revision_published' BEGIN SELECT RAISE(ABORT,'injected'); END`)
 		return e
@@ -249,7 +277,7 @@ func TestPublishUnknownResultReconcilesWithoutRecreating(t *testing.T) {
 		t.Fatal(e)
 	}
 	out, e := s.Publish(ctx, scope, p.ID)
-	if e != nil || out.Status != "published" || remote.creates != 1 {
+	if e != nil || out.Status != "published" || remote.creates != 1 || remote.indexes != 1 {
 		t.Fatal(out, e, remote.creates)
 	}
 	if e = db.View(ctx, func(tx *sql.Tx) error {

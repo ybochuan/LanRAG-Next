@@ -78,7 +78,13 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 	switch {
 	case c.Param("business_action") != "":
 		action = "business_" + c.Param("business_action")
-		read := action == "business_lineage_graph" || action == "business_related" || action == "business_relation_list" || action == "business_feedback_list" || action == "business_guidance_list" || action == "business_revision_list"
+		read := false
+		switch action {
+		case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
+			"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
+			"business_family_workspace", "business_family_replacements", "business_family_suggestions":
+			read = true
+		}
 		if read == mutation {
 			lifecycleError(c, 400)
 			return

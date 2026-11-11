@@ -31,6 +31,7 @@ class Model:
         self.phase = "setup"
         self.prompts = []
         self.rerank_inputs = []
+        self.family_embedding_inputs = []
         self.tool_outputs = []
         self.tool_step = 0
         self.doc_id = ""
@@ -42,6 +43,18 @@ class Model:
         def handle(handler):
             raw = handler.rfile.read(int(handler.headers.get("Content-Length", "0")))
             request = json.loads(raw)
+            if handler.path.endswith("/embeddings") and request.get("model") == "family-fixture-embedding":
+                inputs = request["input"]
+                if handler.headers.get("Authorization") or handler.headers.get("X-API-Key"):
+                    handler.send_error(400)
+                    return
+                model.family_embedding_inputs.extend(inputs)
+                handler.send_response(200); handler.send_header("Content-Type", "application/json"); handler.end_headers()
+                handler.wfile.write(json.dumps({"model": "family-fixture-embedding", "data": [
+                    {"index": i, "embedding": [1, 0] if "Employee handbook" in title else [0, 1]}
+                    for i, title in enumerate(inputs)
+                ]}).encode())
+                return
             messages = request.get("messages", [])
             for message in messages:
                 if message.get("role") == "tool":
@@ -149,6 +162,8 @@ def main():
         env = {key: value for key, value in os.environ.items() if not key.startswith("AGENTRAG_")}
         env["AGENTRAG_MANAGEMENT_KEY"] = secrets.token_hex(32)
         env.update(ENV_FILE=str(ROOT / ".env"), DB_DRIVER="sqlite", DB_PATH=str(work / "core.db"), RETRIEVE_DRIVER="sqlite", STORAGE_TYPE="local", LOCAL_STORAGE_BASE_DIR=str(work / "files"), STREAM_MANAGER_TYPE="memory", SERVER_HOST="127.0.0.1", SERVER_PORT=str(port), WEKNORA_WEB_DIR=str(ROOT / "web"), SSRF_DISABLE="true", NEO4J_ENABLE="false", ENABLE_GRAPH_RAG="false", WEKNORA_SANDBOX_MODE="disabled", LOG_PATH="", JWT_SECRET=secrets.token_hex(32), SYSTEM_SIGNING_KEY=secrets.token_hex(32))
+        if os.environ.get("AGENTRAG_FAMILY_BROWSER_NODE"):
+            env["WEKNORA_WEB_DIR"] = str(ROOT / "frontend/dist")
         binary = Path(os.environ.get("CORE_BINARY", ROOT / "tmp/governance-WeKnora-lite"))
         output = (work / "core-private.log").open("w"); handles.append(output)
         core = subprocess.Popen([str(binary)], cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
@@ -177,6 +192,9 @@ def main():
         host_binary = work / "extension-host"
         subprocess.run(["/usr/local/go/bin/go", "build", "-mod=readonly", "-o", str(host_binary), "./cmd/extension-host"], cwd=ROOT / "extensions", env=dict(env, CGO_ENABLED="0", GOWORK="off"), check=True)
         host_env = dict(env, AGENTRAG_MODE="worker", AGENTRAG_EXT_DB=str(work / "ext.db"), AGENTRAG_WEKNORA_URL=http.base_url, AGENTRAG_WEKNORA_API_KEY=api_key, AGENTRAG_TENANT_ID=str(kb["tenant_id"]), AGENTRAG_KB_IDS=kb["id"], AGENTRAG_RECONCILE_INTERVAL="250ms")
+        if os.environ.get("AGENTRAG_FAMILY_SEMANTIC_E2E") == "1":
+            host_env.update(AGENTRAG_FAMILY_EMBEDDING_ORIGIN=model_url.removesuffix("/v1"),
+                            AGENTRAG_FAMILY_EMBEDDING_MODEL="family-fixture-embedding")
         def start_host():
             output = (work / "host-private.log").open("a"); handles.append(output)
             process = subprocess.Popen([str(host_binary)], cwd=ROOT / "extensions", env=host_env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
@@ -271,7 +289,8 @@ def main():
             if not native_ids:
                 raise RuntimeError("exact-source feedback turn did not persist native retrieval references")
             route = "/knowledge-bases/" + kb["id"] + "/lifecycle/business/feedback_capture"
-            command = {"expected_revision": 0, "operation_id": "qa-feedback-e2e", "business": {"payload": {"session_id": feedback_session, "message_id": answer_id, "topic": "fixture-turn", "text": "Review the effective clause", "negative": True}}}
+            context = {"rating": "incorrect", "question": "What is the effective clause?", "answer_excerpt": "A shared answer excerpt.", "suggested_revision": "Cite the effective text."}
+            command = {"expected_revision": 0, "operation_id": "qa-feedback-e2e", "business": {"payload": {"session_id": feedback_session, "message_id": answer_id, "topic": "fixture-turn", "text": "Review the effective clause", "negative": True, "feedback_context": context}}}
             receipt = http.api("PUT", route, command)["data"]
             replay = http.api("PUT", route, command)["data"]
             status, _ = http.call("PUT", http.base_url + "/api/v1" + route, dict(command, operation_id="qa-feedback-repeat"))
@@ -283,6 +302,43 @@ def main():
             if set(json.loads(chunks)) != native_ids or run_state != "sealed" or promoted:
                 raise RuntimeError("QA feedback was not bound to the exact retrieved chunk set and held for review")
             emit("[M5-QA-FEEDBACK] PASS: authorized Quick QA answer bound exact native chunk IDs; retries produced one staged feedback")
+            review_route = route.removesuffix("feedback_capture")
+            review_row = http.api("GET", review_route + "feedback_list?id=" + receipt["id"])["data"][0]
+            if review_row["feedback_context"] != context or doc["id"] not in review_row["citation_document_ids"]:
+                raise RuntimeError("review did not return the explicitly shared excerpt and verified citation")
+            reviewed_text = "REVIEWEDGUIDE" + secrets.token_hex(12)
+            def review_action(action, revision, payload):
+                return http.api("PUT", review_route + action, {
+                    "operation_id": uuid.uuid4().hex, "expected_revision": revision,
+                    "business": {"id": receipt["id"], "payload": payload},
+                })["data"]
+            approved = review_action("feedback_approve", receipt["revision"], {"text": reviewed_text})
+            if approved["status"] != "approved":
+                raise RuntimeError("review did not preserve the cooling period")
+            with sqlite3.connect(work / "ext.db") as db:
+                if db.execute("SELECT 1 FROM ext_feedback_guidances WHERE feedback_id=?", (receipt["id"],)).fetchone():
+                    raise RuntimeError("approval bypassed the activation gate")
+                db.execute("UPDATE ext_feedback_staging SET ready_at='2020-01-01T00:00:00Z' WHERE feedback_id=?", (receipt["id"],))
+            if review_action("feedback_activate", approved["revision"], {})["status"] != "active":
+                raise RuntimeError("reviewed guidance did not activate")
+            http.api("PUT", quick_id, dict(quick_update, config=exact_config))
+            _, _, matching = ask("rag-workbench-guide-active", False, doc["id"])
+            model.phase = "setup"
+            unrelated = http.api("POST", "/knowledge-bases/" + kb["id"] + "/knowledge/manual", {
+                "title": "Unrelated workbench source",
+                "content": "AGENTRAG_E2E_MARKER appears in a different source. " * 8,
+                "status": "publish",
+            })["data"]["id"]
+            def unrelated_active():
+                url = http.base_url + "/api/v1/knowledge-bases/" + kb["id"] + "/lifecycle/documents/" + unrelated
+                code, body = http.call("GET", url)
+                return code == 200 and json.loads(body)["data"]["snapshot"]["current"]["state"] == "active"
+            startup.until(unrelated_active, 20)
+            _, _, irrelevant = ask("rag-workbench-guide-other-source", False, unrelated)
+            http.api("PUT", quick_id, quick_update)
+            if reviewed_text not in matching or reviewed_text in irrelevant or context["answer_excerpt"] in matching or context["suggested_revision"] in matching:
+                raise RuntimeError("reviewed guidance was not limited to a matching source or included raw user feedback")
+            emit("[DOCUMENT-FEEDBACK] PASS: shared excerpt, reviewed wording, controlled activation and exact citation match")
         status, response, captured = ask("rag-fallback-active", False)
         if status != 200 or desc_canary not in captured or model.old_answer not in response:
             raise RuntimeError("active fallback description positive control failed")
@@ -382,7 +438,7 @@ def main():
         repeal = None
         if os.environ.get("AGENTRAG_BUSINESS_E2E") == "1":
             import business_e2e
-            business_guidance = business_e2e.run(http, kb, doc, emit, work / "ext.db")
+            business_guidance, family_history = business_e2e.run(http, kb, doc, emit, work / "ext.db")
             with sqlite3.connect(work / "ext.db") as db:
                 if db.execute("PRAGMA foreign_key_check").fetchone():
                     raise RuntimeError("business foreign key violation")
@@ -391,6 +447,8 @@ def main():
                 if db.execute("SELECT count(*) FROM ext_projection_outbox WHERE projection_type='family_tag'").fetchone()[0] != 2:
                     raise RuntimeError("family projection intent missing")
             emit("[M5-FACTS] PASS: source superseded, single published proposal, two family projection intents and FK integrity")
+            if os.environ.get("AGENTRAG_FAMILY_CUTOVER_E2E") == "1":
+                business_e2e.run_family_cutover(http, kb, emit, env["AGENTRAG_MANAGEMENT_KEY"], family_history, work / "ext.db")
             if os.environ.get("AGENTRAG_SPLIT_E2E") == "1":
                 business_e2e.run_split(http, kb, emit, work / "ext.db", business_guidance)
             if os.environ.get("AGENTRAG_REPEAL_E2E") == "1":
@@ -435,6 +493,19 @@ def main():
             if status != 200 or model.tool_step != 2 or warning not in captured or canary not in captured:
                 raise RuntimeError("archived repeal was not available through authorized historical search")
             emit("[REL-06-HISTORY] PASS: native MCP found the archived policy with the historical warning")
+        if os.environ.get("AGENTRAG_FAMILY_E2E") == "1":
+            import business_e2e
+            business_e2e.run_families(http, kb, emit, env["AGENTRAG_MANAGEMENT_KEY"])
+            if os.environ.get("AGENTRAG_FAMILY_SEMANTIC_E2E") == "1":
+                required = {f"Employee handbook {year}" for year in (2024, 2025, 2026)}
+                sent = set(model.family_embedding_inputs)
+                retired_title = http.api("GET", "/knowledge/" + doc["id"])["data"]["title"]
+                if not required.issubset(sent) or retired_title in sent or "Foreign handbook" in sent:
+                    raise RuntimeError("family embeddings missed allowed titles or received stale/foreign inputs")
+                emit("[FAM-04-SEMANTIC] PASS: real Host sent scoped title embeddings without forwarding Core credentials")
+        if os.environ.get("AGENTRAG_FAMILY_HISTORY_E2E") == "1":
+            import business_e2e
+            business_e2e.run_family_history(http, kb, emit)
         helpers.stop_owned(host); host = None
         for phase, agent in (("rag-offline", False), ("agent-search-offline", True)):
             status, response, captured = ask(phase, agent)

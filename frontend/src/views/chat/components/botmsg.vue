@@ -131,7 +131,7 @@
                 $t('common.loading') }}</span></div>
         </div>
         <RelatedAttachments :session="session" />
-        <AnswerFeedback v-if="!embeddedMode" :message="session" :session-id="sessionId" />
+        <AnswerFeedback v-if="!embeddedMode" :message="session" :session-id="sessionId" :question="userQuery" />
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"

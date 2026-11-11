@@ -14,6 +14,13 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 		out := Result{ID: c.ID, Revision: c.ExpectedRevision + 1}
 		switch c.Action {
 		case "feedback_create", "feedback_capture", "guidance_seed":
+			if c.Action == "feedback_capture" {
+				// Chat submissions always go through a human reviewer.
+				p.Risk = "medium"
+				if p.FeedbackContext != nil {
+					p.Negative = p.FeedbackContext.Rating == "incorrect"
+				}
+			}
 			if strings.TrimSpace(p.Text) == "" || len(p.Text) > 16000 || strings.TrimSpace(p.Topic) == "" || len(p.Topic) > 128 || c.ExpectedRevision != 0 {
 				return Result{}, ErrInvalid
 			}
@@ -87,9 +94,12 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 			return out, e
 		}
 		var status, risk, topic, text string
+		var reviewContext bool
 		var rev int64
 		var ready sql.NullString
-		if e := tx.QueryRowContext(ctx, `SELECT status,risk,topic,text,revision,ready_at FROM ext_feedback_staging WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, args(c.Scope, c.ID)...).Scan(&status, &risk, &topic, &text, &rev, &ready); e != nil {
+		if e := tx.QueryRowContext(ctx, `SELECT f.status,f.risk,f.topic,f.text,f.revision,f.ready_at,r.feedback_id IS NOT NULL
+FROM ext_feedback_staging f LEFT JOIN ext_feedback_review_context r USING(tenant_id,knowledge_base_id,feedback_id)
+WHERE f.tenant_id=? AND f.knowledge_base_id=? AND f.feedback_id=?`, args(c.Scope, c.ID)...).Scan(&status, &risk, &topic, &text, &rev, &ready, &reviewContext); e != nil {
 			return Result{}, ErrConflict
 		}
 		if rev != c.ExpectedRevision {
@@ -99,6 +109,16 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 		case "feedback_approve":
 			if status != "pending_review" {
 				return Result{}, ErrConflict
+			}
+			if reviewContext {
+				reviewed := strings.TrimSpace(p.Text)
+				if reviewed == "" || len(reviewed) > 720 {
+					return Result{}, ErrInvalid
+				}
+				if _, e := tx.ExecContext(ctx, `UPDATE ext_feedback_review_context SET reviewed_guidance=?
+WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, append([]any{reviewed}, args(c.Scope, c.ID)...)...); e != nil {
+					return Result{}, e
+				}
 			}
 			hours := 24
 			if risk == "medium" {
@@ -124,6 +144,12 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 				return Result{}, ErrConflict
 			}
 			out.Status = "active"
+			if reviewContext {
+				if e := tx.QueryRowContext(ctx, `SELECT reviewed_guidance FROM ext_feedback_review_context
+WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, args(c.Scope, c.ID)...).Scan(&text); e != nil || text == "" {
+					return Result{}, ErrConflict
+				}
+			}
 			if _, e = tx.ExecContext(ctx, `INSERT INTO ext_feedback_guidances VALUES(?,?,?,?,'feedback',?,?,0.75,'active',1,?)`, args(c.Scope, c.ID, c.ID, topic, text, s.now().UTC().Format(time.RFC3339Nano))...); e != nil {
 				return Result{}, e
 			}
@@ -165,12 +191,15 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 	switch c.Action {
 	case "relation_list":
 		table, idcol, fields = relationRecords, "relation_id", "details"
+		if c.Payload.DocumentID != "" {
+			table = documentRelationRecords
+		}
 	case "feedback_list":
 	case "guidance_list":
 		table, idcol = "ext_feedback_guidances", "guidance_id"
 		fields = `json_object('text',text,'topic',topic,'source',source,'confidence',confidence)`
 	case "revision_list":
-		table, idcol, fields = revisionRecords, "proposal_id", "details"
+		table, idcol, fields = revisionRecords+" AS records", "proposal_id", "details"
 	default:
 		return nil, ErrInvalid
 	}
@@ -199,6 +228,34 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 		} else if c.Action == "revision_list" {
 			where += " AND json_extract(details,'$.record_kind') <> 'split_part'"
 		}
+		if c.Payload.DocumentID != "" {
+			if !validID(c.Payload.DocumentID) {
+				return ErrInvalid
+			}
+			switch c.Action {
+			case "relation_list":
+				where += " AND (json_extract(details,'$.document_id')=? OR json_extract(details,'$.target_document_id')=?)"
+			case "revision_list":
+				where += ` AND (json_extract(details,'$.source_document_id')=? OR json_extract(details,'$.target_document_id')=?
+OR (json_extract(details,'$.record_kind')='split_batch' AND EXISTS (
+ SELECT 1 FROM ext_revision_split_parts p JOIN ext_revision_proposals r USING(tenant_id,knowledge_base_id,proposal_id)
+ WHERE p.tenant_id=records.tenant_id AND p.knowledge_base_id=records.knowledge_base_id
+ AND p.batch_id=records.proposal_id AND r.status='published' AND r.target_document_id=?)))`
+				params = append(params, c.Payload.DocumentID)
+			default:
+				return ErrInvalid
+			}
+			params = append(params, c.Payload.DocumentID, c.Payload.DocumentID)
+		}
+		if c.Action == "feedback_list" && c.ListStatus != "" {
+			switch c.ListStatus {
+			case "pending_review", "approved", "active", "rejected", "quarantined", "withdrawn":
+			default:
+				return ErrInvalid
+			}
+			where += " AND status=?"
+			params = append(params, c.ListStatus)
+		}
 		params = append(params, c.PageSize, (c.Page-1)*c.PageSize)
 		rows, e := tx.QueryContext(ctx, `SELECT `+idcol+`,status,revision,`+fields+` FROM `+table+` WHERE `+where+` ORDER BY `+idcol+` LIMIT ? OFFSET ?`, params...)
 		if e != nil {
@@ -219,6 +276,10 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 			row["id"] = id
 			row["status"] = status
 			row["revision"] = rev
+			if c.Action == "feedback_list" && row["source"] == "qa" && !c.IncludeFeedbackContext {
+				delete(row, "text")
+				delete(row, "topic")
+			}
 			out = append(out, row)
 		}
 		if err := rows.Err(); err != nil {
@@ -233,6 +294,11 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 				return err
 			}
 			out[0]["split_parts"] = parts
+		}
+		if c.Action == "feedback_list" && c.ID != "" && len(out) == 1 && out[0]["source"] == "qa" && c.IncludeFeedbackContext {
+			if err := feedbackReviewContext(ctx, tx, c, out[0]); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -272,4 +338,19 @@ json_object('document_id',a.attachment_id,'target_document_id',a.parent_document
 FROM ext_attachment_links a LEFT JOIN ext_attachment_delete_intents d
 ON d.tenant_id=a.tenant_id AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id
 WHERE a.attachment_id IS NOT NULL
+)`
+
+// Supplement declarations are visible from either endpoint in the document workbench.
+// They are edited through the supplement workflow and do not grant retrieval permission.
+const documentRelationRecords = `(
+SELECT * FROM ` + relationRecords + `
+UNION ALL
+SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||f.edge_id,'supplement_declared',d.revision,
+ json_object('document_id',d.document_id,'target_document_id',p.parent_document_id,'edge_type','supplements',
+ 'source_version_id',d.child_version_node_id,'target_version_id',p.parent_version_node_id)
+FROM ext_supplement_current c
+JOIN ext_supplement_declarations d USING(tenant_id,knowledge_base_id,document_id,revision,declaration_id)
+JOIN ext_supplement_parents p USING(tenant_id,knowledge_base_id,document_id,declaration_id)
+JOIN ext_supplement_edge_facts f USING(tenant_id,knowledge_base_id,document_id,declaration_id,parent_document_id)
+WHERE d.status='active'
 )`

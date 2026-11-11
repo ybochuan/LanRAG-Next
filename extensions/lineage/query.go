@@ -89,6 +89,23 @@ func traverse(ctx context.Context, tx *sql.Tx, s provenance.Scope, id, mode stri
 	return out, nil
 }
 
+// CheckVersionLinkTx rejects adding an ancestry edge that closes a cycle.
+func CheckVersionLinkTx(ctx context.Context, tx *sql.Tx, scope provenance.Scope, from, to string) error {
+	if from == to {
+		return ErrConflict
+	}
+	parents, err := traverse(ctx, tx, scope, to, "version-ancestry")
+	if err != nil {
+		return err
+	}
+	for _, ancestor := range parents {
+		if ancestor.NodeID == from {
+			return ErrConflict
+		}
+	}
+	return nil
+}
+
 // Query keeps /provenance (derived_from) separate from /version-ancestry
 // (supersedes/merged_into and committed split_from).
 func (r *Registry) Query(ctx context.Context, s provenance.Scope, node, mode string) ([]Ancestor, error) {

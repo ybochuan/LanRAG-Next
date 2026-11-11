@@ -14,10 +14,15 @@ export async function createBusinessFixture(port=0) {
     feedback:[{id:'feedback-review',revision:1,status:'pending_review',topic:'生效日期的核对',text:'涉及条款时，请明确依据的生效日期，并引用当前有效版本。',risk:'medium',ready_at:null},{id:'feedback-high',revision:2,status:'approved',topic:'高风险条款适用范围',text:'只在适用范围明确匹配的情况下引用该条款，不扩大解释。',risk:'high',ready_at:'2020-01-01T00:00:00Z'},{id:'feedback-cooling',revision:2,status:'approved',topic:'待冷静期结束的反馈',text:'核对定义与术语的一致性。',risk:'medium',ready_at:'2099-01-01T00:00:00Z'}],
     guidance:[{id:'guidance-effective',revision:1,status:'active',topic:'优先使用有效版本',text:'涉及日期的回答，先核对文档有效期和适用范围。',confidence:0.75,source:'seed'}],
     revision:[{id:'proposal-review',revision:1,status:'pending_review',source_document_id:kb.id+'-doc-1',guidance_ids:['guidance-effective'],proposed_patch:'# 研发协作规范（修订建议）\n\n## 评审要求\n每次发布前完成两名评审人的确认，并核对生效日期。'},{id:'proposal-publish',revision:3,status:'approved',source_document_id:kb.id+'-doc-1',guidance_ids:['guidance-effective'],proposed_patch:'# 研发协作规范\n\n## 修订条款\n发布时明确版本、生效日期和适用范围。',publication_key:'fixture-publication-key'}],
+    family:{business_family_id:kb.id+'-family',label:kb.id==='kb-a'?'研发协作制度族':'产品说明文档族',revision:2,published_document_id:kb.id+'-doc-1'},
+    suggestions:kb.id==='kb-a'?[
+      {id:'suggestion-member',revision:1,status:'pending',kind:'membership',document_id:'kb-a-doc-2',target_document_id:'kb-a-doc-1',confidence:.86,evidence:{similarity:.88,title_similarity:.6,semantic_similarity:.88,semantic_model:'fixture-embedding',declaration:1,structure:.54,reasons:['title_overlap','local_title_embedding']}},
+      {id:'suggestion-relation',revision:1,status:'pending',kind:'relationship',edge_type:'related_to',document_id:'kb-a-doc-1',target_document_id:'kb-a-doc-2',confidence:.8,evidence:{similarity:.9,title_similarity:.9,declaration:.8,structure:.4,reasons:['title_overlap']}},
+    ]:[],
   })
-  const entry=`import {createApp,h} from 'vue';import {createRouter,createWebHistory,RouterView} from 'vue-router';import BusinessView from '/src/views/business/BusinessView.vue';import LifecycleView from '/src/views/lifecycle/LifecycleView.vue';import '/src/assets/theme/theme.css';
+  const entry=`import {createApp,h} from 'vue';import {createRouter,createWebHistory,RouterView} from 'vue-router';import BusinessView from '/src/views/business/BusinessView.vue';import LifecycleView from '/src/views/lifecycle/LifecycleView.vue';import FamilyWorkspaceView from '/src/views/families/FamilyWorkspaceView.vue';import '/src/assets/theme/theme.css';
     if(new URLSearchParams(location.search).get('failOverview')==='1')document.cookie='fixture-fail-overview=1; path=/';
-    const routes=[...['associations','feedback-governance','revisions'].map(section=>({path:'/platform/'+section,component:BusinessView,props:{section}})),{path:'/platform/lifecycle',component:LifecycleView}];
+    const routes=[...['associations','feedback-governance','revisions'].map(section=>({path:'/platform/'+section,component:BusinessView,props:{section}})),{path:'/platform/lifecycle',component:LifecycleView},{path:'/platform/families',component:FamilyWorkspaceView}];
     createApp({render:()=>h(RouterView)}).use(createRouter({history:createWebHistory(),routes})).mount('#app');`
   const request=`import {auth} from '/fixture-auth.js';const viewer=new URLSearchParams(location.search).get('viewer')==='1';async function call(method,url,body){const r=await fetch('/fixture-api'+url,{method,headers:{'Content-Type':'application/json','X-Fixture-Viewer':viewer?'1':'0','X-Fixture-Tenant':String(auth.effectiveTenantId)},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw {$httpStatus:r.status};return data}export const get=(u)=>call('GET',u);export const put=(u,b)=>call('PUT',u,b);`
   const modules={
@@ -29,7 +34,7 @@ export async function createBusinessFixture(port=0) {
   const reply=(res,status,data)=>{res.statusCode=status;res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data))}
   const server=await createServer({root,configFile:false,cacheDir:root+'/node_modules/.vite-business-fixture',plugins:[vue(),{
     name:'business-component-fixture',enforce:'pre',
-    transform(code,id){if(id.includes('/views/business/')||id.includes('/views/lifecycle/')||id.endsWith('/api/business.ts')||id.endsWith('/api/lifecycle.ts'))return code.replaceAll("'@/api/knowledge-base'","'/fixture-kb.js'").replaceAll("'@/stores/auth'","'/fixture-auth.js'").replaceAll("'@/utils/request'","'/fixture-request.js'")},
+    transform(code,id){if(id.includes('/views/business/')||id.includes('/views/lifecycle/')||id.includes('/views/families/')||id.endsWith('/api/business.ts')||id.endsWith('/api/lifecycle.ts')||id.endsWith('/api/families.ts'))return code.replaceAll("'@/api/knowledge-base'","'/fixture-kb.js'").replaceAll("'@/stores/auth'","'/fixture-auth.js'").replaceAll("'@/utils/request'","'/fixture-request.js'")},
     resolveId(id){if(modules[id])return '\0'+id},load(id){if(id.startsWith('\0'))return modules[id.slice(1)]},
     configureServer(server){server.middlewares.use(async(req,res,next)=>{
       const url=new URL(req.url,'http://localhost')
@@ -58,6 +63,17 @@ export async function createBusinessFixture(port=0) {
       if(!action){if((req.headers.cookie||'').includes('fixture-fail-overview=1')){reply(res,503,{success:false,error:{code:'fixture_unavailable'}});return}const rows=docs.get(kb).map(d=>({document_id:d.document_id,title:d.title,state:d.state,last_event_id:'fixture-'+d.document_id,annotations:{revision:1,labels:{}}}));const documents=url.searchParams.get('state')==='active'?rows.filter(d=>d.title.includes(url.searchParams.get('title')||'')):rows.slice(0,1);reply(res,200,{success:true,data:{counts:{pending:0,scheduled:0,active:2,stale:0,archived:0,superseded:0,failed:0},total:rows.length,page:1,page_size:20,documents,rules:{rules:{effective_delay_days:0,valid_days:0,review_days:0},source:{tenant_id:7,knowledge_base_id:kb},revision:1,token:'fixture'},rule_revision:1,can_write:!readOnly}});return}
       if(action==='reviews'){reply(res,200,{success:true,data:{alerts:[],truncated:false}});return}
       if(req.method==='GET'){
+        if(action==='family_list'){reply(res,200,{success:true,data:[data.family]});return}
+        if(action==='family_workspace'||action==='family_suggestions'){
+          if(url.searchParams.get('id')!==data.family.business_family_id){reply(res,404,{success:false});return}
+          if(action==='family_workspace'){
+            const view=url.searchParams.get('state')
+            const members=view==='members'?docs.get(kb).slice(0,1):[]
+            reply(res,200,{success:true,data:{family:data.family,view,has_next:false,can_write:!readOnly,members}});return
+          }
+          reply(res,200,{success:true,data:{items:data.suggestions.filter(row=>row.status==='pending'),has_next:false,scan_status:'completed',
+            policy:{revision:0,similarity_weight:.6,declaration_weight:.25,structure_weight:.15,threshold:.7}}});return
+        }
         if(action==='related'){reply(res,200,{success:true,data:data.relation.filter(v=>v.status==='active').map(v=>({document_id:v.target_document_id,edge_type:v.edge_type,confidence:v.confidence,direction:'outgoing'}))});return}
         const kind=action.replace('_list',''),id=url.searchParams.get('id'),page=Number(url.searchParams.get('page')||1)
         const rows=(data[kind]||[]).filter(v=>!id||v.id===id).slice((page-1)*20,page*20)
@@ -68,6 +84,14 @@ export async function createBusinessFixture(port=0) {
       const body=JSON.parse(Buffer.concat(chunks).toString());calls.push({kb,action,body})
       const receiptKey=kb+':'+body.operation_id
       if(receipts.has(receiptKey)){reply(res,200,{success:true,data:receipts.get(receiptKey)});return}
+      if(action==='family_suggestion_confirm'||action==='family_suggestion_ignore'){
+        const suggestion=data.suggestions.find(row=>row.id===body.business.id)
+        if(!suggestion||suggestion.status!=='pending'||suggestion.revision!==body.expected_revision){reply(res,409,{success:false});return}
+        suggestion.status=action.endsWith('_confirm')?'confirmed':'ignored'
+        suggestion.revision++
+        const receipt={id:suggestion.id,revision:suggestion.revision,status:suggestion.status}
+        receipts.set(receiptKey,receipt);reply(res,200,{success:true,data:receipt});return
+      }
       const kind=action.startsWith('clause_')?'relation':action.split('_')[0]
       let row=data[kind]?.find(v=>v.id===body.business.id)
       if(action.endsWith('_create')||action==='relation_declare'||action==='guidance_seed'){

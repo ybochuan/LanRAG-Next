@@ -64,6 +64,47 @@ func TestManagementSupplementReadAndUnavailableWriter(t *testing.T) {
 	}
 }
 
+func TestManagementBusinessFamilyUsesExistingScopeAndWriteGrant(t *testing.T) {
+	s := fixture(t)
+	create := `{"action":"business_family_create","tenant_id":7,"knowledge_base_id":"kb","can_write":true,
+		"actor_id":"native-actor","operation_id":"create-family","business":{"payload":{"family_label":"员工手册"}}}`
+	for _, check := range []struct {
+		body, key string
+		status    int
+	}{
+		{create, "wrong", 401},
+		{strings.Replace(create, `"kb"`, `"other"`, 1), s.key, 403},
+		{strings.Replace(create, `"can_write":true`, `"can_write":false`, 1), s.key, 403},
+		{create, s.key, 200},
+	} {
+		if w := call(s, check.body, check.key); w.Code != check.status {
+			t.Fatalf("status=%d want=%d: %s", w.Code, check.status, w.Body.String())
+		}
+	}
+	w := call(s, `{"action":"business_family_list","tenant_id":7,"knowledge_base_id":"kb"}`, s.key)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"business_family_id"`) || !strings.Contains(w.Body.String(), "员工手册") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var result struct {
+		Data []struct {
+			ID string `json:"business_family_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Data) != 1 {
+		t.Fatal(result, err)
+	}
+	read := `{"action":"business_family_workspace","tenant_id":7,"knowledge_base_id":"kb","state":"activity","business":{"id":"` + result.Data[0].ID + `"}}`
+	w = call(s, read, s.key)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"can_write":false`) ||
+		!strings.Contains(w.Body.String(), `"action":"family_create"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = call(s, strings.Replace(read, result.Data[0].ID, "unknown-family", 1), s.key)
+	if w.Code != 404 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
 func TestManagementDisabledAndUnsupportedVersion(t *testing.T) {
 	s := fixture(t)
 	for _, version := range []string{"", "2"} {

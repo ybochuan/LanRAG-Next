@@ -9,7 +9,10 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 	"net/url"
+	"slices"
 	"sort"
+	"strings"
+	"time"
 )
 
 // AttachmentSource reads current relationship metadata from the native API.
@@ -38,7 +41,7 @@ func (p *Policy) attachmentDocuments(ctx context.Context, r contract.BeforeRetri
 		if !wanted[d.ID] {
 			continue
 		}
-		if d.TenantID != r.TenantID || !p.kbs[d.KnowledgeBaseID] {
+		if d.TenantID != r.TenantID || !slices.Contains(r.KnowledgeBaseIDs, d.KnowledgeBaseID) {
 			return nil, errors.New("attachment source scope mismatch")
 		}
 		if _, ok := result[d.ID]; ok {
@@ -48,19 +51,28 @@ func (p *Policy) attachmentDocuments(ctx context.Context, r contract.BeforeRetri
 	}
 	return result, nil
 }
-func attachmentParentActive(ctx context.Context, tx *sql.Tx, tenant uint64, d weknora.AttachmentDocument) (bool, error) {
-	if !weknora.ValidID(d.ParentDocumentID) || d.ParentDocumentID == d.ID {
-		return false, nil
-	}
-	var state string
-	e := tx.QueryRowContext(ctx, `SELECT CASE WHEN `+store.LifecycleReadableSQL+` THEN c.state ELSE '' END FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
+func publicationChannelReadable(channel, released string) bool {
+	reserved := strings.HasPrefix(channel, weknora.SplitPublicationChannelPrefix) || strings.HasPrefix(channel, weknora.RevisionPublicationChannelPrefix)
+	return !reserved || channel == released
+}
+
+func attachmentParentActive(ctx context.Context, tx *sql.Tx, tenant uint64, parent weknora.AttachmentDocument, now time.Time) (bool, error) {
+	var state, publishedChannel string
+	var from, until sql.NullString
+	e := tx.QueryRowContext(ctx, `SELECT CASE WHEN `+store.LifecycleReadableSQL+` AND NOT `+store.PublicationTargetPendingSQL+` THEN c.state ELSE '' END,
+	COALESCE(`+store.PublishedPublicationChannelSQL+`,''),a.effective_from,a.effective_until FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+store.LifecycleAnnotationJoinSQL+`
 	WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?
 	AND NOT EXISTS (SELECT 1 FROM ext_attachment_delete_intents d WHERE d.tenant_id=c.tenant_id
-	AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id)`, fmt.Sprint(tenant), d.KnowledgeBaseID, d.ParentDocumentID).Scan(&state)
+	AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id)`, fmt.Sprint(tenant), parent.KnowledgeBaseID, parent.ID).Scan(&state, &publishedChannel, &from, &until)
+	effective, _ := store.EffectiveAt(now, from, until)
 	if errors.Is(e, sql.ErrNoRows) {
 		return false, nil
 	}
-	return state == "active", e
+	if e != nil || state != "active" || !effective || !publicationChannelReadable(parent.Channel, publishedChannel) {
+		return false, e
+	}
+	held, e := store.LegacyPublicationHeldTx(ctx, tx, parent)
+	return !held && e == nil, e
 }
 
 // attachmentParents extends only the internal policy lookup; parents are never
@@ -100,7 +112,7 @@ func (p *Policy) attachmentParents(ctx context.Context, r contract.BeforeRetriev
 func validAttachmentParent(child, parent weknora.AttachmentDocument) bool {
 	return parent.ID != "" && parent.ID == child.ParentDocumentID && parent.TenantID == child.TenantID &&
 		parent.KnowledgeBaseID == child.KnowledgeBaseID && !parent.IsAttachment &&
-		parent.EnableStatus != "disabled" && (parent.ParseStatus == "" || parent.ParseStatus == "completed")
+		(parent.EnableStatus == "" || parent.EnableStatus == "enabled") && (parent.ParseStatus == "" || parent.ParseStatus == "completed")
 }
 
 // AttachmentLinks enriches parent hits and direct attachment hits with current permits.

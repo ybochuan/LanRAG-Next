@@ -21,10 +21,7 @@ type SplitPartInput struct {
 }
 
 type splitRemote interface {
-	Remote
 	ValidateSplitSource(context.Context, Publication) error
-	CreateDraft(context.Context, Publication) (RemoteDocument, error)
-	IndexDraft(context.Context, Publication) (RemoteDocument, error)
 }
 
 // An approved split requires exact Markdown bytes. Refuse inputs the native
@@ -226,6 +223,9 @@ func noApprovedSplit(ctx context.Context, tx *sql.Tx, scope provenance.Scope, do
 // A superseded source is accepted only for a member of the batch that retired it.
 func (s *Service) publicationSource(ctx context.Context, tx *sql.Tx, p Publication) (first bool, err error) {
 	if p.SplitID == "" {
+		if err := requireLegacyPublisherOutsideFamilyHead(ctx, tx, p.Scope, p.SourceDocumentID); err != nil {
+			return false, err
+		}
 		if err := noApprovedSplit(ctx, tx, p.Scope, p.SourceDocumentID, p.SourceVersionID); err != nil {
 			return false, err
 		}
@@ -243,6 +243,9 @@ func (s *Service) publicationSource(ctx context.Context, tx *sql.Tx, p Publicati
 		return false, err
 	}
 	if !firstProposal.Valid {
+		if err := requireLegacyPublisherOutsideFamilyHead(ctx, tx, p.Scope, p.SourceDocumentID); err != nil {
+			return false, err
+		}
 		return true, s.current(ctx, tx, p.Scope, p.SourceDocumentID, p.SourceVersionID)
 	}
 	state, event, err := store.ReadLifecycleCurrentTx(ctx, tx, p.Scope.TenantID, p.Scope.KnowledgeBaseID, p.SourceDocumentID)
@@ -265,11 +268,8 @@ func (s *Service) observeVersion(ctx context.Context, scope provenance.Scope, do
 	return v.ID, err
 }
 
-func (s *Service) publishSplit(ctx, remoteCtx context.Context, p Publication, r Result) (Result, error) {
-	remote, ok := s.remote.(splitRemote)
-	if !ok {
-		return Result{}, ErrUnavailable
-	}
+func (s *Service) publishDraft(ctx, remoteCtx context.Context, p Publication, r Result) (Result, error) {
+	remote := s.remote
 	target, err := remote.Reconcile(remoteCtx, p)
 	if err != nil {
 		return s.publishFailure(ctx, p, r, err)
@@ -288,7 +288,7 @@ func (s *Service) publishSplit(ctx, remoteCtx context.Context, p Publication, r 
 			return s.publishMismatch(ctx, p, r)
 		}
 		// The native channel already fences unbound documents. Bind the ID
-		// before this publisher can submit indexing or finalize the split.
+		// before this publisher can submit indexing or finalize governance.
 		return s.publishState(ctx, p, r, "publishing", "", target.ID, "")
 	}
 	if target.ID != p.TargetDocumentID || target.ContentHash != p.ContentHash {

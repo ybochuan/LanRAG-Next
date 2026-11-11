@@ -3,7 +3,7 @@ import test from 'node:test'
 import type { LineageGraph, LineageNode } from '../../api/lineage'
 import { layoutGraph, nodeTitle } from './model'
 
-const node = (id: string): LineageNode => ({ id, type: 'document_version', document_id: id, family_id: '', sequence: 1, current: false, state: 'active', created_at: '' })
+const node = (id: string): LineageNode => ({ id, type: 'document_version', document_id: id, sequence: 1, current: false, state: 'active', created_at: '' })
 const graph = (): LineageGraph => ({
   mode: 'version-ancestry', root_id: '', nodes: ['a', 'b', 'c', 'd'].map(node),
   edges: [['a', 'b'], ['a', 'c'], ['b', 'd'], ['c', 'd']].map(([from, to], index) => ({ id: String(index), from: from!, to: to!, type: 'supersedes' })),

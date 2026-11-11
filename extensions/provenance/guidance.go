@@ -49,7 +49,7 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 				return ErrConflict
 			}
 		}
-		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID}
+		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID, StepID: q.StepID}
 		selection, err := guidance.SelectTx(ctx, tx, scope, q.CallID)
 		if err != nil {
 			return err

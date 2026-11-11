@@ -1,9 +1,14 @@
 import { get, put } from '@/utils/request'
 import { batchQueryKnowledge, getKnowledgeDetailsCon } from '@/api/knowledge-base'
 import { cached, cacheKey, invalidateCache } from './requestCache'
+import type { FamilyActivity, SuggestionPolicy } from './families'
 
 export type BusinessKind = 'relation' | 'feedback' | 'guidance' | 'revision'
 export type BusinessSection = 'associations' | 'feedback-governance' | 'revisions'
+export type FamilyAction = 'family_create' | 'family_member_add' | 'family_member_remove'
+  | 'family_replace_create' | 'family_replace_approve' | 'family_replace_cancel' | 'family_replace_history'
+  | 'family_backfill_apply' | 'family_projection_set'
+  | 'family_suggestion_scan' | 'family_suggestion_confirm' | 'family_suggestion_ignore' | 'family_suggestion_policy_set'
 export type BusinessAction = 'relation_declare' | 'relation_confirm' | 'relation_revoke'
   | 'repeal_create' | 'repeal_approve' | 'repeal_cancel'
   | 'clause_create' | 'clause_confirm' | 'clause_resolve' | 'clause_revoke'
@@ -22,6 +27,10 @@ export interface SplitPartRecord {
   target_document_id?: string; publish_error?: string
 }
 export interface BusinessPayload {
+  family_label?: string; business_family_id?: string; family_revision?: number; reason?: string
+  legacy_family_id?: string; backfill_fingerprint?: string; projection_enabled?: boolean
+  replacement_ids?: string[]; history_fingerprint?: string
+  suggestion_policy?: Omit<SuggestionPolicy, 'revision'>
   document_id?: string; target_document_id?: string; edge_type?: string
   text?: string; topic?: string; risk?: string; negative?: boolean
   second_confirmation?: boolean; guidance_ids?: string[]
@@ -44,6 +53,9 @@ export interface BusinessRecord {
   publish_error?: string; family_id?: string
   record_kind?: 'split_batch' | 'split_part'
   split_id?: string; split_title?: string; split_parts?: SplitPartRecord[]
+  feedback_context?: AnswerFeedbackContext
+  reviewed_guidance?: string
+  citation_document_ids?: string[]
 }
 export interface BusinessResult { id: string; revision: number; status: string; target_document_id?: string }
 export interface BusinessBody { operation_id: string; expected_revision: number; business: { id?: string; payload: BusinessPayload } }
@@ -56,12 +68,28 @@ async function unwrap<T>(request: Promise<unknown>): Promise<T> {
   if (!response.success || response.data === null || response.data === undefined) throw new Error(response.error?.code || 'business_unavailable')
   return response.data
 }
-export const list = (kb: string, kind: BusinessKind, page = 1, id = '') => unwrap<BusinessRecord[]>(get(`${base(kb)}${kind}_list?page=${page}&page_size=20&id=${encodeURIComponent(id)}`))
-export const write = async (kb: string, action: BusinessAction, body: BusinessBody) => {
+export const list = (kb: string, kind: BusinessKind, page = 1, id = '', state = '') =>
+  unwrap<BusinessRecord[]>(get(`${base(kb)}${kind}_list?${new URLSearchParams({page:String(page),page_size:'20',id,...(state?{state}:{})})}`))
+export const documentRecords = (kb: string, doc: string, kind: 'relation' | 'revision', page: number, id = '') =>
+  unwrap<BusinessRecord[]>(get(`${base(kb)}related?${new URLSearchParams({
+    state: kind === 'relation' ? 'workbench-relations' : 'workbench-revisions',
+    document_id: doc, page: String(page), page_size: '20', id,
+  })}`))
+export const documentActivity = (kb:string, doc:string, page:number) =>
+  unwrap<FamilyActivity[]>(get(`${base(kb)}related?${new URLSearchParams({
+    state:'workbench-activity',document_id:doc,page:String(page),page_size:'20',
+  })}`))
+export const write = async (kb: string, action: BusinessAction | FamilyAction, body: BusinessBody) => {
   const result = await unwrap<BusinessResult>(put(`${base(kb)}${action}`, body))
   invalidateCache('document-picker-active')
   invalidateCache('doc-titles')
   return result
+}
+export interface AnswerFeedbackContext {
+  rating: 'incorrect' | 'suggestion' | 'helpful'
+  question?: string
+  answer_excerpt?: string
+  suggested_revision?: string
 }
 export interface AnswerFeedbackPayload {
   session_id: string
@@ -69,6 +97,7 @@ export interface AnswerFeedbackPayload {
   topic: string
   text: string
   negative: boolean
+  feedback_context: AnswerFeedbackContext
 }
 export const captureAnswerFeedback = (kb: string, operationId: string, payload: AnswerFeedbackPayload) =>
   unwrap<BusinessResult>(put(`${base(kb)}feedback_capture`, {

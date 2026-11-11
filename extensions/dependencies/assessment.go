@@ -45,11 +45,12 @@ type Assessment struct {
 	Sources          []SourceRef `json:"sources"`
 	ReviewDue        *time.Time  `json:"review_due,omitempty"`
 	RepealHold       bool        `json:"repeal_hold,omitempty"`
+	PublicationHold  bool        `json:"publication_hold,omitempty"`
 }
 
 // ReadBlocked includes temporary holds that must not persist a lifecycle transition.
 func (a Assessment) ReadBlocked(now time.Time) bool {
-	return a.RepealHold || a.Invalid(now)
+	return a.RepealHold || a.PublicationHold || a.Invalid(now)
 }
 
 // Invalid distinguishes permission invalidation from advisory review deadlines.
@@ -180,13 +181,14 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 				a.StructuralReason = "parent_missing"
 			}
 			if state == "active" {
-				var repealDue bool
-				e = tx.QueryRowContext(ctx, `SELECT `+store.RepealDueSQL+` FROM ext_lifecycle_current c
-					WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scoped(s, ref.DocumentID)...).Scan(&repealDue)
+				var repealDue, publicationPending bool
+				e = tx.QueryRowContext(ctx, `SELECT `+store.RepealDueSQL+`,`+store.PublicationTargetPendingSQL+` FROM ext_lifecycle_current c
+					WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scoped(s, ref.DocumentID)...).Scan(&repealDue, &publicationPending)
 				if e != nil {
 					return e
 				}
 				a.RepealHold = a.RepealHold || repealDue
+				a.PublicationHold = a.PublicationHold || publicationPending
 			}
 			p := Parent{DocumentID: ref.DocumentID, VersionID: ref.VersionID, State: state}
 			current = ""
