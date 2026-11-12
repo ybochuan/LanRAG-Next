@@ -20,18 +20,18 @@
           <RouterLink :to="{ path: '/platform/lineage', query: { kb, mode: 'relations' } }">查看关联图</RouterLink>
         </div>
         <p class="subtle">查询已核验的制度关系。系统登记的附件归属在下方关联记录中查看。</p>
-        <form @submit.prevent="queryRelated">
-          <DocumentPicker :key="kb" v-model="queryDocument" :kb="kb" label="查询文档" :selected-title="titles.get(queryDocument)" searchable />
+        <form @submit.prevent="inspectRelated(queryDocument, kb)">
+          <DocumentPicker :key="kb" v-model="queryDocument" :kb="kb" label="查询文档" :selected-title="docName(queryDocument, queryScope||kb)" searchable />
           <button type="submit" class="primary" :disabled="querying||!queryDocument">查询关联</button>
         </form>
         <p v-if="querying" role="status">正在核对关联…</p>
         <p v-if="queryError" role="alert" class="notice error">{{ queryError }}</p>
         <template v-if="queryResult">
-          <p role="status">{{ docName(queryDocument) }} · {{ queryResult.length }} 条有效关联</p>
+          <p role="status">{{ docName(queryDocument, queryScope||kb) }} · {{ queryResult.length }} 条有效关联</p>
           <ul v-if="queryResult.length" class="relation-results">
-            <li v-for="row in queryResult" :key="row.document_id+row.edge_type+row.direction">
-              <span><strong>{{ docName(row.document_id) }}</strong><small>{{ row.direction==='incoming'?'关联至当前文档':'当前文档关联至' }} · {{ edgeLabels[row.edge_type] || row.edge_type }} · 评分 {{ row.confidence.toFixed(2) }}</small></span>
-              <button type="button" class="text-button" :aria-label="`查询 ${docName(row.document_id)} 的关联`" @click="inspectRelated(row.document_id)">继续查询</button>
+            <li v-for="row in queryResult" :key="row.knowledge_base_id+row.document_id+row.edge_type+row.direction">
+              <span><strong>{{ docName(row.document_id, row.knowledge_base_id) }}</strong><small>{{ row.direction==='incoming'?'关联至当前文档':'当前文档关联至' }} · {{ edgeLabels[row.edge_type] || row.edge_type }} · 评分 {{ row.confidence.toFixed(2) }}<template v-if="row.knowledge_base_id!==kb"> · 跨库 {{ row.knowledge_base_id }}</template></small></span>
+              <button type="button" class="text-button" :aria-label="`查询 ${docName(row.document_id, row.knowledge_base_id)} 的关联`" @click="inspectRelated(row.document_id, row.knowledge_base_id)">继续查询</button>
             </li>
           </ul>
           <p v-else class="empty">当前没有满足条件的有效关联。</p>
@@ -41,7 +41,7 @@
         <section class="panel records-panel" aria-label="治理记录">
           <div class="section-heading"><h2>{{ kind==='relation'?'关联记录':kind==='feedback'?'反馈记录':kind==='guidance'?'指导清单':'修订提案' }}</h2><span class="subtle">本页 {{ records.length }} 项</span></div>
           <p v-if="loading" role="status">正在读取记录…</p>
-          <div v-else class="record-list"><button v-for="row in records" :key="row.id" class="record-card" :class="{chosen:detail?.id===row.id}" @click="openRecord(row)"><span class="record-top"><strong>{{ recordTitle(row) }}</strong><span class="state-badge" :class="row.status">{{ stateLabel(row) }}</span></span><span v-if="kind==='relation'" class="subtle">{{ docName(row.document_id) }} → {{ docName(row.target_document_id) }}</span><span v-else class="record-summary">{{ row.text||row.proposed_patch }}</span><small>{{ shortID(row.id) }} · 版本 {{ row.revision }}<template v-if="row.ready_at"> · 冷静期至 {{ date(row.ready_at) }}</template></small></button>
+          <div v-else class="record-list"><button v-for="row in records" :key="row.id" class="record-card" :class="{chosen:detail?.id===row.id}" @click="openRecord(row)"><span class="record-top"><strong>{{ recordTitle(row) }}</strong><span class="state-badge" :class="row.status">{{ stateLabel(row) }}</span></span><span v-if="kind==='relation'" class="subtle">{{ docName(row.document_id, row.knowledge_base_id || kb) }} → {{ docName(row.target_document_id, row.target_knowledge_base_id || kb) }}</span><span v-else class="record-summary">{{ row.text||row.proposed_patch }}</span><small>{{ shortID(row.id) }} · 版本 {{ row.revision }}<template v-if="row.ready_at"> · 冷静期至 {{ date(row.ready_at) }}</template></small></button>
             <p v-if="!records.length" class="empty">{{ kind==='feedback'&&feedbackStatus ? '此状态下没有反馈。可切到「全部状态」查看其他记录。' : '当前还没有记录。' }}</p>
           </div>
           <footer class="pagination"><button :disabled="loading||page<=1" @click="movePage(-1)">上一页</button><span>第 {{ page }} 页</span><button :disabled="loading||records.length<20" @click="movePage(1)">下一页</button></footer>
@@ -49,7 +49,7 @@
         <section v-if="detailLoading" class="panel" role="status">正在核对记录内容…</section>
         <section v-else-if="detail" class="panel detail-panel" aria-label="记录详情">
           <div class="section-heading"><h2 ref="detailHeading" tabindex="-1">{{ recordTitle(detail) }}</h2><button class="text-button" @click="detail=undefined">关闭详情</button></div>
-          <p class="state-badge" :class="detail.status">{{ stateLabel(detail) }}</p><dl><dt>记录编号</dt><dd><code>{{ detail.id }}</code></dd><dt>当前版本</dt><dd>{{ detail.revision }}</dd><template v-if="detail.topic"><dt>主题</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>风险</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>冷静期至</dt><dd>{{ date(detail.ready_at) }}</dd></template><template v-if="detail.document_id||detail.source_document_id"><dt>源文档</dt><dd>{{ docName(detail.document_id||detail.source_document_id) }}</dd></template><template v-if="detail.target_document_id"><dt>{{ kind==='revision'?'发布的新文档':'关联文档' }}</dt><dd>{{ docName(detail.target_document_id) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>评分</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template></dl>
+          <p class="state-badge" :class="detail.status">{{ stateLabel(detail) }}</p><dl><dt>记录编号</dt><dd><code>{{ detail.id }}</code></dd><dt>当前版本</dt><dd>{{ detail.revision }}</dd><template v-if="detail.topic"><dt>主题</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>风险</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>冷静期至</dt><dd>{{ date(detail.ready_at) }}</dd></template><template v-if="detail.document_id||detail.source_document_id"><dt>源文档</dt><dd>{{ docName(detail.document_id||detail.source_document_id, detail.knowledge_base_id || kb) }}</dd></template><template v-if="detail.target_document_id"><dt>{{ kind==='revision'?'发布的新文档':'关联文档' }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || kb) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>评分</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template></dl>
           <p v-if="detail.publish_error" class="notice" role="status">{{ publicationError(detail.publish_error) }}</p>
           <template v-if="kind==='feedback' && detail.source==='qa'">
             <section v-if="detail.feedback_context" class="feedback-excerpt">
@@ -130,7 +130,7 @@
           <template v-else-if="detail.edge_type==='supplements'">
             <p class="subtle">箭头从补充通知指向主件。打开补充通知即可核对或修改它的依赖声明。</p>
             <button v-if="document?.id===detail.target_document_id && detail.document_id" type="button" class="text-button"
-              @click="$emit('open',detail.document_id,docName(detail.document_id))">打开补充通知</button>
+              @click="$emit('open',detail.document_id,docName(detail.document_id, detail.knowledge_base_id || kb))">打开补充通知</button>
           </template>
           <p v-else-if="kind==='relation'" class="subtle">已确认表示声明已保存；有效关联查询还会核对文档当前状态和版本。</p>
           <div v-if="kind==='relation'&&!document&&detail.edge_type!=='repeals'&&!clauseRelation(detail.edge_type)" class="actions">
@@ -148,7 +148,7 @@
           <label v-if="document && kind==='relation'">当前文档在关系中的位置
             <select v-model="relationEnd"><option value="source">源文档</option><option value="target">关联文档</option></select>
           </label>
-          <CreateForm :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="running||!!pending"
+          <CreateForm :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="running||!!pending" :knowledge-bases="knowledgeBases"
             :initial-guidance="initialGuidance" :fixed-document="document && (kind==='relation'||kind==='revision') ? {...document,end:kind==='revision'?'source':relationEnd} : undefined"
             @submit="(action,payload)=>beginWrite(action,payload)" />
         </div>
@@ -192,12 +192,14 @@ const records=ref<api.BusinessRecord[]>([]),detail=ref<api.BusinessRecord>(),det
 const titles=ref(new Map<string,string>()),detailHeading=ref<HTMLElement>(),dialog=ref<HTMLDialogElement>(),confirmationOpen=ref(false),secondConfirmation=ref(false),highRisk=ref(false)
 const pending=ref<{kb:string;intent:WriteIntent;detailID?:string}>(),confirmationText=ref(''),now=ref(Date.now())
 const clauseDecision=ref(''),clauseDecisionNote=ref('')
-const queryDocument=ref(''),queryResult=ref<api.RelatedDocument[]>(),queryError=ref(''),querying=ref(false)
+const queryDocument=ref(''),queryScope=ref(''),queryResult=ref<api.RelatedDocument[]>(),queryError=ref(''),querying=ref(false)
+const crossTitles=ref(new Map<string,string>())
+const docKey=(scope:string,id:string)=>scope+'\u0000'+id
 const queryHeading=ref<HTMLElement>()
 const listFence=requestFence(),detailFence=requestFence(),kbFence=requestFence(),queryFence=requestFence(),catalogFence=requestFence()
 let generation=0
 const timer=setInterval(()=>{now.value=Date.now()},30_000)
-const docName=(id?:string)=>id?(titles.value.get(id)||`文档 ${shortID(id)}`):'—'
+const docName=(id?:string, scope=kb.value)=>id?((scope===kb.value?titles.value.get(id):crossTitles.value.get(docKey(scope,id)))||`文档 ${shortID(id)}`):'—'
 const stateLabel=(row:api.BusinessRecord)=>kind.value==='relation'&&row.status==='active'?'已确认':statusLabels[row.status]||row.status
 function recordTitle(row:api.BusinessRecord){
   if(kind.value==='relation')return edgeLabels[row.edge_type||'']||'文档关联'
@@ -218,19 +220,28 @@ function actionPayload(action:api.BusinessAction):api.BusinessPayload{
   return {}
 }
 
-function recordDocumentIDs(row:api.BusinessRecord):string[]{
-  return [row.document_id,row.source_document_id,row.target_document_id].filter((value):value is string=>!!value)
+async function loadRecordTitles(rows:api.BusinessRecord[]){
+  const byScope=new Map<string,string[]>()
+  const add=(scope:string|undefined,id:string|undefined)=>{if(scope&&id)byScope.set(scope,[...(byScope.get(scope)||[]),id])}
+  for(const row of rows){
+    add(row.knowledge_base_id||kb.value,row.document_id||row.source_document_id)
+    add(row.target_knowledge_base_id||kb.value,row.target_document_id)
+    for(const part of row.split_parts||[])add(kb.value,part.target_document_id)
+    for(const id of row.citation_document_ids||[])add(kb.value,id)
+  }
+  await Promise.all([...byScope].map(([scope,ids])=>loadTitles(ids,scope)))
 }
-async function loadTitles(ids:string[]){
-  const scope=kb.value
-  const missing=[...new Set(ids.filter(id=>!!id&&!titles.value.has(id)))]
-  if(!scope||!missing.length)return
+async function loadTitles(ids:string[], scope=kb.value){
+  if(!scope)return
+  const target=scope===kb.value?titles.value:crossTitles.value
+  const missing=[...new Set(ids.filter(id=>!!id&&!target.has(scope===kb.value?id:docKey(scope,id))))]
+  if(!missing.length)return
   const version=generation
-  try{const values=await api.documentTitles(scope,missing);if(version!==generation||kb.value!==scope)return;for(const [id,title] of Object.entries(values))titles.value.set(id,title)}catch{}
+  try{const values=await api.documentTitles(scope,missing);if(version!==generation)return;for(const [id,title] of Object.entries(values)){if(scope===kb.value)titles.value.set(id,title);else crossTitles.value.set(docKey(scope,id),title)}}catch{}
 }
 async function loadRecords(){
   const token=listFence.begin(),scope=kb.value,recordKind=kind.value;if(!scope)return;loading.value=true;error.value=''
-  try{const rows=await readRecords(scope,recordKind,page.value);if(listFence.current(token)){records.value=rows;void loadTitles(rows.flatMap(recordDocumentIDs))}}
+  try{const rows=await readRecords(scope,recordKind,page.value);if(listFence.current(token)){records.value=rows;void loadRecordTitles(rows)}}
   catch(e){if(listFence.current(token)){records.value=[];detail.value=undefined;error.value=businessError(e);if(httpStatus(e)===403)canWrite.value=false}}
   finally{if(listFence.current(token))loading.value=false}
 }
@@ -244,8 +255,7 @@ function movePage(delta:number){page.value+=delta;void loadRecords()}
 async function openRecord(row:api.BusinessRecord){
   const token=detailFence.begin(),scope=kb.value,recordKind=kind.value;error.value='';detailLoading.value=true
   try{const found=(await readRecords(scope,recordKind,1,row.id))[0];if(!detailFence.current(token))return;if(!found){detail.value=undefined;error.value='该记录已不可访问，请刷新列表。';return}detail.value=found;await nextTick();detailHeading.value?.focus()
-    const partTargets=(found.split_parts||[]).flatMap(part=>part.target_document_id?[part.target_document_id]:[])
-    void loadTitles([...recordDocumentIDs(found),...partTargets,...(found.citation_document_ids||[])])
+    void loadRecordTitles([found])
   }catch(e){if(detailFence.current(token)){detail.value=undefined;error.value=businessError(e)}}finally{if(detailFence.current(token))detailLoading.value=false}
 }
 async function beginWrite(action:api.BusinessAction,payload:api.BusinessPayload,row?:api.BusinessRecord){
@@ -288,7 +298,7 @@ function clearRelatedResult(){
   querying.value=false
 }
 async function queryRelated(){
-  const scope=kb.value,id=queryDocument.value
+  const scope=queryScope.value||kb.value,id=queryDocument.value
   if(!scope||!id||kind.value!=='relation')return
   const token=queryFence.begin()
   querying.value=true
@@ -298,19 +308,24 @@ async function queryRelated(){
     const rows=await api.related(scope,id)
     if(!queryFence.current(token))return
     queryResult.value=rows
-    await loadTitles([id,...rows.map(row=>row.document_id)])
+    await loadTitles([id],scope)
+    const byScope=new Map<string,string[]>()
+    for(const row of rows)byScope.set(row.knowledge_base_id,[...(byScope.get(row.knowledge_base_id)||[]),row.document_id])
+    for(const [rowScope,docs] of byScope)if(rowScope!==scope)await loadTitles(docs,rowScope)
   }catch(e){
     if(queryFence.current(token))queryError.value=businessError(e)
   }finally{
     if(queryFence.current(token))querying.value=false
   }
 }
-function inspectRelated(id:string){
+function inspectRelated(id:string, scope=kb.value){
+  if(!id)return
+  queryScope.value=scope
   queryDocument.value=id
   queryHeading.value?.focus()
   void queryRelated()
 }
-function resetScope(){generation++;listFence.invalidate();detailFence.invalidate();kbFence.invalidate();clearRelatedResult();records.value=[];detail.value=undefined;detailLoading.value=false;pending.value=undefined;running.value=false;page.value=1;canWrite.value=false;titles.value.clear();error.value='';authorityError.value='';success.value='';queryDocument.value='';dialog.value?.close();confirmationOpen.value=false}
+function resetScope(){generation++;listFence.invalidate();detailFence.invalidate();kbFence.invalidate();clearRelatedResult();records.value=[];detail.value=undefined;detailLoading.value=false;pending.value=undefined;running.value=false;page.value=1;canWrite.value=false;titles.value.clear();crossTitles.value.clear();error.value='';authorityError.value='';success.value='';queryDocument.value='';queryScope.value='';dialog.value?.close();confirmationOpen.value=false}
 async function loadKBs(){
   const token=catalogFence.begin();kb.value='';resetScope();knowledgeBases.value=[];loadingKB.value=true
   if(props.scope){kb.value=props.scope;loadingKB.value=false;return}

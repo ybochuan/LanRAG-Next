@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
+	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 )
 
@@ -41,6 +42,10 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	}
 	if r.Action == "business_lineage_graph" {
 		return s.lineageGraph(ctx, r, body.ID)
+	}
+	if body.Payload.TargetKnowledgeBaseID != "" &&
+		!s.scopes[lifecycle.PolicyScope{TenantID: r.TenantID, KnowledgeBaseID: body.Payload.TargetKnowledgeBaseID}] {
+		return nil, errScopeNotConfigured
 	}
 	c := business.Command{Scope: provenance.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, ActorID: r.ActorID, Action: strings.TrimPrefix(r.Action, "business_"), OperationID: r.OperationID, ID: body.ID, ExpectedRevision: r.ExpectedRevision, Payload: body.Payload}
 	c.Page = r.Page
@@ -87,7 +92,17 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 			}
 			return b.List(ctx, c)
 		}
-		return b.QueryRelated(ctx, c.Scope, r.DocumentID)
+		rows, err := b.QueryRelated(ctx, c.Scope, r.DocumentID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]business.Related, 0, len(rows))
+		for _, row := range rows {
+			if s.scopes[lifecycle.PolicyScope{TenantID: r.TenantID, KnowledgeBaseID: row.KnowledgeBaseID}] {
+				out = append(out, row)
+			}
+		}
+		return out, nil
 	case "relation_list", "feedback_list", "guidance_list", "revision_list":
 		if c.Action == "feedback_list" {
 			c.ListStatus = r.State

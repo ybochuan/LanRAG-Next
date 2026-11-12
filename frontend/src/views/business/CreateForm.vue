@@ -13,7 +13,17 @@
       <p v-if="fixedDocument?.end==='source'" class="subtle">源文档 · {{ fixedDocument.title }}</p>
       <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
       <p v-if="fixedDocument?.end==='target'" class="subtle">关联文档 · {{ fixedDocument.title }}</p>
-      <DocumentPicker v-else-if="kind==='relation'" v-model="form.target_document_id" :kb="kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
+      <template v-if="kind==='relation'&&fixedDocument?.end!=='target'">
+        <label v-if="crossEligible" class="target-kb">目标知识库
+          <select v-model="form.target_knowledge_base_id" :disabled="disabled">
+            <option value="">当前知识库</option>
+            <option v-for="item in knowledgeBases.filter(v=>v.id!==kb)" :key="item.id" :value="item.id">{{ item.name }}</option>
+          </select>
+        </label>
+        <p v-if="crossEligible&&crossKB" class="subtle">跨库规范性关联仅支持修订、解释和相关；相关候选需要显式确认。</p>
+        <DocumentPicker v-model="form.target_document_id" :kb="crossEligible?(form.target_knowledge_base_id||kb):kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
+        <label v-if="form.edge_type==='related_to'&&crossEligible&&crossKB" class="check-label"><input v-model="form.second_confirmation" type="checkbox" :disabled="disabled" />我确认这是跨库语义关联</label>
+      </template>
       <template v-if="kind==='relation'">
         <label>关系类型<select v-model="form.edge_type" :disabled="disabled"><option v-for="item in relationChoices" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
         <p class="subtle">{{ relationChoices.find(item => item.key === form.edge_type)?.direction }}</p>
@@ -63,11 +73,14 @@ import DocumentPicker from './DocumentPicker.vue'
 import ClausePicker from './ClausePicker.vue'
 import { requestFence } from '../lifecycle/model'
 import { clauseRelation, relationChoices } from './model'
-const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;initialGuidance?:string;fixedDocument?:{id:string;title:string;end:'source'|'target'}}>()
+const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;knowledgeBases?:{id:string;name:string}[];initialGuidance?:string;fixedDocument?:{id:string;title:string;end:'source'|'target'}}>()
 const emit=defineEmits<{submit:[action:api.BusinessAction,payload:api.BusinessPayload]}>()
-const form=reactive({document_id:'',target_document_id:'',edge_type:'amends',effective_at:'',topic:'',risk:'medium',text:'',negative:false,similarity:0.8,declaration:0.8,structure:0.8})
+const knowledgeBases=computed(()=>props.knowledgeBases||[])
+const form=reactive({document_id:'',target_document_id:'',target_knowledge_base_id:'',edge_type:'amends',effective_at:'',topic:'',risk:'medium',text:'',negative:false,similarity:0.8,declaration:0.8,structure:0.8,second_confirmation:false})
 const clauses=reactive({source_clause:undefined as api.ClauseAnchor|undefined,target_clause:undefined as api.ClauseAnchor|undefined,applies_when:''})
 const clauseMode=computed(()=>props.kind==='relation'&&clauseRelation(form.edge_type))
+const crossEligible=computed(()=>['amends','interprets','related_to'].includes(form.edge_type))
+const crossKB=computed(()=>crossEligible.value&&(form.target_knowledge_base_id||props.kb)!==props.kb)
 const revisionMode=ref<'single'|'split'>('single')
 const splitParts=ref([{key:0,title:'',text:''},{key:1,title:'',text:''}])
 let nextPartKey=2
@@ -91,7 +104,7 @@ function submit(){
     const time=Date.parse(form.effective_at)
     emit('submit','repeal_create',{document_id:form.document_id,target_document_id:form.target_document_id,effective_at:Number.isFinite(time)?new Date(time).toISOString():''})
   }
-  else if(props.kind==='relation')emit('submit','relation_declare',{document_id:form.document_id,target_document_id:form.target_document_id,edge_type:form.edge_type,similarity:form.similarity,declaration:form.declaration,structure:form.structure})
+  else if(props.kind==='relation')emit('submit','relation_declare',{document_id:form.document_id,target_document_id:form.target_document_id,target_knowledge_base_id:crossEligible.value?(form.target_knowledge_base_id||undefined):undefined,edge_type:form.edge_type,similarity:form.similarity,declaration:form.declaration,structure:form.structure,...(crossKB.value&&form.edge_type==='related_to'?{second_confirmation:form.second_confirmation}:{})})
   else if(props.kind==='revision'){
     const scope={document_id:form.document_id,guidance_ids:[...selected.value]}
     if(revisionMode.value==='split')emit('submit','split_create',{...scope,split_parts:splitParts.value.map(({title,text})=>({title,text}))})
@@ -99,6 +112,8 @@ function submit(){
   }
   else emit('submit',props.kind==='guidance'?'guidance_seed':'feedback_create',{topic:form.topic.trim(),text:form.text,...(props.kind==='feedback'?{risk:form.risk,negative:form.negative}:{})})
 }
+watch(()=>form.target_knowledge_base_id,()=>{form.target_document_id='';form.second_confirmation=false})
+watch(()=>form.edge_type,()=>{if(!crossEligible.value){if(form.target_knowledge_base_id)form.target_knowledge_base_id='';form.second_confirmation=false}else if(!crossKB.value)form.second_confirmation=false})
 watch(()=>props.kb,()=>{if(props.kind==='revision')void loadGuidances()},{immediate:true})
 watch(()=>props.fixedDocument,(fixed)=>{
   if(!fixed)return

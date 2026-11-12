@@ -133,6 +133,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, lifecycle.ErrConfigurationConflict) || errors.Is(err, lineage.ErrConflict) || errors.Is(err, business.ErrConflict) {
 			status, code = 409, "revision_conflict"
 		}
+		if errors.Is(err, errScopeNotConfigured) {
+			status, code = 403, "scope_not_configured"
+		}
 		if errors.Is(err, errNotFound) {
 			status, code = 404, "document_not_found"
 		}
@@ -150,6 +153,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var errNotFound = errors.New("document not found")
 var errDatabase = errors.New("management database unavailable")
+var errScopeNotConfigured = errors.New("scope not configured")
 
 func (s *Server) execute(ctx context.Context, r Request) (any, error) {
 	if strings.HasPrefix(r.Action, "business_") {

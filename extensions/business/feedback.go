@@ -219,6 +219,10 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 	e := s.db.View(ctx, func(tx *sql.Tx) error {
 		where := "tenant_id=? AND knowledge_base_id=?"
 		params := args(c.Scope)
+		if c.Action == "relation_list" {
+			where = "tenant_id=? AND (knowledge_base_id=? OR target_knowledge_base_id=?)"
+			params = append(args(c.Scope), c.Scope.KnowledgeBaseID)
+		}
 		if c.ID != "" {
 			if !validID(c.ID) {
 				return ErrInvalid
@@ -308,18 +312,18 @@ OR (json_extract(details,'$.record_kind')='split_batch' AND EXISTS (
 // Attachment links are system records; their presence is not a claim that
 // either document is currently retrievable.
 const relationRecords = `(
-SELECT tenant_id,knowledge_base_id,relation_id,status,revision,
-json_object('document_id',document_id,'target_document_id',target_document_id,'edge_type',edge_type,'confidence',confidence,'source_version_id',source_version_id,'target_version_id',target_version_id) AS details
+SELECT tenant_id,knowledge_base_id,relation_id,status,revision,target_knowledge_base_id,
+json_object('knowledge_base_id',knowledge_base_id,'document_id',document_id,'target_knowledge_base_id',target_knowledge_base_id,'target_document_id',target_document_id,'edge_type',edge_type,'confidence',confidence,'source_version_id',source_version_id,'target_version_id',target_version_id) AS details
 FROM ext_document_relations
 UNION ALL
-SELECT tenant_id,knowledge_base_id,notice_id,status,revision,
-json_object('document_id',document_id,'target_document_id',target_document_id,'edge_type','repeals',
+SELECT tenant_id,knowledge_base_id,notice_id,status,revision,knowledge_base_id,
+json_object('document_id',document_id,'target_knowledge_base_id',knowledge_base_id,'target_document_id',target_document_id,'edge_type','repeals',
  'source_version_id',source_version_id,'target_version_id',target_version_id,
  'effective_at',strftime('%Y-%m-%dT%H:%M:%fZ',effective_at_ms/1000.0,'unixepoch'),'applied_at',applied_at)
 FROM ext_repeal_notices
 UNION ALL
-SELECT r.tenant_id,r.knowledge_base_id,r.relation_id,r.status,r.revision,
-json_object('document_id',r.document_id,'target_document_id',r.target_document_id,'edge_type',r.edge_type,
+SELECT r.tenant_id,r.knowledge_base_id,r.relation_id,r.status,r.revision,r.knowledge_base_id,
+json_object('document_id',r.document_id,'target_knowledge_base_id',r.knowledge_base_id,'target_document_id',r.target_document_id,'edge_type',r.edge_type,
  'source_version_id',r.source_version_id,'target_version_id',r.target_version_id,
  'source_clause',json_object('chunk_id',r.source_chunk_id,'content_hash',r.source_content_hash),
  'target_clause',json_object('chunk_id',r.target_chunk_id,'content_hash',r.target_content_hash),
@@ -333,8 +337,8 @@ CASE WHEN a.removed_at IS NOT NULL THEN 'attachment_removed'
      WHEN d.document_id IS NULL AND a.retired_at IS NOT NULL THEN 'attachment_retired'
      WHEN d.document_id IS NULL THEN 'linked'
      WHEN a.cleanup_error<>'' THEN 'attachment_cleanup_retry'
-     ELSE 'attachment_cleanup_pending' END,1,
-json_object('document_id',a.attachment_id,'target_document_id',a.parent_document_id,'edge_type','attachment_of')
+     ELSE 'attachment_cleanup_pending' END,1,a.knowledge_base_id,
+json_object('document_id',a.attachment_id,'target_knowledge_base_id',a.knowledge_base_id,'target_document_id',a.parent_document_id,'edge_type','attachment_of')
 FROM ext_attachment_links a LEFT JOIN ext_attachment_delete_intents d
 ON d.tenant_id=a.tenant_id AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id
 WHERE a.attachment_id IS NOT NULL
@@ -345,8 +349,8 @@ WHERE a.attachment_id IS NOT NULL
 const documentRelationRecords = `(
 SELECT * FROM ` + relationRecords + `
 UNION ALL
-SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||f.edge_id,'supplement_declared',d.revision,
- json_object('document_id',d.document_id,'target_document_id',p.parent_document_id,'edge_type','supplements',
+SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||f.edge_id,'supplement_declared',d.revision,d.knowledge_base_id,
+ json_object('knowledge_base_id',d.knowledge_base_id,'document_id',d.document_id,'target_knowledge_base_id',d.knowledge_base_id,'target_document_id',p.parent_document_id,'edge_type','supplements',
  'source_version_id',d.child_version_node_id,'target_version_id',p.parent_version_node_id)
 FROM ext_supplement_current c
 JOIN ext_supplement_declarations d USING(tenant_id,knowledge_base_id,document_id,revision,declaration_id)

@@ -42,6 +42,7 @@ func TestManagementRejectsCredentialsScopeAndReadonly(t *testing.T) {
 		{`{"action":"put_rules","tenant_id":7,"knowledge_base_id":"kb","rules":{}}`, key, 403},
 		{`{"action":"put_supplements","tenant_id":7,"knowledge_base_id":"kb","document_id":"doc","parents":[]}`, key, 403},
 		{`{"action":"overview","tenant_id":7,"knowledge_base_id":"kb","unknown":true}`, key, 400},
+		{`{"action":"business_relation_declare","tenant_id":7,"knowledge_base_id":"kb","can_write":true,"actor_id":"native-actor","operation_id":"cross-scope","business":{"payload":{"document_id":"a","target_document_id":"b","target_knowledge_base_id":"other","edge_type":"amends"}}}`, key, 403},
 	} {
 		if w := call(s, test.body, test.key); w.Code != test.status {
 			t.Fatalf("status=%d want=%d", w.Code, test.status)

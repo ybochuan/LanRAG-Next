@@ -127,14 +127,14 @@ func (s *Service) confirmSuggestedRelationTx(ctx context.Context, tx *sql.Tx, sc
 		return "", ErrUnavailable
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO ext_document_relations
-		SELECT ?,?,?,?,?,?,?,?,'active',?,1,NULL
+		SELECT ?,?,?,?,?,?,?,?,?,'active',?,1,NULL,NULL
 		WHERE NOT EXISTS(SELECT 1 FROM ext_document_relations WHERE tenant_id=? AND knowledge_base_id=? AND edge_type=?
 			AND status='active' AND (source_version_id=? AND target_version_id=? OR edge_type='related_to' AND source_version_id=? AND target_version_id=?))`,
-		append(args(scope, id, item.DocumentID, item.TargetDocumentID, item.SourceVersionID, item.TargetVersionID, item.EdgeType, item.Confidence),
+		append(args(scope, id, item.DocumentID, scope.KnowledgeBaseID, item.TargetDocumentID, item.SourceVersionID, item.TargetVersionID, item.EdgeType, item.Confidence),
 			args(scope, item.EdgeType, item.SourceVersionID, item.TargetVersionID, item.TargetVersionID, item.SourceVersionID)...)...)
 	if err := requireFamilyChange(result, err); err != nil {
 		return "", err
 	}
 	edge := digest([]string{strconvScope(scope), item.SourceVersionID, item.TargetVersionID, item.EdgeType})
-	return id, s.activateRelationEdgeTx(ctx, tx, scope, id, item.SourceVersionID, item.TargetVersionID, item.EdgeType, edge)
+	return id, s.activateRelationEdgeTx(ctx, tx, scope, scope, id, item.SourceVersionID, item.TargetVersionID, item.EdgeType, edge)
 }

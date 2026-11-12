@@ -31,7 +31,7 @@ export interface BusinessPayload {
   legacy_family_id?: string; backfill_fingerprint?: string; projection_enabled?: boolean
   replacement_ids?: string[]; history_fingerprint?: string
   suggestion_policy?: Omit<SuggestionPolicy, 'revision'>
-  document_id?: string; target_document_id?: string; edge_type?: string
+  document_id?: string; target_document_id?: string; target_knowledge_base_id?: string; edge_type?: string
   text?: string; topic?: string; risk?: string; negative?: boolean
   second_confirmation?: boolean; guidance_ids?: string[]
   similarity?: number; declaration?: number; structure?: number
@@ -43,7 +43,7 @@ export interface BusinessPayload {
 export interface BusinessRecord {
   id: string; revision: number; status: string; text?: string; topic?: string
   risk?: string; ready_at?: string | null; confidence?: number; source?: string
-  document_id?: string; target_document_id?: string; edge_type?: string
+  knowledge_base_id?: string; document_id?: string; target_document_id?: string; target_knowledge_base_id?: string; edge_type?: string
   source_document_id?: string; source_version_id?: string; target_version_id?: string
   effective_at?: string; applied_at?: string | null
   source_clause?: ClauseAnchor; target_clause?: ClauseAnchor
@@ -59,7 +59,7 @@ export interface BusinessRecord {
 }
 export interface BusinessResult { id: string; revision: number; status: string; target_document_id?: string }
 export interface BusinessBody { operation_id: string; expected_revision: number; business: { id?: string; payload: BusinessPayload } }
-export interface RelatedDocument { document_id: string; edge_type: string; direction: string; confidence: number }
+export interface RelatedDocument { knowledge_base_id: string; document_id: string; edge_type: string; direction: string; confidence: number }
 interface Envelope<T> { success: boolean; data: T; error?: { code?: string } }
 const base = (kb: string) => `/api/v1/knowledge-bases/${encodeURIComponent(kb)}/lifecycle/business/`
 function cacheTenant(){try{return localStorage.getItem('weknora_selected_tenant_id')||localStorage.getItem('weknora_tenant')||''}catch{return ''}}

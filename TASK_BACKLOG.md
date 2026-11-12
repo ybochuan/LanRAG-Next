@@ -137,7 +137,7 @@
 | M1.5／待开始 | 完成库级检索基线、RRF 参数实验、重排降级与查询扩展门控；量化只通过 feature flag 验证，保留原生 RRF 实现。 | 架构 14–15；Recall@5 ≥ 0.85、MRR ≥ 0.80（或基线 95%）；量化 Recall@10 退化 ≤ 2%。 | 开始检索优化前；模型、语料或 sqlite-vec 基线变化时。 |
 | M2／进行中（内核/Observer/扫描/普通RAG策略已接线） | 已实现默认矩阵、DB规则/标注、原子决策回执和两类stale；Observer/每日扫描、普通RAG策略及本地复核告警已接线；外部通知及生产配置入口待做。 | 架构不变量A/4/15及用户2026-10-31业务规则；五处故障回滚、真实崩溃恢复和24并发CAS验证。 | 自动接线前、业务矩阵/有效期规则变化时；不以组件测试代替全阶段验收。 |
 | M3／进行中：T1/T2已交付 | 已完成原生只读快照、schema8观察版本/family、真实源权威、分边查询及环防护；Critical Edge业务/完整来源封存继续实施。 | 用户批准与`docs/evidence/m3-trusted-sources-2026-11-01.md`；不将观察顺序称原生generation。 | 新边类型、真实来源适配、关键事务和原生接线变化时。 |
-| M4／进行中：后台关联已接线 | 同库amends/interprets声明、related_to候选/确认/撤销、双向active/当前版本过滤并联合T3 supplements；原生JWT管理API可调用。MCP消费、按库标定、跨库、UI与Agentic/Graph预算待做。 | 用户2026-11-02业务冲刺授权；`extensions/business/related.go`、管理薄转发；见业务验收记录。精确率/召回率不以合成用例冒充，GraphRAG保持关闭。 | 接原生MCP、标注数据可用、跨库或GraphRAG申请时重审。 |
+| M4／进行中：后台关联已接线，跨库关系首刀完成 | 同库amends/interprets声明、related_to候选/确认/撤销、双向active/当前版本过滤并联合T3 supplements；schema 30 新增跨库规范性关系（amends/interprets、经二次确认的related_to），跨库关键边独立表，管理API和前端支持目标知识库。MCP消费、按库标定、跨库supplements、跨库Graph与Agentic/Graph预算待做。 | 用户2026-11-02业务冲刺授权及2026-11-12跨库关系开工；`extensions/business/related.go`、管理薄转发；见业务验收记录。精确率/召回率不以合成用例冒充，GraphRAG保持关闭。 | 接原生MCP、标注数据可用、跨库supplements/Graph或GraphRAG申请时重审。 |
 | M5／进行中：后台反馈与manual发布已接线 | 管理反馈→审批/冷静期→指导→修订提案→原生Markdown创建/索引→supersedes/旧文档停用；Saga先对账、治理+audit同事务。真实问答事件、guidance预算注入、抽样复核、binary正式文件、family投影和UI待做。 | 架构B/C/D；真实Core/Host业务E2E与SQLite并发/审计故障/未知ACK测试；`extensions/business/{feedback,revision,native}.go`，schema11。 | 详见新增细分条目；不据本批声明M5或M2整体验收完成。 |
 | M6／可视化提前进行中 | 单库血缘图首版已接通，opaque mDNS、认证能力查询、静态节点回退及其余运维／评估 UI 继续按规划推进。 | 用户2026-11-05明确提前启动M6-b；架构11/13/15。 | 单库血缘验收见M6-B；公开网络、跨库或新增权限范围时重审。 |
 
