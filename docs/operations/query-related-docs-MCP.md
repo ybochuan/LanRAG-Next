@@ -6,7 +6,7 @@ Host worker现在提供`http://127.0.0.1:8090/mcp`，Streamable HTTP、无状态
 
 当前schema8的`ext_lineage_edge.edge_type`不支持`attachment_of`，且阶段一明确没有写附件边。本批不改已有迁移：补充通知查询现有`supplements`边及其当前声明，附件复用`is_attachment/parent_document_id` Metadata和既有下载策略。撤销的旧声明和旧版本边不返回。需要真正的attachment_of事实时另行设计迁移，不将Metadata冒充血缘。
 
-查询主文档和返回文档须通过当前active许可；附件继续要求父active。返回`supplements`、`attachments`及供现有聊天卡片使用的`related_attachments`。原生每次调用注入自己的会话授权范围，覆盖模型参数；该范围不入库、不改变MCP目录指纹。整库或明确文档范围可用，未解析的标签授权不会扩大为整库。
+查询主文档和返回文档须通过当前active许可；附件继续要求父active。返回`supplements`、`relations`、`attachments`及供现有聊天卡片使用的`related_attachments`；`relations`只包含当前active、两端版本匹配的关联元数据（知识库、文档、边类型、置信度、方向），不返回正文。原生每次调用注入自己的会话授权范围，覆盖模型参数；该范围不入库、不改变MCP目录指纹。整库或明确文档范围可用，未解析的标签授权不会扩大为整库。
 
 ## 启用
 
@@ -47,7 +47,7 @@ python3 extensions/scripts/register_related_mcp.py
 - 准备一个active制度及其已提取附件。验证补充通知时，在生命周期页通过既有T3功能声明同库通知的父制度，确保通知也active。
 - 打开新会话、开启Agent模式，选中该知识库或明确主文档，询问：**“请说明这项制度的办理要求，给我需要使用的登记表，并核对有没有补充通知。”** 无需在用户提问中指定工具名。
 - 系统提示词已引导调用；预期先出现原生`discover_mcp_tools`的发现/描述动作，再出现包含`query_related_docs`的工具调用。实际注册名带服务前缀/hash，以发现结果为准。
-- 工具结果中查看`supplements`与`attachments`；回答下方应出现关联文件下载卡片，附件下载沿用现有登录和父状态校验。
+- 工具结果中查看`supplements`、`relations`与`attachments`；回答下方应出现关联文件下载卡片，附件下载沿用现有登录和父状态校验。
 - 将通知变为stale后重新提问，通知应不再返回；主制度过期后调用应报告不可用。停Host后不得返回旧数据；其他服务上同名工具或本服务上的未知工具仍不能利用该白名单。
 
 模型是否选择调用属于实际模型验收，不能用提示词存在代替；本轮没有调用真实云模型、注册生产连接或替换生产服务。旧/files/签名资源、已输出答案及完整来源封存不随白名单自动恢复。

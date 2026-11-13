@@ -36,6 +36,14 @@ type nativeScope struct {
 	WholeKBs []string `json:"whole_kb_ids"`
 }
 
+type relatedDocument struct {
+	KnowledgeBaseID string  `json:"knowledge_base_id"`
+	DocumentID      string  `json:"document_id"`
+	EdgeType        string  `json:"edge_type"`
+	Confidence      float64 `json:"confidence"`
+	Direction       string  `json:"direction"`
+}
+
 func (scope nativeScope) allows(kb, id string) bool {
 	return slices.Contains(scope.KBs, kb) && (slices.Contains(scope.IDs, id) || slices.Contains(scope.WholeKBs, kb))
 }
@@ -159,7 +167,92 @@ func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[s
 		}
 	}
 	all := append(append([]contract.RelatedAttachment{}, notices...), attachments...)
-	return map[string]any{"document_id": id, "supplements": notices, "attachments": attachments, "related_attachments": all}, nil
+	relations, e := s.relatedDocuments(ctx, kb, id, scope)
+	if e != nil {
+		return nil, e
+	}
+	return map[string]any{"document_id": id, "supplements": notices, "relations": relations, "attachments": attachments, "related_attachments": all}, nil
+}
+
+// relatedDocuments returns version-pinned relationship metadata only. Target
+// documents must be covered by the caller's native scope and current lifecycle.
+func (s *Server) relatedDocuments(ctx context.Context, kb, id string, scope nativeScope) ([]relatedDocument, error) {
+	candidates := []relatedDocument{}
+	err := s.DB.View(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT r.target_knowledge_base_id,r.target_document_id,r.edge_type,r.confidence,'outgoing'
+			FROM ext_document_relations r
+			WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.document_id=? AND r.status='active'
+			  AND (r.edge_type<>'related_to' OR r.confidence>=0.7 OR EXISTS(
+			    SELECT 1 FROM ext_family_suggestions s
+			    WHERE s.tenant_id=r.tenant_id AND s.knowledge_base_id=r.knowledge_base_id
+			      AND s.applied_id=r.relation_id AND s.edge_type='related_to' AND s.status='confirmed'
+			      AND s.source_version_id=r.source_version_id AND s.target_version_id=r.target_version_id))
+			  AND EXISTS (SELECT 1 FROM ext_document_version_family f
+			    WHERE f.tenant_id=r.tenant_id AND f.knowledge_base_id=r.knowledge_base_id AND f.document_id=r.document_id AND f.current_version_node_id=r.source_version_id)
+			  AND EXISTS (SELECT 1 FROM ext_document_version_family t
+			    WHERE t.tenant_id=r.tenant_id AND t.knowledge_base_id=r.target_knowledge_base_id AND t.document_id=r.target_document_id AND t.current_version_node_id=r.target_version_id)
+			UNION ALL
+			SELECT r.knowledge_base_id,r.document_id,r.edge_type,r.confidence,'incoming'
+			FROM ext_document_relations r
+			WHERE r.tenant_id=? AND r.target_knowledge_base_id=? AND r.target_document_id=? AND r.status='active'
+			  AND (r.edge_type<>'related_to' OR r.confidence>=0.7 OR EXISTS(
+			    SELECT 1 FROM ext_family_suggestions s
+			    WHERE s.tenant_id=r.tenant_id AND s.knowledge_base_id=r.knowledge_base_id
+			      AND s.applied_id=r.relation_id AND s.edge_type='related_to' AND s.status='confirmed'
+			      AND s.source_version_id=r.source_version_id AND s.target_version_id=r.target_version_id))
+			  AND EXISTS (SELECT 1 FROM ext_document_version_family f
+			    WHERE f.tenant_id=r.tenant_id AND f.knowledge_base_id=r.knowledge_base_id AND f.document_id=r.document_id AND f.current_version_node_id=r.source_version_id)
+			  AND EXISTS (SELECT 1 FROM ext_document_version_family t
+			    WHERE t.tenant_id=r.tenant_id AND t.knowledge_base_id=r.target_knowledge_base_id AND t.document_id=r.target_document_id AND t.current_version_node_id=r.target_version_id)
+			LIMIT 101`, fmt.Sprint(s.Tenant), kb, id, fmt.Sprint(s.Tenant), kb, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row relatedDocument
+			if err = rows.Scan(&row.KnowledgeBaseID, &row.DocumentID, &row.EdgeType, &row.Confidence, &row.Direction); err != nil {
+				return err
+			}
+			if scope.allows(row.KnowledgeBaseID, row.DocumentID) {
+				candidates = append(candidates, row)
+			}
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) > 100 {
+		return nil, errors.New("relation result too large")
+	}
+	byKB := map[string][]string{}
+	seen := map[string]bool{}
+	for _, row := range candidates {
+		key := row.KnowledgeBaseID + "\x00" + row.DocumentID
+		if !seen[key] {
+			seen[key] = true
+			byKB[row.KnowledgeBaseID] = append(byKB[row.KnowledgeBaseID], row.DocumentID)
+		}
+	}
+	blocked := map[string]bool{}
+	for targetKB, ids := range byKB {
+		req := contract.BeforeRetrieveRequest{Context: contract.Context{RequestID: "query-related-relation", SessionID: "mcp", Mode: "agent", TenantID: s.Tenant, KnowledgeBaseIDs: []string{targetKB}, KnowledgeIDs: ids}}
+		excluded, err := s.Policy.ExcludedDocumentIDs(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		for _, doc := range excluded {
+			blocked[targetKB+"\\x00"+doc] = true
+		}
+	}
+	out := []relatedDocument{}
+	for _, row := range candidates {
+		if !blocked[row.KnowledgeBaseID+"\\x00"+row.DocumentID] {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 // ServeHTTP is a stateless Streamable HTTP JSON-RPC endpoint (JSON responses).
@@ -202,7 +295,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		result = map[string]any{}
 	case "tools/list":
-		tools := []any{readTool("query_related_docs", "查询制度的有效补充通知和附件下载链接。先从已授权检索结果获取document_id。", "document_id")}
+		tools := []any{readTool("query_related_docs", "查询制度的有效补充通知、确认关联和附件下载链接。先从已授权检索结果获取document_id。", "document_id")}
 		if s.NativeDBPath != "" {
 			tools = append(tools, readTool("search_archived_documents", "仅当用户明确要求查阅过期或归档文档时，用短关键词 query 查询授权范围内的历史条款；必须提醒用户结果已失效。", "query"))
 		}

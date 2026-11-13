@@ -92,7 +92,7 @@
 
 ## 关联文件MCP接线（2026-11-03）
 
-- `extensions/mcp/server.go`在worker的现有回环端口挂载`/mcp` Streamable HTTP，提供只读query_related_docs；使用现有管理凭据。supplements查询当前版本边及当前声明、active许可，覆盖同库与跨库父件；附件仍从Metadata读取；schema不支持attachment_of，本批不新增迁移。
+- `extensions/mcp/server.go`在worker的现有回环端口挂载`/mcp` Streamable HTTP，提供只读query_related_docs；使用现有管理凭据。supplements查询当前版本边及当前声明、active许可，覆盖同库与跨库父件；`relations`返回当前active、版本匹配的同库/跨库关联元数据（仅知识库/文档/边类型/置信度/方向，不含正文）；附件仍从Metadata读取；schema不支持attachment_of，本批不新增迁移。
 - 原生仅允许固定本机URL、匹配凭据及工具原名的可信例外；按需发现/审批保留。会话授权范围通过不持久化DTO随调用注入，工具目录缓存不授予其他会话的范围；未知外部MCP仍拒绝。
 - Agent系统提示词引导发现/调用；MCP structured_content复用关联文件卡片。注册脚本及实际模型验收步骤见`docs/operations/query-related-docs-MCP.md`；本轮未注册生产连接或运行真实模型自主调用验收。
 
