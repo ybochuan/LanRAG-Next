@@ -7,13 +7,13 @@ import * as vue from 'vue'
 import * as model from './model'
 import { requestFence } from '../lifecycle/model'
 
-function mountSetup(api: Record<string, unknown>) {
+function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, string> = {}) {
   const scope = vue.effectScope()
   const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const modules: Record<string, unknown> = {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
-    'vue-router': { useRoute:()=>({query:{}}), useRouter:()=>({}), onBeforeRouteLeave(){}, onBeforeRouteUpdate(){} },
+    'vue-router': { useRoute:()=>({query:routeQuery}), useRouter:()=>({}), onBeforeRouteLeave(){}, onBeforeRouteUpdate(){} },
     '@/api/business': {},
     '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }) },
     '@/api/lifecycle': {
@@ -79,5 +79,15 @@ test('late reviews response from previous KB cannot replace current reviews', as
     releaseOld({ alerts: [{ alert_id: 'old', document_id: 'old-doc', review_due: '2026-01-01T00:00:00Z', delivery_state: 'pending' }], truncated: false })
     await vue.nextTick(); await vue.nextTick()
     assert.equal(view.state.reviewItems.value[0]?.alert_id, 'new')
+  } finally { view.stop() }
+})
+
+test('route query seeds the list tab, page, state and title', () => {
+  const view = mountSetup({}, { tab: 'reviews', page: '3', state: 'active', title: '合同' })
+  try {
+    assert.equal(view.state.tab.value, 'reviews')
+    assert.equal(view.state.page.value, 3)
+    assert.equal(view.state.filter.value, 'active')
+    assert.equal(view.state.titleQuery.value, '合同')
   } finally { view.stop() }
 })

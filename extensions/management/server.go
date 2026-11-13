@@ -243,7 +243,7 @@ func (s *Server) execute(ctx context.Context, r Request) (any, error) {
 		if err := s.enrichDocumentFamilies(ctx, r, docs); err != nil {
 			return nil, errDatabase
 		}
-		return map[string]any{"snapshot": snap, "events": events, "events_truncated": truncated, "evaluation_status": evaluation, "business_family": docs[0].BusinessFamily}, nil
+		return map[string]any{"snapshot": snap, "events": events, "events_truncated": truncated, "evaluation_status": evaluation, "business_family": docs[0].BusinessFamily, "can_write": r.CanWrite}, nil
 	case "rules", "put_rules":
 		if r.Action == "put_rules" {
 			if err := c.PutRules(ctx, lifecycle.PolicyScope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, r.Rules, r.ExpectedRevision); err != nil {
@@ -255,6 +255,17 @@ func (s *Server) execute(ctx context.Context, r Request) (any, error) {
 		alerts, err := review.NewService(s.db, time.Now).List(ctx, outbox.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, 1000)
 		if err != nil {
 			return nil, errDatabase
+		}
+		if s.titles != nil && len(alerts) > 0 {
+			ids := make([]string, len(alerts))
+			for i := range alerts {
+				ids[i] = alerts[i].DocumentID
+			}
+			if titles, titleErr := s.titles(ctx, r.KnowledgeBaseID, ids); titleErr == nil {
+				for i := range alerts {
+					alerts[i].Title = titles[alerts[i].DocumentID]
+				}
+			}
 		}
 		return map[string]any{"alerts": alerts, "truncated": len(alerts) == 1000}, nil
 	default:

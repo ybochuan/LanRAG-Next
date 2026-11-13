@@ -72,6 +72,48 @@ func TestReviewLeavesExistingLifecycleHeadUntouched(t *testing.T) {
 	}
 }
 
+func TestInboxHidesStaleAndUnavailableDocuments(t *testing.T) {
+	db, s, now, scope := fixture(t)
+	ctx := context.Background()
+	past := now.Add(-time.Hour)
+	annotate(t, db, scope, &past, 0)
+	lifecycleStore := lifecycle.NewStore(db)
+	if _, err := lifecycleStore.Append(ctx, lifecycle.Event{EventID: "review-active", TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, DocumentID: scope.DocumentID, ToState: lifecycle.Active, Reason: "seed", OccurredAt: *now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Check(ctx, scope); err != nil {
+		t.Fatal(err)
+	}
+	if len(list(t, s, scope)) != 1 {
+		t.Fatal("active document alert missing")
+	}
+	if _, err := lifecycleStore.Append(ctx, lifecycle.Event{EventID: "review-stale", TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, DocumentID: scope.DocumentID, FromState: lifecycle.Active, ToState: lifecycle.Stale, Reason: "archive", OccurredAt: now.Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(list(t, s, scope)) != 0 {
+		t.Fatal("stale document alert visible")
+	}
+
+	unavailable := scope
+	unavailable.DocumentID = "doc-b"
+	annotate(t, db, unavailable, &past, 0)
+	if err := s.Check(ctx, unavailable); err != nil {
+		t.Fatal(err)
+	}
+	if len(list(t, s, unavailable)) != 1 {
+		t.Fatal("available document alert missing")
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO ext_document_availability(tenant_id,knowledge_base_id,document_id,status,observed_at,reason) VALUES('7','kb-a','doc-b','deleted',?,'test')`, now.Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(list(t, s, unavailable)) != 0 {
+		t.Fatal("deleted document alert visible")
+	}
+}
+
 func TestDeadReviewCanBeRetriedWithoutChangingTruth(t *testing.T) {
 	db, s, now, scope := fixture(t)
 	ctx := context.Background()

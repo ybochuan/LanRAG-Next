@@ -110,6 +110,106 @@ func snapshotTx(ctx context.Context, tx *sql.Tx, s Scope) (snap Snapshot, err er
 	return
 }
 
+// AnnotationsForDocuments reads the effective annotations for a bounded page in
+// one transaction. Attachment children inherit their active parent's effective
+// window without writing copied dates into the child's own annotation row.
+func (m *Machine) AnnotationsForDocuments(ctx context.Context, s Scope, documentIDs []string) (map[string]Annotations, error) {
+	if s.TenantID == 0 || s.KnowledgeBaseID == "" {
+		return nil, errors.New("complete lifecycle scope is required")
+	}
+	result := make(map[string]Annotations, len(documentIDs))
+	if len(documentIDs) == 0 {
+		return result, nil
+	}
+	body, err := json.Marshal(documentIDs)
+	if err != nil {
+		return nil, err
+	}
+	err = m.db.View(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT document_id,revision,effective_from,effective_until,review_due,labels_json
+FROM ext_document_annotations
+WHERE tenant_id=? AND knowledge_base_id=? AND document_id IN (SELECT value FROM json_each(?))`, s.args()[0], s.args()[1], string(body))
+		if err != nil {
+			return err
+		}
+		annotations, err := scanAnnotationRows(rows)
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for id, value := range annotations {
+			result[id] = value
+		}
+		parentRows, err := tx.QueryContext(ctx, `SELECT l.attachment_id,l.parent_document_id
+FROM ext_attachment_links l
+WHERE l.tenant_id=? AND l.knowledge_base_id=? AND l.attachment_id IN (SELECT value FROM json_each(?))
+AND l.removed_at IS NULL AND l.retired_at IS NULL
+AND l.created_at=(SELECT MAX(l2.created_at) FROM ext_attachment_links l2
+ WHERE l2.tenant_id=l.tenant_id AND l2.knowledge_base_id=l.knowledge_base_id AND l2.attachment_id=l.attachment_id
+ AND l2.removed_at IS NULL AND l2.retired_at IS NULL)`, s.args()[0], s.args()[1], string(body))
+		if err != nil {
+			return err
+		}
+		parentIDs := make(map[string]string)
+		for parentRows.Next() {
+			var child, parent string
+			if err := parentRows.Scan(&child, &parent); err != nil {
+				parentRows.Close()
+				return err
+			}
+			parentIDs[child] = parent
+		}
+		if err := parentRows.Err(); err != nil {
+			parentRows.Close()
+			return err
+		}
+		parentRows.Close()
+		if len(parentIDs) == 0 {
+			return nil
+		}
+		parentList := make([]string, 0, len(parentIDs))
+		seen := make(map[string]bool)
+		for _, parent := range parentIDs {
+			if !seen[parent] {
+				seen[parent] = true
+				parentList = append(parentList, parent)
+			}
+		}
+		parentBody, err := json.Marshal(parentList)
+		if err != nil {
+			return err
+		}
+		rows, err = tx.QueryContext(ctx, `SELECT document_id,revision,effective_from,effective_until,review_due,labels_json
+FROM ext_document_annotations
+WHERE tenant_id=? AND knowledge_base_id=? AND document_id IN (SELECT value FROM json_each(?))`, s.args()[0], s.args()[1], string(parentBody))
+		if err != nil {
+			return err
+		}
+		parentAnnotations, err := scanAnnotationRows(rows)
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for child, parent := range parentIDs {
+			value := result[child]
+			// The parent's validity window is authoritative, including an
+			// absent parent annotation row (which means no effective window).
+			value.EffectiveFrom = nil
+			value.EffectiveUntil = nil
+			if parentValue, ok := parentAnnotations[parent]; ok {
+				value.EffectiveFrom = parentValue.EffectiveFrom
+				value.EffectiveUntil = parentValue.EffectiveUntil
+			}
+			result[child] = value
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // Snapshot returns empty current/annotations for a new document, never another scope.
 func (m *Machine) Snapshot(ctx context.Context, s Scope) (snap Snapshot, err error) {
 	if err = s.validate(); err != nil {
@@ -241,6 +341,37 @@ func (m *Machine) Apply(ctx context.Context, c Command) (bool, error) {
 		return err
 	})
 }
+func scanAnnotationRows(rows *sql.Rows) (map[string]Annotations, error) {
+	result := make(map[string]Annotations)
+	for rows.Next() {
+		var id string
+		var annotation Annotations
+		var from, until, review sql.NullString
+		var labels []byte
+		if err := rows.Scan(&id, &annotation.Revision, &from, &until, &review, &labels); err != nil {
+			return nil, err
+		}
+		for _, entry := range []struct {
+			value  sql.NullString
+			target **time.Time
+		}{{from, &annotation.EffectiveFrom}, {until, &annotation.EffectiveUntil}, {review, &annotation.ReviewDue}} {
+			if entry.value.Valid {
+				value, err := time.Parse(time.RFC3339Nano, entry.value.String)
+				if err != nil {
+					return nil, err
+				}
+				value = value.UTC()
+				*entry.target = &value
+			}
+		}
+		if err := json.Unmarshal(labels, &annotation.Labels); err != nil {
+			return nil, err
+		}
+		result[id] = annotation
+	}
+	return result, rows.Err()
+}
+
 func allowed(c Command, a Annotations, now time.Time) bool {
 	from, to := c.Event.FromState, c.Event.ToState
 	expired := overdue(now, a.EffectiveUntil)

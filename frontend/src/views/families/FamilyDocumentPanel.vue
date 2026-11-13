@@ -2,7 +2,7 @@
   <section class="panel" aria-labelledby="family-document-title">
     <div class="section-heading">
       <h2 id="family-document-title">{{ title }}</h2>
-      <button type="button" :disabled="busy || supplementBusy" @click="$emit('close')">关闭详情</button>
+      <button type="button" :disabled="busy || supplementBusy" @click="requestClose">关闭详情</button>
     </div>
     <p v-if="error" class="notice error" role="alert">{{ error }} <button type="button" :disabled="busy" @click="load">重新载入</button></p>
     <p v-if="notice" class="notice success" role="status">{{ notice }}</p>
@@ -35,13 +35,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { documentDetail, saveAnnotations, type Detail, type LifecycleState } from '@/api/lifecycle'
-import { date } from '../business/model'
+import { date, httpStatus } from '../business/model'
 import SupplementEditor from '../lifecycle/SupplementEditor.vue'
 import { annotationsForSave, errorMessage, requestFence, stateLabels, toLocalInput } from '../lifecycle/model'
 
 const props = defineProps<{ kb: string; documentId: string; title: string; canWrite: boolean; disabled: boolean; knowledgeBases: { id: string; name: string }[] }>()
 const emit = defineEmits<{ close: []; saved: []; busy: [value: boolean] }>()
 const fields = reactive({ effective_from: '', effective_until: '', review_due: '' })
+const dateBaseline = ref('')
+const dateKey = () => JSON.stringify([fields.effective_from, fields.effective_until, fields.review_due])
+const dateDirty = computed(() => dateBaseline.value !== dateKey())
 const detail = ref<Detail>(), busy = ref(false), supplementBusy = ref(false)
 const error = ref(''), notice = ref(''), reloadRequired = ref(false)
 const locked = computed(() => !props.canWrite || props.disabled || busy.value || supplementBusy.value || reloadRequired.value)
@@ -55,6 +58,11 @@ function show(value: Detail) {
   fields.effective_from = toLocalInput(a.effective_from)
   fields.effective_until = toLocalInput(a.effective_until)
   fields.review_due = toLocalInput(a.review_due)
+  dateBaseline.value = dateKey()
+}
+function requestClose() {
+  if (dateDirty.value && !window.confirm('日期尚未保存，确定关闭文档详情？')) return
+  emit('close')
 }
 
 async function load() {
@@ -91,7 +99,7 @@ async function save() {
   } catch (e) {
     if (fence.current(token)) {
       error.value = errorMessage(e)
-      reloadRequired.value = true
+      reloadRequired.value = httpStatus(e) === 409
     }
   } finally {
     if (fence.current(token)) busy.value = false

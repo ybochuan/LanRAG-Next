@@ -24,7 +24,7 @@ export interface ClauseChunk {
 }
 export interface SplitPartRecord {
   id: string; title: string; proposed_patch: string; revision: number; status: string
-  target_document_id?: string; publish_error?: string
+  target_document_id?: string; target_knowledge_base_id?: string; publish_error?: string
 }
 export interface BusinessPayload {
   family_label?: string; business_family_id?: string; family_revision?: number; reason?: string

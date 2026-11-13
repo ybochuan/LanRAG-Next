@@ -53,7 +53,7 @@
           <div><dt>登记时间</dt><dd>{{ formatDate(selected.created_at) }}</dd></div>
         </dl>
         <div class="detail-actions"><button @click="expandNode('provenance')">内容溯源</button><button @click="expandNode('version-ancestry')">版本历史</button>
-          <button v-if="selected.document_id" type="button" @click="$emit('open',selected.document_id,nodeTitle(selected))">打开文档详情</button>
+          <button v-if="selected.document_id" type="button" @click="$emit('open',selected.document_id,nodeTitle(selected),selected.knowledge_base_id)">打开文档详情</button>
         </div>
       </section>
     </template>
@@ -71,7 +71,7 @@ import { graphError, layoutGraph, modes, nodeTitle, stateLabels, typeLabels } fr
 import LineageCanvas from './LineageCanvas.vue'
 
 const props = defineProps<{ scope?:string; documentId?:string }>()
-defineEmits<{ open:[id:string,title:string] }>()
+defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string] }>()
 const route = useRoute(), auth = useAuthStore()
 const knowledgeBases = ref<{ id: string; name: string }[]>([])
 const kb = ref(''), mode = ref<GraphMode>('version-ancestry'), root = ref(''), search = ref(''), selectedID = ref('')
@@ -106,20 +106,18 @@ async function loadGraph() {
 }
 async function loadCatalog() {
   const token = catalogFence.begin()
-  graphFence.invalidate(); kb.value = ''; data.value = undefined; knowledgeBases.value = []; error.value = ''; includeCross.value = false; catalogLoading.value = true
+  graphFence.invalidate(); kb.value = props.scope || ''; data.value = undefined; knowledgeBases.value = []; error.value = ''; includeCross.value = false; catalogLoading.value = true
   if (props.scope) {
-    kb.value = props.scope
     mode.value = props.documentId ? 'relations' : modes.find(item => item.key === route.query.mode)?.key || 'version-ancestry'
     const requested = route.query.node || route.query.id
     root.value = props.documentId || (typeof requested==='string' && mode.value!=='relations' ? requested : '')
-    catalogLoading.value = false
-    return
   }
   try {
     const response = await listKnowledgeBases()
     if (!catalogFence.current(token)) return
     if (!response.success) throw new Error()
     knowledgeBases.value = response.data || []
+    if (props.scope) return
     const requested = typeof route.query.kb === 'string' ? route.query.kb : ''
     kb.value = knowledgeBases.value.find(item => item.id === requested)?.id || knowledgeBases.value[0]?.id || ''
     mode.value = modes.find(item => item.key === route.query.mode)?.key || 'version-ancestry'

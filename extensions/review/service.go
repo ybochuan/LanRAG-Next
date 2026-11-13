@@ -1,4 +1,5 @@
-// Package review implements local review-deadline alerts independently of lifecycle state.
+// Package review implements local review-deadline alerts with lifecycle and
+// availability visibility checks at read time.
 package review
 
 import (
@@ -38,6 +39,7 @@ type Alert struct {
 	DetectedAt         time.Time  `json:"detected_at"`
 	DeliveredAt        *time.Time `json:"delivered_at,omitempty"`
 	DeliveryState      string     `json:"delivery_state"`
+	Title              string     `json:"title,omitempty"`
 }
 
 // Service shares the extension single writer and never owns the DB lifetime.
@@ -62,12 +64,49 @@ func validateScope(s lifecycle.Scope) error {
 	}
 	return nil
 }
+func reviewDocumentVisibleTx(ctx context.Context, tx *sql.Tx, scope lifecycle.Scope) (bool, error) {
+	var state string
+	var verified int
+	err := tx.QueryRowContext(ctx, `SELECT c.state, CASE WHEN `+store.LifecycleCurrentVerifiedSQL+` THEN 1 ELSE 0 END FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+` WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scopeArgs(scope)...).Scan(&state, &verified)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if err == nil && (state != string(lifecycle.Pending) && state != string(lifecycle.Scheduled) && state != string(lifecycle.Active) || verified != 1) {
+		return false, nil
+	}
+
+	// Availability is a schema29 read projection. Older read-only inbox
+	// databases may not have it yet; absence must not hide the alert.
+	var availabilitySupported bool
+	if err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='ext_document_availability')").Scan(&availabilitySupported); err != nil {
+		return false, err
+	}
+	if availabilitySupported {
+		var status string
+		err = tx.QueryRowContext(ctx, `SELECT status FROM ext_document_availability WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, scopeArgs(scope)...).Scan(&status)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+		if err == nil && status != "active" {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func deadlineTx(ctx context.Context, tx *sql.Tx, scope lifecycle.Scope) (int64, *time.Time, error) {
 	var revision int64
 	var raw sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT revision,review_due FROM ext_document_annotations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, scopeArgs(scope)...).Scan(&revision, &raw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, nil, err
+	}
+	visible, err := reviewDocumentVisibleTx(ctx, tx, scope)
+	if err != nil {
+		return 0, nil, err
+	}
+	if !visible {
+		return revision, nil, nil
 	}
 	var due *time.Time
 	if raw.Valid {

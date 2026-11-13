@@ -1,6 +1,7 @@
 package business
 
 import (
+	"database/sql"
 	"errors"
 	"testing"
 )
@@ -66,6 +67,46 @@ func TestFamilyWorkspaceSeparatesCurrentRelationshipsAndHistory(t *testing.T) {
 	query.Scope.KnowledgeBaseID = "other"
 	if _, err := s.FamilyWorkspace(ctx, query, "activity"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("foreign family was not treated as missing", err)
+	}
+}
+
+func TestFamilyWorkspaceReadsIncomingCrossKBFamilyRelation(t *testing.T) {
+	s, db, create := familyFixture(t)
+	ctx := t.Context()
+	family, err := s.Execute(ctx, create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := cmd("family_member_add", "cross-kb-member")
+	add.ID, add.ExpectedRevision, add.Payload.DocumentID = family.ID, family.Revision, "2026"
+	if _, err = s.Execute(ctx, add); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO ext_lineage_edge_cross_kb
+			(edge_id,tenant_id,source_knowledge_base_id,source_node_id,target_knowledge_base_id,target_node_id,edge_type,edge_class,created_at)
+			VALUES('cross-1','7','other','version-foreign','kb','version-2026','amends','governance_critical','2026-11-02T00:00:00Z')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO ext_document_relations
+			(tenant_id,knowledge_base_id,relation_id,document_id,target_knowledge_base_id,target_document_id,
+			 source_version_id,target_version_id,edge_type,status,confidence,revision,edge_id,cross_edge_id)
+			VALUES('7','other','cross-relation','foreign','kb','2026','version-foreign','version-2026','amends','active',1,1,NULL,'cross-1')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.FamilyWorkspace(ctx, Command{Scope: create.Scope, ID: family.ID}, "relations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Relations) != 1 {
+		t.Fatalf("incoming cross-KB relation missing: %+v", view.Relations)
+	}
+	relation := view.Relations[0]
+	if relation.ID != "cross-relation" || relation.DocumentID != "foreign" || relation.TargetDocumentID != "2026" ||
+		relation.KnowledgeBaseID != "other" || relation.TargetKnowledgeBaseID != "kb" || relation.Scope != "external" || !relation.Current {
+		t.Fatalf("unexpected cross-KB relation: %+v", relation)
 	}
 }
 

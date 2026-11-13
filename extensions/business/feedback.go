@@ -361,4 +361,13 @@ JOIN ext_supplement_declarations d USING(tenant_id,knowledge_base_id,document_id
 JOIN ext_supplement_parents p USING(tenant_id,knowledge_base_id,document_id,declaration_id)
 JOIN ext_supplement_edge_facts f USING(tenant_id,knowledge_base_id,document_id,declaration_id,parent_document_id)
 WHERE d.status='active'
+UNION ALL
+SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||cf.cross_edge_id,'supplement_declared',d.revision,cp.parent_knowledge_base_id,
+ json_object('knowledge_base_id',d.knowledge_base_id,'document_id',d.document_id,'target_knowledge_base_id',cp.parent_knowledge_base_id,'target_document_id',cp.parent_document_id,'edge_type','supplements',
+ 'source_version_id',d.child_version_node_id,'target_version_id',cp.parent_version_node_id)
+FROM ext_supplement_current c
+JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision
+JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id AND cp.tenant_id=d.tenant_id AND cp.knowledge_base_id=d.knowledge_base_id AND cp.document_id=d.document_id
+JOIN ext_supplement_cross_edge_facts cf ON cf.declaration_id=cp.declaration_id AND cf.parent_knowledge_base_id=cp.parent_knowledge_base_id AND cf.parent_document_id=cp.parent_document_id
+WHERE d.status='active'
 )`

@@ -20,6 +20,8 @@ export interface FamilyRelation {
   id: string
   document_id: string
   target_document_id: string
+  knowledge_base_id?: string
+  target_knowledge_base_id?: string
   edge_type: string
   status: string
   revision: number

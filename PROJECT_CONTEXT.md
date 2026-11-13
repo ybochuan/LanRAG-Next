@@ -10,6 +10,7 @@
 - 扩展 schema 30 支持跨库规范性文档关系：`amends`、`interprets` 和经二次确认的跨库 `related_to` 可指向另一知识库的主件；同库仍写 `ext_lineage_edge`，跨库关键边写 `ext_lineage_edge_cross_kb`，关系记录保留两端知识库。扩展 schema 31 支持跨库补充声明（`supplements`）：跨库父件写入 `ext_supplement_cross_parents`、`ext_supplement_cross_edges` 和 `ext_supplement_cross_edge_facts`，同库仍使用原表；依赖评估、关系查询、`relations-cross` 图和 MCP `query_related_docs` 均覆盖同库与跨库声明。
 - 关系声明、确认和撤销在同一事务写入持久 Outbox；`tag_projection`/`relation_tag` 处理器按文档重算当前 active 关系的 `gov:relation:<edge_type>` 命名空间。跨库关系分别给两端知识库的文档入队；投影失败只重试标签，不回写关系或生命周期事实。
 - 跨库关系图使用 `relations-cross` 模式：基础关系图追加 `ext_lineage_edge_cross_kb` 边和跨库节点，节点返回 `knowledge_base_id`；管理端按节点所属知识库加载标题，前端关系图提供“包含跨库关联”开关。
+- 工作台台账和待复核按已核验的当前生命周期投影读取，投影损坏的文档标记为降级而不是让整页失败；待复核还会隐藏已失效、已归档或不可用文档的旧提醒。版本族工作台同时读取同库和跨库关系/补充声明，前端详情抽屉按记录所属知识库打开、查询和加载标题。
 
 ## 业务文档族（FAM-01）
 

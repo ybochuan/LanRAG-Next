@@ -45,6 +45,50 @@ func TestOverviewCannotOpenNativeFallsBack(t *testing.T) {
 	}
 }
 
+func TestOverviewExcludesInconsistentCurrent(t *testing.T) {
+	s := fixture(t)
+	ctx := context.Background()
+	for _, id := range []string{"good", "bad"} {
+		if _, err := lifecycle.NewStore(s.db).Append(ctx, lifecycle.Event{EventID: id, TenantID: 7, KnowledgeBaseID: "kb", DocumentID: id, ToState: lifecycle.Active, Reason: "test", OccurredAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS ext_lifecycle_current_update_matches_event`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS ext_lifecycle_current_update_heads_latest_event`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE ext_lifecycle_current SET state='stale' WHERE tenant_id=7 AND knowledge_base_id='kb' AND document_id='bad'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w := call(s, `{"action":"overview","tenant_id":7,"knowledge_base_id":"kb"}`, s.key)
+	var out struct {
+		Data struct {
+			Total          int
+			Counts         map[string]int
+			Documents      []document
+			Degraded       bool   `json:"degraded"`
+			DegradedReason string `json:"degraded_reason"`
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != 200 {
+		t.Fatalf("unexpected overview: %d %s", w.Code, w.Body.String())
+	}
+	if out.Data.Total != 1 || len(out.Data.Documents) != 1 || out.Data.Documents[0].DocumentID != "good" {
+		t.Fatalf("inconsistent current leaked into page: %+v", out.Data)
+	}
+	if out.Data.Counts["active"] != 1 || out.Data.Counts["stale"] != 0 {
+		t.Fatalf("inconsistent current leaked into counts: %+v", out.Data.Counts)
+	}
+	if !out.Data.Degraded || out.Data.DegradedReason != "lifecycle_inconsistent" {
+		t.Fatalf("expected lifecycle inconsistency degradation, got %+v", out.Data)
+	}
+}
+
 func TestOverviewTitleFilterAndBusyFallback(t *testing.T) {
 	s := fixture(t)
 	ctx := context.Background()

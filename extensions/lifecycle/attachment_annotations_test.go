@@ -34,6 +34,11 @@ func TestAttachmentEffectiveDatesFollowParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	insertAttachmentLink(t, db, now)
+	childFrom := now.Add(-2 * time.Hour)
+	childUntil := now.Add(2 * time.Hour)
+	if err := cfg.PutAnnotations(ctx, child, Annotations{EffectiveFrom: &childFrom, EffectiveUntil: &childUntil}, 0); err != nil {
+		t.Fatal(err)
+	}
 
 	snap, err := m.Snapshot(ctx, child)
 	if err != nil {
@@ -45,6 +50,13 @@ func TestAttachmentEffectiveDatesFollowParent(t *testing.T) {
 	}
 	if snap.AttachmentParentDocumentID != "parent" {
 		t.Fatalf("child did not report inherited parent: %q", snap.AttachmentParentDocumentID)
+	}
+	batch, err := m.AnnotationsForDocuments(ctx, Scope{TenantID: 7, KnowledgeBaseID: "kb-a"}, []string{"parent", "child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := batch["child"]; got.EffectiveFrom == nil || !got.EffectiveFrom.Equal(from) || got.EffectiveUntil == nil || !got.EffectiveUntil.Equal(until) {
+		t.Fatalf("batch child dates = %+v", got)
 	}
 
 	newFrom := now.Add(48 * time.Hour)
@@ -70,6 +82,13 @@ func TestAttachmentEffectiveDatesFollowParent(t *testing.T) {
 	}
 	if snap.Annotations.EffectiveFrom != nil || snap.Annotations.EffectiveUntil != nil {
 		t.Fatalf("cleared parent dates not reflected on child: %+v", snap.Annotations)
+	}
+	batch, err = m.AnnotationsForDocuments(ctx, Scope{TenantID: 7, KnowledgeBaseID: "kb-a"}, []string{"child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := batch["child"]; got.EffectiveFrom != nil || got.EffectiveUntil != nil {
+		t.Fatalf("batch child dates not cleared with parent: %+v", got)
 	}
 }
 

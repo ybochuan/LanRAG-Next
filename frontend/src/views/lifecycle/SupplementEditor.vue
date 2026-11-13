@@ -16,7 +16,7 @@
     <label class="search-label">父文档所属知识库<select v-model="parentKB" :disabled="locked" @change="changeParentKB"><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
     <label class="search-label">筛选本页父文档<input v-model="query" type="search" placeholder="文档名称或 ID" :disabled="locked" /></label>
     <p v-if="candidateError" class="notice error" role="alert">{{ candidateError }}</p>
-    <p v-if="candidateBusy" role="status">正在加载同库生效文档…</p>
+    <p v-if="candidateBusy" role="status">正在加载该知识库的生效文档…</p>
     <ul v-else class="choices">
      <li v-for="candidate in filtered" :key="candidate.document_id"><label><input v-model="selected" type="checkbox" :value="selectionKey(parentKB,candidate.document_id)" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" /><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></label></li>
     </ul>
@@ -34,15 +34,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import * as api from '@/api/lifecycle'
+import { documentTitle } from '@/api/business'
+import { httpStatus } from '../business/model'
 import { dependencyReason, errorMessage, requestFence, stateLabels, supplementCommand } from './model'
 const props=defineProps<{kb:string;documentId:string;canWrite:boolean;parentBusy:boolean;knowledgeBases:{id:string;name:string}[]}>()
 const emit=defineEmits<{saved:[];busy:[value:boolean]}>()
 const value=ref<api.SupplementView>(),selected=ref<string[]>([]),candidates=ref<api.DocumentRow[]>([])
 const loading=ref(false),saving=ref(false),error=ref(''),success=ref(''),conflict=ref(false)
 const candidateBusy=ref(false),candidateError=ref(''),page=ref(1),total=ref(0),query=ref(''),parentKB=ref(props.kb)
-const titles=new Map<string,string>()
+const titles=reactive(new Map<string,string>())
 const fence=requestFence(),candidateFence=requestFence()
 const locked=computed(()=>saving.value||props.parentBusy)
 const selectionKey=(kb:string,id:string)=>`${kb}\u0000${id}`
@@ -61,16 +63,24 @@ async function loadCandidates(){
  candidateBusy.value=true;candidateError.value=''
  try{const result=await api.overview(kb,page.value,'active');if(candidateFence.current(token)){candidates.value=result.documents;total.value=result.total;for(const row of result.documents)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)}}catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
 }
+async function loadSelectedTitles(view:api.SupplementView){
+ const kbs=view.parent_knowledge_base_ids||[]
+ await Promise.all(view.parents.map(async(id,index)=>{
+  const kb=kbs[index]||props.kb
+  if(titles.has(`${kb}:${id}`))return
+  try{const name=await documentTitle(kb,id);if(name)titles.set(`${kb}:${id}`,name)}catch{}
+ }))
+}
 function changeParentKB(){page.value=1;query.value='';candidates.value=[];void loadCandidates()}
 function move(delta:number){page.value+=delta;void loadCandidates()}
 async function reload(){
  const token=fence.begin();loading.value=true;error.value='';success.value='';conflict.value=false;value.value=undefined
- try{const result=await api.supplements(props.kb,props.documentId);if(fence.current(token)){value.value=result.supplements;setSelected(result.supplements);const kbs=[...new Set((result.supplements.parent_knowledge_base_ids||[]).filter(Boolean))];if(!kbs.includes(parentKB.value))parentKB.value=kbs[0]||props.kb}}catch(e){if(fence.current(token))error.value=errorMessage(e)}finally{if(fence.current(token))loading.value=false}
+ try{const result=await api.supplements(props.kb,props.documentId);if(fence.current(token)){value.value=result.supplements;setSelected(result.supplements);void loadSelectedTitles(result.supplements);const kbs=[...new Set((result.supplements.parent_knowledge_base_ids||[]).filter(Boolean))];if(!kbs.includes(parentKB.value))parentKB.value=kbs[0]||props.kb}}catch(e){if(fence.current(token))error.value=errorMessage(e)}finally{if(fence.current(token))loading.value=false}
 }
 async function save(){
  if(!value.value||!props.canWrite||locked.value||conflict.value)return
  const token=fence.begin();saving.value=true;emit('busy',true);error.value='';success.value=''
- try{const refs=selectedRefs.value;const body=supplementCommand(value.value.revision,refs.map(item=>item.id),props.documentId,crypto.randomUUID(),refs.map(item=>item.kb));const result=await api.saveSupplements(props.kb,props.documentId,body);if(!fence.current(token))return;value.value=result.supplements;setSelected(result.supplements);success.value=result.evaluation_status==='pending'?'关系已保存，状态待后台重新核验。':'依赖已保存，状态已重新核验。';emit('saved')}catch(e){if(fence.current(token)){error.value=errorMessage(e);conflict.value=true}}finally{if(fence.current(token)){saving.value=false;emit('busy',false)}}
+ try{const refs=selectedRefs.value;const body=supplementCommand(value.value.revision,refs.map(item=>item.id),props.documentId,crypto.randomUUID(),refs.map(item=>item.kb));const result=await api.saveSupplements(props.kb,props.documentId,body);if(!fence.current(token))return;value.value=result.supplements;setSelected(result.supplements);success.value=result.evaluation_status==='pending'?'关系已保存，状态待后台重新核验。':'依赖已保存，状态已重新核验。';emit('saved')}catch(e){if(fence.current(token)){error.value=errorMessage(e);conflict.value=httpStatus(e)===409}}finally{if(fence.current(token)){saving.value=false;emit('busy',false)}}
 }
 watch(()=>[props.kb,props.documentId],()=>{fence.invalidate();candidateFence.invalidate();saving.value=false;emit('busy',false);titles.clear();parentKB.value=props.kb;page.value=1;query.value='';selected.value=[];candidates.value=[];void reload();void loadCandidates()},{immediate:true})
 onBeforeUnmount(()=>{fence.invalidate();candidateFence.invalidate();emit('busy',false)})

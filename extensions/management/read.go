@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
+	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
 type document struct {
@@ -18,6 +19,8 @@ type document struct {
 	LastEventID    string                `json:"last_event_id"`
 	Annotations    lifecycle.Annotations `json:"annotations"`
 	BusinessFamily *documentFamily       `json:"business_family,omitempty"`
+	Degraded       bool                  `json:"degraded,omitempty"`
+	DegradedReason string                `json:"degraded_reason,omitempty"`
 }
 
 type documentFamily struct {
@@ -87,43 +90,72 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 		return nil, errors.New("invalid title")
 	}
 	tenant := strconv.FormatUint(r.TenantID, 10)
+	lifecycleInconsistent := false
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, "SELECT state,count(*) FROM ext_lifecycle_current WHERE tenant_id=? AND knowledge_base_id=? GROUP BY state", tenant, r.KnowledgeBaseID)
+		rows, err := tx.QueryContext(ctx, `SELECT c.state,count(*) FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+` WHERE c.tenant_id=? AND c.knowledge_base_id=? AND `+store.LifecycleCurrentVerifiedSQL+` GROUP BY c.state`, tenant, r.KnowledgeBaseID)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var state string
 			var n int
 			if err = rows.Scan(&state, &n); err != nil {
+				rows.Close()
 				return err
 			}
 			if _, ok := counts[state]; !ok {
+				rows.Close()
 				return errors.New("unknown lifecycle state")
 			}
 			counts[state] = n
 		}
-		return rows.Err()
+		if err = rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		var invalid int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+` WHERE c.tenant_id=? AND c.knowledge_base_id=? AND NOT (`+store.LifecycleCurrentVerifiedSQL+`)`, tenant, r.KnowledgeBaseID).Scan(&invalid); err != nil {
+			return err
+		}
+		lifecycleInconsistent = invalid > 0
+		return nil
 	})
 	if err != nil {
 		return nil, errDatabase
 	}
-	ids, total, degraded, err := s.overviewPage(ctx, r, tenant)
+	ids, total, nativeDegraded, err := s.overviewPage(ctx, r, tenant)
 	if err != nil {
 		return nil, errDatabase
 	}
+	degraded := nativeDegraded || lifecycleInconsistent
 	// Bounded page snapshots reuse the canonical date decoder and scoped policy read.
 	if err := s.enrichDocumentFamilies(ctx, r, ids); err != nil {
 		return nil, errDatabase
 	}
 	m := lifecycle.NewMachine(s.db, nil)
+	documentIDs := make([]string, len(ids))
 	for i := range ids {
-		snap, err := m.Snapshot(ctx, lifecycle.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID, DocumentID: ids[i].DocumentID})
-		if err != nil {
-			return nil, errDatabase
+		documentIDs[i] = ids[i].DocumentID
+	}
+	annotations, batchErr := m.AnnotationsForDocuments(ctx, lifecycle.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, documentIDs)
+	if batchErr == nil {
+		for i := range ids {
+			ids[i].Annotations = annotations[ids[i].DocumentID]
 		}
-		ids[i].Annotations = snap.Annotations
+	} else {
+		// Preserve per-document degradation if a malformed annotation still
+		// prevents a batch read.
+		for i := range ids {
+			snap, err := m.Snapshot(ctx, lifecycle.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID, DocumentID: ids[i].DocumentID})
+			if err != nil {
+				ids[i].Degraded = true
+				ids[i].DegradedReason = "lifecycle_inconsistent"
+				degraded = true
+				continue
+			}
+			ids[i].Annotations = snap.Annotations
+		}
 	}
 	rules, err := s.rules(ctx, r)
 	if err != nil {
@@ -137,7 +169,14 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 	rules["can_write"] = r.CanWrite
 	rules["degraded"] = degraded
 	if degraded {
-		rules["degraded_reason"] = "native_database_unavailable"
+		switch {
+		case nativeDegraded && lifecycleInconsistent:
+			rules["degraded_reason"] = "native_database_unavailable,lifecycle_inconsistent"
+		case lifecycleInconsistent:
+			rules["degraded_reason"] = "lifecycle_inconsistent"
+		default:
+			rules["degraded_reason"] = "native_database_unavailable"
+		}
 	}
 	return rules, nil
 }

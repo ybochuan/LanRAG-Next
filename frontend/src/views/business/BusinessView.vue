@@ -59,7 +59,7 @@
             </section>
             <div v-if="detail.citation_document_ids?.length">
               <h3>已核验的引用文档</h3>
-              <button v-for="id in detail.citation_document_ids" :key="id" class="text-button" type="button" @click="$emit('open',id,docName(id))">{{ docName(id) }}</button>
+              <button v-for="id in detail.citation_document_ids" :key="id" class="text-button" type="button" @click="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)">{{ docName(id,detail.knowledge_base_id||kb) }}</button>
             </div>
           </template>
           <h3 v-if="detail.text||detail.proposed_patch">{{ kind==='revision'?'完整修订正文':kind==='feedback'?'用户意见':'内容' }}</h3><pre v-if="detail.text||detail.proposed_patch" class="content-preview">{{ detail.text||detail.proposed_patch }}</pre>
@@ -85,7 +85,7 @@
               <div class="section-heading">
                 <h4>{{ part.title }}</h4><span class="state-badge" :class="part.status">{{ stateLabel(part) }}</span>
               </div>
-              <p v-if="part.target_document_id" class="subtle">目标文档 · {{ docName(part.target_document_id) }}</p>
+              <p v-if="part.target_document_id" class="subtle">目标文档 · {{ docName(part.target_document_id, part.target_knowledge_base_id || detail.knowledge_base_id || kb) }}</p>
               <pre class="content-preview">{{ part.proposed_patch }}</pre>
               <p v-if="part.publish_error" class="notice" role="status">{{ publicationError(part.publish_error) }}</p>
               <button v-if="detail.status==='approved'&&actionsFor(kind,part,canWrite,now).includes('revision_publish')"
@@ -99,7 +99,7 @@
             <dl>
               <dt>废止通知标识</dt><dd><code>{{ detail.document_id }}</code></dd>
               <dt>通知锁定版本</dt><dd><code>{{ detail.source_version_id }}</code></dd>
-              <dt>被废止制度</dt><dd>{{ docName(detail.target_document_id) }}</dd>
+              <dt>被废止制度</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || detail.knowledge_base_id || kb) }}</dd>
               <dt>制度文档标识</dt><dd><code>{{ detail.target_document_id }}</code></dd>
               <dt>制度锁定版本</dt><dd><code>{{ detail.target_version_id }}</code></dd>
               <dt>废止生效时间</dt><dd>{{ date(detail.effective_at) }}</dd>
@@ -130,12 +130,12 @@
           <template v-else-if="detail.edge_type==='supplements'">
             <p class="subtle">箭头从补充通知指向主件。打开补充通知即可核对或修改它的依赖声明。</p>
             <button v-if="document?.id===detail.target_document_id && detail.document_id" type="button" class="text-button"
-              @click="$emit('open',detail.document_id,docName(detail.document_id, detail.knowledge_base_id || kb))">打开补充通知</button>
+              @click="$emit('open',detail.document_id,docName(detail.document_id, detail.knowledge_base_id || kb), detail.knowledge_base_id || kb)">打开补充通知</button>
           </template>
           <p v-else-if="kind==='relation'" class="subtle">已确认表示声明已保存；有效关联查询还会核对文档当前状态和版本。</p>
           <div v-if="kind==='relation'&&!document&&detail.edge_type!=='repeals'&&!clauseRelation(detail.edge_type)" class="actions">
-            <button v-if="detail.document_id" type="button" class="text-button" @click="inspectRelated(detail.document_id)">查询源文档关联</button>
-            <button v-if="detail.target_document_id" type="button" class="text-button" @click="inspectRelated(detail.target_document_id)">查询目标文档关联</button>
+            <button v-if="detail.document_id" type="button" class="text-button" @click="inspectRelated(detail.document_id, detail.knowledge_base_id || kb)">查询源文档关联</button>
+            <button v-if="detail.target_document_id" type="button" class="text-button" @click="inspectRelated(detail.target_document_id, detail.target_knowledge_base_id || kb)">查询目标文档关联</button>
           </div>
           <p v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" class="notice">尚在冷静期，达到上面的时间后可激活指导。</p>
           <div class="actions"><button v-for="action in actionsFor(kind,detail,canWrite,now)" :key="action"
@@ -174,7 +174,7 @@ import { requestFence } from '../lifecycle/model'
 import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, shortID, statusLabels, type WriteIntent } from './model'
 
 const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string}}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
-const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string]}>()
+const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string]}>()
 const sections=[{key:'associations',label:'关联关系'},{key:'feedback-governance',label:'反馈审核'},{key:'revisions',label:'修订发布'}]
 const riskLabels:Record<string,string>={low:'低风险',medium:'中风险',high:'高风险'}
 const heading=computed(()=>sections.find(v=>v.key===props.section)?.label||'业务治理')
@@ -204,9 +204,9 @@ const stateLabel=(row:api.BusinessRecord)=>kind.value==='relation'&&row.status==
 function recordTitle(row:api.BusinessRecord){
   if(kind.value==='relation')return edgeLabels[row.edge_type||'']||'文档关联'
   if(kind.value!=='revision')return row.topic||'未命名主题'
-  if(row.record_kind==='split_batch')return `拆分 · ${docName(row.source_document_id)}`
+  if(row.record_kind==='split_batch')return `拆分 · ${docName(row.source_document_id, row.knowledge_base_id || kb.value)}`
   if(row.record_kind==='split_part')return row.split_title||'拆分分件'
-  return `修订 · ${docName(row.source_document_id)}`
+  return `修订 · ${docName(row.source_document_id, row.knowledge_base_id || kb.value)}`
 }
 const publicationError=(code:string)=>code==='binary_source_upload_required'?'源文档是上传文件：请上传修订后的正式源文件。本条目保留为修订建议。':code==='remote_identity_mismatch'?'已找到的远端文档与本次发布不匹配，请先核对发布记录。':'上次发布尚未确认完成，可核对并继续发布；不会直接重复创建文档。'
 
@@ -247,7 +247,7 @@ async function loadRecords(){
 }
 async function loadAuthority(){
   const token=kbFence.begin(),scope=kb.value;canWrite.value=false;authorityError.value=''
-  try{const value=await overview(scope,1,'');if(!kbFence.current(token))return;canWrite.value=value.can_write;for(const row of value.documents)if(row.title)titles.value.set(row.document_id,row.title)}
+  try{const value=await overview(scope,1,'','',1);if(!kbFence.current(token))return;canWrite.value=value.can_write;for(const row of value.documents)if(row.title)titles.value.set(row.document_id,row.title)}
   catch(e){if(kbFence.current(token))authorityError.value=`权限信息暂不可用：${businessError(e)}。记录列表仍可查看。`}
 }
 function refresh(){if(!kb.value){void loadKBs();return}const selected=detail.value;void loadAuthority();void loadRecords();if(selected)void openRecord(selected);if(kind.value==='relation'&&queryDocument.value)void queryRelated()}
@@ -327,9 +327,12 @@ function inspectRelated(id:string, scope=kb.value){
 }
 function resetScope(){generation++;listFence.invalidate();detailFence.invalidate();kbFence.invalidate();clearRelatedResult();records.value=[];detail.value=undefined;detailLoading.value=false;pending.value=undefined;running.value=false;page.value=1;canWrite.value=false;titles.value.clear();crossTitles.value.clear();error.value='';authorityError.value='';success.value='';queryDocument.value='';queryScope.value='';dialog.value?.close();confirmationOpen.value=false}
 async function loadKBs(){
-  const token=catalogFence.begin();kb.value='';resetScope();knowledgeBases.value=[];loadingKB.value=true
-  if(props.scope){kb.value=props.scope;loadingKB.value=false;return}
-  try{const response=await listKnowledgeBases();if(!catalogFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];const requested=typeof route.query.kb==='string'?route.query.kb:'';kb.value=knowledgeBases.value.find(v=>v.id===requested)?.id||knowledgeBases.value[0]?.id||''}
+  const token=catalogFence.begin();kb.value=props.scope||'';resetScope();knowledgeBases.value=[];loadingKB.value=true
+  try{
+    const response=await listKnowledgeBases();if(!catalogFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[]
+    if(props.scope)return
+    const requested=typeof route.query.kb==='string'?route.query.kb:'';kb.value=knowledgeBases.value.find(v=>v.id===requested)?.id||knowledgeBases.value[0]?.id||''
+  }
   catch{if(catalogFence.current(token))error.value='无法载入可访问的知识库，请检查登录状态后重试。'}finally{if(catalogFence.current(token))loadingKB.value=false}
 }
 watch(kb,()=>{resetScope();if(kb.value){void loadAuthority();void loadRecords()}})

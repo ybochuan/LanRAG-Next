@@ -24,16 +24,18 @@ type WorkspaceMember struct {
 // WorkspaceRelation preserves the declared direction and its version anchors.
 // Current identifies a current governance record, not a retrieval permit.
 type WorkspaceRelation struct {
-	ID               string `json:"id"`
-	DocumentID       string `json:"document_id"`
-	TargetDocumentID string `json:"target_document_id"`
-	EdgeType         string `json:"edge_type"`
-	Status           string `json:"status"`
-	Revision         int64  `json:"revision"`
-	Scope            string `json:"scope"`
-	Current          bool   `json:"current"`
-	SourceVersionID  string `json:"source_version_id,omitempty"`
-	TargetVersionID  string `json:"target_version_id,omitempty"`
+	ID                    string `json:"id"`
+	DocumentID            string `json:"document_id"`
+	TargetDocumentID      string `json:"target_document_id"`
+	EdgeType              string `json:"edge_type"`
+	Status                string `json:"status"`
+	Revision              int64  `json:"revision"`
+	Scope                 string `json:"scope"`
+	Current               bool   `json:"current"`
+	SourceVersionID       string `json:"source_version_id,omitempty"`
+	TargetVersionID       string `json:"target_version_id,omitempty"`
+	KnowledgeBaseID       string `json:"knowledge_base_id"`
+	TargetKnowledgeBaseID string `json:"target_knowledge_base_id,omitempty"`
 }
 
 // WorkspaceActivity exposes an audit receipt without replaying the original payload.
@@ -183,7 +185,7 @@ func (s *Service) FamilyWorkspace(ctx context.Context, c Command, view string) (
 				args(c.Scope, c.ID, view == "relations", limit+1, offset), limit, func(rows *sql.Rows) (WorkspaceRelation, error) {
 					var item WorkspaceRelation
 					err := rows.Scan(&item.ID, &item.DocumentID, &item.TargetDocumentID, &item.EdgeType, &item.Status, &item.Revision,
-						&item.Scope, &item.Current, &item.SourceVersionID, &item.TargetVersionID)
+						&item.Scope, &item.Current, &item.SourceVersionID, &item.TargetVersionID, &item.KnowledgeBaseID, &item.TargetKnowledgeBaseID)
 					return item, err
 				})
 		case "activity":
@@ -239,25 +241,60 @@ const workspaceMembersSQL = `SELECT m.document_id,
 const workspaceScope = `WITH scope(tenant_id,knowledge_base_id,business_family_id) AS (VALUES(?,?,?)),
 	members AS (SELECT document_id,status FROM ext_business_family_member_history JOIN scope USING(tenant_id,knowledge_base_id,business_family_id)),
 	records AS (
-		SELECT relation_id,status,revision,json_extract(details,'$.document_id') AS document_id,
-			json_extract(details,'$.target_document_id') AS target_document_id,json_extract(details,'$.edge_type') AS edge_type,
-			COALESCE(json_extract(details,'$.source_version_id'),'') AS source_version_id,
-			COALESCE(json_extract(details,'$.target_version_id'),'') AS target_version_id,
-			CASE WHEN json_type(details,'$.pins_current') IS NOT NULL THEN
-				status IN ('active','awaiting_resolution','resolved') AND json_extract(details,'$.pins_current')=1
-				ELSE status IN ('active','applied','linked') END AS declared_current
-		FROM ` + relationRecords + ` JOIN scope USING(tenant_id,knowledge_base_id)
+		SELECT r.relation_id,r.status,r.revision,
+			json_extract(r.details,'$.document_id') AS document_id,
+			json_extract(r.details,'$.target_document_id') AS target_document_id,
+			json_extract(r.details,'$.edge_type') AS edge_type,
+			COALESCE(json_extract(r.details,'$.source_version_id'),'') AS source_version_id,
+			COALESCE(json_extract(r.details,'$.target_version_id'),'') AS target_version_id,
+			CASE WHEN json_type(r.details,'$.pins_current') IS NOT NULL THEN
+				r.status IN ('active','awaiting_resolution','resolved') AND json_extract(r.details,'$.pins_current')=1
+				ELSE r.status IN ('active','applied','linked') END AS declared_current,
+			r.knowledge_base_id,
+			COALESCE(json_extract(r.details,'$.target_knowledge_base_id'),r.knowledge_base_id) AS target_knowledge_base_id
+		FROM ` + relationRecords + ` r JOIN scope USING(tenant_id,knowledge_base_id)
+		UNION ALL
+		SELECT r.relation_id,r.status,r.revision,
+			json_extract(r.details,'$.document_id'),json_extract(r.details,'$.target_document_id'),json_extract(r.details,'$.edge_type'),
+			COALESCE(json_extract(r.details,'$.source_version_id'),''),COALESCE(json_extract(r.details,'$.target_version_id'),''),
+			CASE WHEN json_type(r.details,'$.pins_current') IS NOT NULL THEN
+				r.status IN ('active','awaiting_resolution','resolved') AND json_extract(r.details,'$.pins_current')=1
+				ELSE r.status IN ('active','applied','linked') END,
+			r.knowledge_base_id,COALESCE(json_extract(r.details,'$.target_knowledge_base_id'),r.knowledge_base_id)
+		FROM ` + relationRecords + ` r JOIN scope s ON r.tenant_id=s.tenant_id AND r.target_knowledge_base_id=s.knowledge_base_id AND r.knowledge_base_id<>s.knowledge_base_id
 		UNION ALL
 		SELECT 'supplement:'||d.declaration_id||':'||p.parent_document_id,
 			CASE WHEN c.declaration_id=d.declaration_id THEN d.status WHEN latest.status='revoked' THEN 'revoked' ELSE 'historical' END,
 			d.revision,d.document_id,p.parent_document_id,'supplements',d.child_version_node_id,p.parent_version_node_id,
-			(c.declaration_id=d.declaration_id AND d.status='active')
+			(c.declaration_id=d.declaration_id AND d.status='active'),d.knowledge_base_id,d.knowledge_base_id
 		FROM ext_supplement_declarations d JOIN scope USING(tenant_id,knowledge_base_id)
 		JOIN ext_supplement_parents p USING(tenant_id,knowledge_base_id,document_id,declaration_id)
 		LEFT JOIN ext_supplement_current c USING(tenant_id,knowledge_base_id,document_id)
-		LEFT JOIN ext_supplement_declarations latest ON latest.declaration_id=c.declaration_id
+		LEFT JOIN ext_supplement_declarations latest ON latest.tenant_id=d.tenant_id AND latest.knowledge_base_id=d.knowledge_base_id AND latest.document_id=d.document_id AND latest.declaration_id=c.declaration_id
 		UNION ALL
-		SELECT e.edge_id,'applied',1,n.native_id,m.native_id,e.edge_type,e.from_node_id,e.to_node_id,1
+		SELECT 'supplement:'||cf.cross_edge_id,
+			CASE WHEN c.declaration_id=d.declaration_id THEN d.status WHEN latest.status='revoked' THEN 'revoked' ELSE 'historical' END,
+			d.revision,d.document_id,cp.parent_document_id,'supplements',d.child_version_node_id,cp.parent_version_node_id,
+			(c.declaration_id=d.declaration_id AND d.status='active'),d.knowledge_base_id,cp.parent_knowledge_base_id
+		FROM ext_supplement_cross_parents cp
+		JOIN scope s ON cp.tenant_id=s.tenant_id AND cp.knowledge_base_id=s.knowledge_base_id
+		JOIN ext_supplement_declarations d ON d.tenant_id=cp.tenant_id AND d.knowledge_base_id=cp.knowledge_base_id AND d.document_id=cp.document_id AND d.declaration_id=cp.declaration_id
+		JOIN ext_supplement_cross_edge_facts cf ON cf.declaration_id=cp.declaration_id AND cf.parent_knowledge_base_id=cp.parent_knowledge_base_id AND cf.parent_document_id=cp.parent_document_id
+		LEFT JOIN ext_supplement_current c ON c.tenant_id=d.tenant_id AND c.knowledge_base_id=d.knowledge_base_id AND c.document_id=d.document_id
+		LEFT JOIN ext_supplement_declarations latest ON latest.tenant_id=d.tenant_id AND latest.knowledge_base_id=d.knowledge_base_id AND latest.document_id=d.document_id AND latest.declaration_id=c.declaration_id
+		UNION ALL
+		SELECT 'supplement:'||cf.cross_edge_id,
+			CASE WHEN c.declaration_id=d.declaration_id THEN d.status WHEN latest.status='revoked' THEN 'revoked' ELSE 'historical' END,
+			d.revision,d.document_id,cp.parent_document_id,'supplements',d.child_version_node_id,cp.parent_version_node_id,
+			(c.declaration_id=d.declaration_id AND d.status='active'),d.knowledge_base_id,cp.parent_knowledge_base_id
+		FROM ext_supplement_cross_parents cp
+		JOIN scope s ON cp.tenant_id=s.tenant_id AND cp.parent_knowledge_base_id=s.knowledge_base_id
+		JOIN ext_supplement_declarations d ON d.tenant_id=cp.tenant_id AND d.knowledge_base_id=cp.knowledge_base_id AND d.document_id=cp.document_id AND d.declaration_id=cp.declaration_id
+		JOIN ext_supplement_cross_edge_facts cf ON cf.declaration_id=cp.declaration_id AND cf.parent_knowledge_base_id=cp.parent_knowledge_base_id AND cf.parent_document_id=cp.parent_document_id
+		LEFT JOIN ext_supplement_current c ON c.tenant_id=d.tenant_id AND c.knowledge_base_id=d.knowledge_base_id AND c.document_id=d.document_id
+		LEFT JOIN ext_supplement_declarations latest ON latest.tenant_id=d.tenant_id AND latest.knowledge_base_id=d.knowledge_base_id AND latest.document_id=d.document_id AND latest.declaration_id=c.declaration_id
+		UNION ALL
+		SELECT e.edge_id,'applied',1,n.native_id,m.native_id,e.edge_type,e.from_node_id,e.to_node_id,1,scope.knowledge_base_id,scope.knowledge_base_id
 		FROM (SELECT edge_id,tenant_id,knowledge_base_id,edge_type,from_node_id,to_node_id FROM ext_lineage_edge
 			WHERE edge_type IN ('supersedes','merged_into')
 			UNION ALL SELECT edge_id,tenant_id,knowledge_base_id,edge_type,from_node_id,to_node_id FROM ext_revision_split_ancestry) e
@@ -272,13 +309,13 @@ const workspaceScope = `WITH scope(tenant_id,knowledge_base_id,business_family_i
 		FROM records r CROSS JOIN scope
 		LEFT JOIN members a ON a.document_id=r.document_id
 		LEFT JOIN members b ON b.document_id=r.target_document_id
-		LEFT JOIN ext_document_version_family f ON f.tenant_id=scope.tenant_id AND f.knowledge_base_id=scope.knowledge_base_id AND f.document_id=r.document_id
-		LEFT JOIN ext_document_version_family g ON g.tenant_id=scope.tenant_id AND g.knowledge_base_id=scope.knowledge_base_id AND g.document_id=r.target_document_id
+		LEFT JOIN ext_document_version_family f ON f.tenant_id=scope.tenant_id AND f.knowledge_base_id=r.knowledge_base_id AND f.document_id=r.document_id
+		LEFT JOIN ext_document_version_family g ON g.tenant_id=scope.tenant_id AND g.knowledge_base_id=r.target_knowledge_base_id AND g.document_id=r.target_document_id
 		WHERE a.document_id IS NOT NULL OR b.document_id IS NOT NULL
 	)`
 
 const workspaceRelationsSQL = workspaceScope + `
-	SELECT relation_id,document_id,target_document_id,edge_type,status,revision,relation_scope,current,source_version_id,target_version_id
+	SELECT relation_id,document_id,target_document_id,edge_type,status,revision,relation_scope,current,source_version_id,target_version_id,knowledge_base_id,target_knowledge_base_id
 	FROM incident WHERE current=? ORDER BY edge_type,document_id,target_document_id,relation_id LIMIT ? OFFSET ?`
 
 const workspaceActivitySQL = workspaceScope + `

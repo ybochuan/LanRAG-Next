@@ -77,7 +77,7 @@
                   <strong>{{ relationLabel(row.edge_type) }}</strong>
                   <span class="state-badge">{{ row.scope==='internal' ? '族内' : '族外' }}</span>
                   <span class="subtle">{{ relationStatus(row) }}</span>
-                  <p>{{ title(row.document_id) }} → {{ title(row.target_document_id) }}</p>
+                  <p>{{ title(row.document_id, row.knowledge_base_id || kb) }} → {{ title(row.target_document_id, row.target_knowledge_base_id || kb) }}</p>
                   <button v-for="action in relationActions(row)" :key="action" type="button" :disabled="locked"
                     @click="changeRelation(row,action)">{{ actionLabels[action] }}</button>
                 </li>
@@ -170,7 +170,7 @@
             <select v-model="relationEnd" :disabled="locked"><option value="source">作为源文档</option><option value="target">作为目标文档</option></select>
           </label>
           <CreateForm v-if="relationMember" :key="relationMember+relationEnd" :kb="kb" kind="relation" :disabled="locked"
-            :fixed-document="{id:relationMember,title:title(relationMember),end:relationEnd}" @submit="submitRelation" />
+            :knowledge-bases="bases" :fixed-document="{id:relationMember,title:title(relationMember),end:relationEnd}" @submit="submitRelation" />
         </section>
       </div>
     </template>
@@ -194,7 +194,7 @@ import FamilySuggestionPanel from './FamilySuggestionPanel.vue'
 import '../business/business.css'
 
 const props = defineProps<{ scope?:string; documentId?:string; currentFamily?:string; initialView?:api.FamilyTab }>()
-const emit = defineEmits<{ open:[id:string,title:string]; changed:[]; locked:[value:boolean] }>()
+const emit = defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string]; changed:[]; locked:[value:boolean] }>()
 
 const tabs: {key:api.FamilyTab; label:string}[] = [
   {key:'members',label:'当前成员'}, {key:'unassigned',label:'未归族'}, {key:'removed',label:'移出历史'},
@@ -226,6 +226,8 @@ const history = ref<api.FamilyReplacementHistory>(), historyBusy = ref(false), h
 const inbox = ref<api.FamilySuggestionInbox>()
 let scanPoll: ReturnType<typeof setTimeout> | undefined
 const names = ref<Record<string,string>>({})
+const crossNames = ref(new Map<string,string>())
+const nameKey = (scope:string,id:string) => scope+'\u0000'+id
 const relationMember = ref(''), relationEnd = ref<'source'|'target'>('source'), relationMembers = ref<api.FamilyMember[]>([])
 const memberPage = ref(1), moreMembers = ref(false)
 const saving = ref(false)
@@ -244,7 +246,7 @@ const historyBlocks: Record<string,string> = {
   document_needs_review: '有文档已失效、正在受其他治理限制，或来源版本已改变，请复核后再处理。',
 }
 
-const title = (id: string) => names.value[id] || id
+const title = (id: string, scope=kb.value) => scope===kb.value ? (names.value[id] || id) : (crossNames.value.get(nameKey(scope,id)) || id)
 const lifecycleLabel = (state: string) => stateLabels[state as LifecycleState] || state
 const activityLabel = (action: string) => familyActions[action] || actionLabels[action as BusinessAction] || action
 const replacementStatus = (state: string) => state==='applied' ? '已执行' : statusLabels[state] || ({created:'已创建',member_added:'已加入',member_removed:'已移出'} as Record<string,string>)[state] || state
@@ -254,15 +256,15 @@ const relationStatus = (row: api.FamilyRelation) => row.status==='active' && !ro
 async function loadCatalog() {
   const token = catalogFence.begin()
   catalogBusy.value = true
-  kb.value = ''
+  kb.value = props.scope || ''
   bases.value = []
   error.value = ''
-  if (props.scope) { kb.value=props.scope; catalogBusy.value=false; return }
   try {
     const response = await listKnowledgeBases()
     if (!catalogFence.current(token)) return
     if (!response.success) throw new Error()
     bases.value = response.data || []
+    if (props.scope) return
     const preferred = route.query.kb
     kb.value = bases.value.find(row=>row.id===preferred)?.id || bases.value[0]?.id || ''
   } catch {
@@ -277,7 +279,7 @@ async function loadFamilies(select = false) {
   if (!scope) return
   listBusy.value = true
   try {
-    const [rows, access] = await Promise.all([api.listFamilies(scope,familyPage.value), overview(scope,1,'')])
+    const [rows, access] = await Promise.all([api.listFamilies(scope,familyPage.value), overview(scope,1,'','',1)])
     if (!listFence.current(token)) return
     families.value = rows
     canWrite.value = access.can_write
@@ -342,12 +344,28 @@ async function loadView() {
       moreMembers.value = candidates?.has_next || false
       if (!relationMembers.value.some(row=>row.document_id===relationMember.value)) relationMember.value=''
     }
-    const docs = [...members.value.map(row=>row.document_id), ...relationMembers.value.map(row=>row.document_id),
-      ...plans.value.flatMap(row=>[row.old_document_id,row.new_document_id]),
-      ...(view==='suggestions' ? inbox.value?.items.flatMap(row=>[row.document_id,row.target_document_id]) || [] : []),
-      ...relations.value.flatMap(row=>[row.document_id,row.target_document_id]), family.value?.published_document_id || '']
-    const labels = await documentTitles(scope,docs).catch(()=>({}))
-    if (viewFence.current(token)) names.value = {...names.value,...labels}
+    const byScope = new Map<string,string[]>()
+    const add = (documentScope:string|undefined,id:string|undefined) => {
+      if (documentScope && id) byScope.set(documentScope,[...(byScope.get(documentScope)||[]),id])
+    }
+    for (const row of members.value) add(scope,row.document_id)
+    for (const row of relationMembers.value) add(scope,row.document_id)
+    for (const row of plans.value) { add(scope,row.old_document_id); add(scope,row.new_document_id) }
+    if (view==='suggestions') for (const row of inbox.value?.items || []) {
+      add(scope,row.document_id); add(scope,row.target_document_id)
+    }
+    for (const row of relations.value) {
+      add(row.knowledge_base_id || scope,row.document_id)
+      add(row.target_knowledge_base_id || scope,row.target_document_id)
+    }
+    add(scope,family.value?.published_document_id || '')
+    const titleGroups = await Promise.all([...byScope].map(async ([documentScope,ids]) =>
+      [documentScope,await documentTitles(documentScope,[...new Set(ids)]).catch(()=>({}))] as const))
+    if (!viewFence.current(token)) return
+    for (const [documentScope,labels] of titleGroups) {
+      if (documentScope===scope) names.value = {...names.value,...labels}
+      else for (const [id,name] of Object.entries(labels)) crossNames.value.set(nameKey(documentScope,id),name)
+    }
   } catch (e) {
     if (!viewFence.current(token)) return
     if (httpStatus(e)===403 || httpStatus(e)===404) {
@@ -372,8 +390,8 @@ function moveFamilies(delta: number) {
   familyPage.value += delta
   void loadFamilies()
 }
-function openDocument(id: string) {
-  if (props.documentId) emit('open',id,title(id))
+function openDocument(id: string, scope=kb.value) {
+  if (props.documentId) emit('open',id,title(id,scope),scope)
   else documentId.value = id
 }
 function askRemoval(id: string) { removing.value = id; removalReason.value = '' }
@@ -537,7 +555,7 @@ watch(kb,()=>{
   listFence.invalidate()
   viewFence.invalidate()
   family.value=undefined; familyId.value=''; familyPage.value=1; families.value=[]; canWrite.value=false
-  pending.value=undefined; batch.value=undefined; saving.value=false; names.value={}; error.value=''; notice.value=''
+  pending.value=undefined; batch.value=undefined; saving.value=false; names.value={}; crossNames.value.clear(); error.value=''; notice.value=''
   documentId.value=''; documentBusy.value=false; removing.value=''; addId.value=''; newLabel.value=''
   if (kb.value) void loadFamilies(true)
 })
