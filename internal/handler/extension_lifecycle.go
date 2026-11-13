@@ -139,12 +139,13 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 	}
 	if mutation {
 		var body struct {
-			ExpectedRevision *int64          `json:"expected_revision"`
-			Annotations      json.RawMessage `json:"annotations"`
-			Rules            json.RawMessage `json:"rules"`
-			OperationID      string          `json:"operation_id"`
-			Parents          *[]string       `json:"parents"`
-			Business         json.RawMessage `json:"business"`
+			ExpectedRevision       *int64          `json:"expected_revision"`
+			Annotations            json.RawMessage `json:"annotations"`
+			Rules                  json.RawMessage `json:"rules"`
+			OperationID            string          `json:"operation_id"`
+			Parents                *[]string       `json:"parents"`
+			ParentKnowledgeBaseIDs *[]string       `json:"parent_knowledge_base_ids"`
+			Business               json.RawMessage `json:"business"`
 		}
 		dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10))
 		dec.DisallowUnknownFields()
@@ -160,7 +161,7 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 			return
 		}
 		if strings.HasPrefix(action, "business_") {
-			if len(body.Business) == 0 || body.OperationID == "" || len(body.Annotations) > 0 || len(body.Rules) > 0 || body.Parents != nil {
+			if len(body.Business) == 0 || body.OperationID == "" || len(body.Annotations) > 0 || len(body.Rules) > 0 || body.Parents != nil || body.ParentKnowledgeBaseIDs != nil {
 				lifecycleError(c, 400)
 				return
 			}
@@ -172,13 +173,30 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 				lifecycleError(c, 400)
 				return
 			}
-			for _, id := range *body.Parents {
+			parentKBs := make([]string, len(*body.Parents))
+			for i := range parentKBs {
+				parentKBs[i] = req.KnowledgeBaseID
+			}
+			if body.ParentKnowledgeBaseIDs != nil {
+				if len(*body.ParentKnowledgeBaseIDs) != len(*body.Parents) {
+					lifecycleError(c, 400)
+					return
+				}
+				for i, kb := range *body.ParentKnowledgeBaseIDs {
+					if kb == "" || len(kb) > 128 {
+						lifecycleError(c, 400)
+						return
+					}
+					parentKBs[i] = kb
+				}
+			}
+			for i, id := range *body.Parents {
 				if id == "" || len(id) > 128 {
 					lifecycleError(c, 400)
 					return
 				}
 				parent, e := h.knowledgeService.GetKnowledgeByID(grant.Context(ctx), id)
-				if e != nil || parent == nil || parent.ID != id || parent.KnowledgeBaseID != req.KnowledgeBaseID || parent.TenantID != req.TenantID {
+				if e != nil || parent == nil || parent.ID != id || parent.KnowledgeBaseID != parentKBs[i] || parent.TenantID != req.TenantID {
 					lifecycleError(c, 404)
 					return
 				}
@@ -186,7 +204,8 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 			req.ActorID = strconv.FormatUint(caller.TenantID, 10) + ":" + caller.UserID
 			req.OperationID = body.OperationID
 			req.Parents = *body.Parents
-		} else if body.Parents != nil || body.OperationID != "" {
+			req.ParentKnowledgeBaseIDs = parentKBs
+		} else if body.Parents != nil || body.ParentKnowledgeBaseIDs != nil || body.OperationID != "" {
 			lifecycleError(c, 400)
 			return
 		}

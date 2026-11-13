@@ -99,13 +99,17 @@ const suggestionScanPageSize = 64
 func (s *Service) suggestionDocuments(ctx context.Context, scope provenance.Scope, client *weknora.Client, family, after string) ([]scanDocument, string, error) {
 	ids := make([]string, 0, suggestionScanPageSize)
 	members := make(map[string]string)
+	asOf := s.now().UTC().Format(time.RFC3339Nano)
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT c.document_id,COALESCE(m.business_family_id,'')
 			FROM ext_lifecycle_current c `+store.LifecycleEventJoinSQL+`
+			`+store.LifecycleAnnotationJoinSQL+`
 			LEFT JOIN ext_business_document_family_members m USING(tenant_id,knowledge_base_id,document_id)
 			WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id>? AND (?='' OR m.business_family_id=?)
 			AND c.state='active' AND `+store.LifecycleReadableSQL+` AND NOT `+store.PublicationTargetPendingSQL+`
-			ORDER BY c.document_id LIMIT ?`, args(scope, after, family, family, suggestionScanPageSize)...)
+			AND (a.effective_from IS NULL OR a.effective_from='' OR a.effective_from<=?)
+			AND (a.effective_until IS NULL OR a.effective_until='' OR a.effective_until>=?)
+			ORDER BY c.document_id LIMIT ?`, args(scope, after, family, family, asOf, asOf, suggestionScanPageSize)...)
 		if err != nil {
 			return err
 		}

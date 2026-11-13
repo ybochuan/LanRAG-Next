@@ -45,7 +45,7 @@ export interface BusinessRecord {
   risk?: string; ready_at?: string | null; confidence?: number; source?: string
   knowledge_base_id?: string; document_id?: string; target_document_id?: string; target_knowledge_base_id?: string; edge_type?: string
   source_document_id?: string; source_version_id?: string; target_version_id?: string
-  effective_at?: string; applied_at?: string | null
+  effective_at?: string; applied_at?: string | null; effective_from?: string | null; effective_until?: string | null
   source_clause?: ClauseAnchor; target_clause?: ClauseAnchor
   applies_when?: string; resolution?: string; decision_note?: string
   resolved_by?: string; resolved_at?: string | null; pins_current?: boolean

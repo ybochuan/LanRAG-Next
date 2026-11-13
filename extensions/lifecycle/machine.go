@@ -45,11 +45,12 @@ type Command struct {
 
 // Snapshot is a consistent scoped read. ReviewOverdue is advisory only.
 type Snapshot struct {
-	Current       Current                 `json:"current"`
-	Annotations   Annotations             `json:"annotations"`
-	Policy        ResolvedRules           `json:"policy"`
-	ReviewOverdue bool                    `json:"review_overdue"`
-	Dependencies  dependencies.Assessment `json:"dependencies"`
+	Current                    Current                 `json:"current"`
+	Annotations                Annotations             `json:"annotations"`
+	Policy                     ResolvedRules           `json:"policy"`
+	ReviewOverdue              bool                    `json:"review_overdue"`
+	Dependencies               dependencies.Assessment `json:"dependencies"`
+	AttachmentParentDocumentID string                  `json:"attachment_parent_document_id,omitempty"`
 }
 
 // Machine applies extension-only decisions. It does not own its DB or schedule work.
@@ -65,13 +66,40 @@ func NewMachine(db *store.DB, now func() time.Time) *Machine {
 	}
 	return &Machine{db, now}
 }
+
+// attachmentAnnotationsTx overlays an attachment's effective window with its
+// active parent's annotations. The child keeps its own lifecycle facts and
+// review metadata; only the validity dates are inherited so parent edits take
+// effect without copying rows into every attachment.
+func attachmentAnnotationsTx(ctx context.Context, tx *sql.Tx, s Scope) (Annotations, string, error) {
+	annotations, err := annotationsTx(ctx, tx, s)
+	if err != nil {
+		return annotations, "", err
+	}
+	var parent string
+	err = tx.QueryRowContext(ctx, `SELECT parent_document_id FROM ext_attachment_links WHERE tenant_id=? AND knowledge_base_id=? AND attachment_id=? AND removed_at IS NULL AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1`, s.args()...).Scan(&parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return annotations, "", nil
+	}
+	if err != nil {
+		return annotations, "", err
+	}
+	parentAnnotations, err := annotationsTx(ctx, tx, Scope{TenantID: s.TenantID, KnowledgeBaseID: s.KnowledgeBaseID, DocumentID: parent})
+	if err != nil {
+		return annotations, "", err
+	}
+	annotations.EffectiveFrom = parentAnnotations.EffectiveFrom
+	annotations.EffectiveUntil = parentAnnotations.EffectiveUntil
+	return annotations, parent, nil
+}
+
 func snapshotTx(ctx context.Context, tx *sql.Tx, s Scope) (snap Snapshot, err error) {
 	state, event, readErr := store.ReadLifecycleCurrentTx(ctx, tx, s.TenantID, s.KnowledgeBaseID, s.DocumentID)
 	snap.Current.State, snap.Current.LastEventID, err = State(state), event, readErr
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return
 	}
-	snap.Annotations, err = annotationsTx(ctx, tx, s)
+	snap.Annotations, snap.AttachmentParentDocumentID, err = attachmentAnnotationsTx(ctx, tx, s)
 	if err != nil {
 		return
 	}

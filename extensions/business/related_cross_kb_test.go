@@ -3,6 +3,7 @@ package business
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,37 @@ func seedCrossKBTarget(t *testing.T, db interface {
 func seedCrossKBSourceActive(t *testing.T, db *store.DB, ctx context.Context) {
 	t.Helper()
 	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: "source-active", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedCrossKBSupplement(t *testing.T, db *store.DB, childKB, childDoc, childVersion, childEvent, parentKB, parentDoc, parentVersion, parentEvent string) {
+	t.Helper()
+	if err := db.Write(context.Background(), func(tx *sql.Tx) error {
+		for _, row := range []struct {
+			kb, doc, version, event string
+		}{
+			{childKB, childDoc, childVersion, childEvent},
+			{parentKB, parentDoc, parentVersion, parentEvent},
+		} {
+			if _, err := tx.Exec(`INSERT INTO ext_document_version(version_node_id,tenant_id,knowledge_base_id,family_id,document_id,content_hash,observation_sequence,lifecycle_event_id,source_uri,source_format,created_at)
+				VALUES(?, '7', ?, ?, ?, ?, 1, ?, '', 'markdown', '2026-11-02T00:00:00Z')`,
+				row.version, row.kb, "family-"+row.doc, row.doc, strings.Repeat("0", 64), row.event); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO ext_supplement_declarations(declaration_id,tenant_id,knowledge_base_id,document_id,revision,child_version_node_id,child_event_id,actor_id,operation_id,payload_hash,status,created_at)
+			VALUES('decl-cross', '7', ?, ?, 1, ?, ?, '7:owner', 'op-cross-supplement', ?, 'active', '2026-11-02T00:00:00Z')`,
+			childKB, childDoc, childVersion, childEvent, strings.Repeat("0", 64)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO ext_supplement_current(tenant_id,knowledge_base_id,document_id,revision,declaration_id) VALUES('7', ?, ?, 1, 'decl-cross')`, childKB, childDoc); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO ext_supplement_cross_parents(declaration_id,tenant_id,knowledge_base_id,document_id,parent_knowledge_base_id,parent_document_id,parent_version_node_id,parent_event_id)
+			VALUES('decl-cross', '7', ?, ?, ?, ?, ?, ?)`, childKB, childDoc, parentKB, parentDoc, parentVersion, parentEvent)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -73,6 +105,13 @@ func TestCrossKnowledgeBaseNormativeRelation(t *testing.T) {
 		if sameEdges != 0 || crossEdges != 1 {
 			t.Fatalf("edges same=%d cross=%d", sameEdges, crossEdges)
 		}
+		var tagIntents int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM ext_projection_outbox WHERE projection_type='relation_tag'`).Scan(&tagIntents); err != nil {
+			return err
+		}
+		if tagIntents != 2 {
+			t.Fatalf("relation tag intents=%d", tagIntents)
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -109,6 +148,34 @@ func TestCrossKnowledgeBaseNormativeRelation(t *testing.T) {
 		return tx.QueryRow(`SELECT COUNT(*) FROM ext_lineage_edge_cross_kb`).Scan(&crossEdges)
 	}); err != nil || crossEdges != 0 {
 		t.Fatalf("cross edge not removed: %d %v", crossEdges, err)
+	}
+}
+
+func TestCrossKnowledgeBaseSupplementQueryRelated(t *testing.T) {
+	s, db, _ := fixture(t)
+	ctx := context.Background()
+	scope := provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}
+	seedVersions(t, db, scope)
+	seedCrossKBSourceActive(t, db, ctx)
+	seedCrossKBTarget(t, db, "kb2", "target2", "version-target2")
+	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: "target2-active", TenantID: 7, KnowledgeBaseID: "kb2", DocumentID: "target2", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	seedCrossKBSupplement(t, db, "kb", "source", "version-source", "source-active", "kb2", "target2", "version-target2", "target2-active")
+	s.verify = func(_ context.Context, _ provenance.Scope, doc string) (string, error) {
+		if doc == "target2" {
+			return "version-target2", nil
+		}
+		return "version-" + doc, nil
+	}
+
+	rows, err := s.QueryRelated(ctx, scope, "source")
+	if err != nil || len(rows) != 1 || rows[0].KnowledgeBaseID != "kb2" || rows[0].DocumentID != "target2" || rows[0].EdgeType != "supplements" || rows[0].Direction != "outgoing" {
+		t.Fatalf("cross-KB supplement query: %v %v", rows, err)
+	}
+	incoming, err := s.QueryRelated(ctx, provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb2"}, "target2")
+	if err != nil || len(incoming) != 1 || incoming[0].KnowledgeBaseID != "kb" || incoming[0].DocumentID != "source" || incoming[0].EdgeType != "supplements" || incoming[0].Direction != "incoming" {
+		t.Fatalf("cross-KB supplement incoming query: %v %v", incoming, err)
 	}
 }
 

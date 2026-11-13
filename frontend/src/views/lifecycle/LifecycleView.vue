@@ -70,18 +70,19 @@
       <h3>有效期与复核</h3>
       <p class="source-note">时间按本机时区显示（{{ timezone }}），保存为 UTC。清空日期不会恢复已失效文档。</p>
       <form @submit.prevent="submitDocument">
-       <label>生效时间<input v-model="dateForm.effective_from" type="datetime-local" :disabled="!data?.can_write || detailLocked" /></label>
-       <label>失效时间<input v-model="dateForm.effective_until" type="datetime-local" :disabled="!data?.can_write || detailLocked" /></label>
-       <label>复核时间<input v-model="dateForm.review_due" type="datetime-local" :disabled="!data?.can_write || detailLocked" /></label>
+       <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">此附件的生效/失效时间继承主件，请到主件编辑日期。</p>
+       <label>生效时间<input v-model="dateForm.effective_from" type="datetime-local" :disabled="!data?.can_write || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
+       <label>失效时间<input v-model="dateForm.effective_until" type="datetime-local" :disabled="!data?.can_write || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
+       <label>复核时间<input v-model="dateForm.review_due" type="datetime-local" :disabled="!data?.can_write || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
        <p v-if="documentSuccess" class="notice success" role="status">{{ documentSuccess }}</p>
-       <button v-if="data?.can_write" class="primary" :disabled="detailLocked || documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</button>
+       <button v-if="data?.can_write && !detail.snapshot.attachment_parent_document_id" class="primary" :disabled="detailLocked || documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</button>
       </form>
      </template>
      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedID+detailTab" :scope="kb" :document-id="selectedID"
       :current-family="detail.business_family?.id" :initial-view="detailTab==='suggestions'?'suggestions':'members'"
       @open="openDocument" @changed="refreshDocumentMembership" @locked="childLocked=$event" />
      <template v-else-if="detailTab==='relations'">
-      <SupplementEditor :kb="kb" :document-id="selectedID" :can-write="!!data?.can_write" :parent-busy="childLocked" @busy="supplementBusy=$event" @saved="supplementSaved" />
+      <SupplementEditor :kb="kb" :document-id="selectedID" :can-write="!!data?.can_write" :parent-busy="childLocked" :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="supplementSaved" />
       <BusinessView :key="selectedID+':'+supplementRevision" :scope="kb" :document="{id:selectedID,title:selectedTitle||selectedID}" section="associations" @open="openRelatedDocument" @locked="childLocked=$event" />
      </template>
      <LineageView v-else-if="detailTab==='graph'" :key="selectedID" :scope="kb" :document-id="selectedID" @open="openGraphDocument" />

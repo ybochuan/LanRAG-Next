@@ -1,27 +1,29 @@
 <template>
  <section class="supplements" aria-labelledby="supplement-title" data-testid="supplement-editor">
   <h3 id="supplement-title">补充文档依赖</h3>
-  <p>为本篇补充文档选择同库父文档，最多 8 篇。任一父文档失效、过期或版本变化，本篇将停止参与问答。复核到期只提醒，不改变状态。</p>
+  <p>为本篇补充文档选择父文档，最多 8 篇；父文档可来自当前知识库或另一个已授权知识库。任一父文档失效、过期或版本变化，本篇将停止参与问答。复核到期只提醒，不改变状态。</p>
   <p v-if="loading" role="status">正在核验依赖…</p>
   <p v-if="error" class="notice error" role="alert">{{ error }}</p>
   <template v-if="value">
    <p class="subtle">关系版本 {{ value.revision }} · {{ value.assessment.configured?'已声明依赖':'未声明依赖' }}</p>
    <p v-if="dependencyReason(value.assessment.reason)" class="notice" role="status">{{ dependencyReason(value.assessment.reason) }}</p>
    <ul v-if="value.assessment.parents.length" class="evidence">
-    <li v-for="parent in value.assessment.parents" :key="`${parent.document_id}:${parent.version_id}`"><strong>{{ title(parent.document_id) }}</strong><span>{{ stateLabels[parent.state] || '缺少状态' }}<template v-if="parent.effective_until"> · 失效 {{ date(parent.effective_until) }}</template><template v-if="parent.review_due"> · 复核 {{ date(parent.review_due) }}</template></span></li>
+    <li v-for="parent in value.assessment.parents" :key="`${parent.knowledge_base_id}:${parent.document_id}:${parent.version_id}`"><strong>{{ title(parent.knowledge_base_id, parent.document_id) }}</strong><span>{{ stateLabels[parent.state] || '缺少状态' }}<template v-if="parent.effective_until"> · 失效 {{ date(parent.effective_until) }}</template><template v-if="parent.review_due"> · 复核 {{ date(parent.review_due) }}</template></span></li>
    </ul>
    <p v-if="value.assessment.review_due" class="subtle">父级最早复核：{{ date(value.assessment.review_due) }}。本篇原有日期保持不变。</p>
+   <p v-if="mixedParents" class="notice" role="status">当前依赖分布在多个知识库；保存会按每篇父文档所属知识库分别提交。</p>
    <div v-if="canWrite" class="picker">
+    <label class="search-label">父文档所属知识库<select v-model="parentKB" :disabled="locked" @change="changeParentKB"><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
     <label class="search-label">筛选本页父文档<input v-model="query" type="search" placeholder="文档名称或 ID" :disabled="locked" /></label>
     <p v-if="candidateError" class="notice error" role="alert">{{ candidateError }}</p>
     <p v-if="candidateBusy" role="status">正在加载同库生效文档…</p>
     <ul v-else class="choices">
-     <li v-for="candidate in filtered" :key="candidate.document_id"><label><input v-model="selected" type="checkbox" :value="candidate.document_id" :disabled="locked || selected.length>=8&&!selected.includes(candidate.document_id)" /><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></label></li>
+     <li v-for="candidate in filtered" :key="candidate.document_id"><label><input v-model="selected" type="checkbox" :value="selectionKey(parentKB,candidate.document_id)" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" /><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></label></li>
     </ul>
     <p v-if="!candidateBusy&&!filtered.length" class="subtle">本页没有可选文档。</p>
     <div class="pages"><button type="button" :disabled="locked || candidateBusy || page<=1" @click="move(-1)">上一页</button><span>第 {{ page }} 页</span><button type="button" :disabled="locked || candidateBusy || page*20>=total" @click="move(1)">下一页</button></div>
     <p class="subtle">已选 {{ selected.length }}/8；清空并保存即撤销关系，已有失效状态不会恢复。</p>
-    <ul class="selected"><li v-for="id in selected" :key="id"><span>{{ title(id) }}</span><button type="button" :disabled="locked" :aria-label="`移除父文档 ${title(id)}`" @click="selected=selected.filter(v=>v!==id)">移除</button></li></ul>
+    <ul class="selected"><li v-for="item in selectedRefs" :key="`${item.kb}:${item.id}`"><span>{{ title(item.kb,item.id) }}</span><button type="button" :disabled="locked" :aria-label="`移除父文档 ${title(item.kb,item.id)}`" @click="removeSelected(item.kb,item.id)">移除</button></li></ul>
     <div class="actions"><button type="button" class="primary" :disabled="locked || conflict || loading" @click="save">{{ saving?'正在保存…':'保存依赖' }}</button><button type="button" :disabled="locked" @click="reload">重新载入</button></div>
    </div>
    <p v-else class="subtle">当前账号仅有查看权限。</p>
@@ -35,33 +37,42 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import * as api from '@/api/lifecycle'
 import { dependencyReason, errorMessage, requestFence, stateLabels, supplementCommand } from './model'
-const props=defineProps<{kb:string;documentId:string;canWrite:boolean;parentBusy:boolean}>()
+const props=defineProps<{kb:string;documentId:string;canWrite:boolean;parentBusy:boolean;knowledgeBases:{id:string;name:string}[]}>()
 const emit=defineEmits<{saved:[];busy:[value:boolean]}>()
 const value=ref<api.SupplementView>(),selected=ref<string[]>([]),candidates=ref<api.DocumentRow[]>([])
 const loading=ref(false),saving=ref(false),error=ref(''),success=ref(''),conflict=ref(false)
-const candidateBusy=ref(false),candidateError=ref(''),page=ref(1),total=ref(0),query=ref('')
+const candidateBusy=ref(false),candidateError=ref(''),page=ref(1),total=ref(0),query=ref(''),parentKB=ref(props.kb)
 const titles=new Map<string,string>()
 const fence=requestFence(),candidateFence=requestFence()
 const locked=computed(()=>saving.value||props.parentBusy)
-const filtered=computed(()=>candidates.value.filter(v=>v.document_id!==props.documentId&&(v.title||v.document_id).toLowerCase().includes(query.value.toLowerCase())))
-const title=(id:string)=>titles.get(id)||id
+const selectionKey=(kb:string,id:string)=>`${kb}\u0000${id}`
+const selectedRefs=computed(()=>selected.value.map(raw=>{const at=raw.indexOf('\u0000');return{ kb:raw.slice(0,at),id:raw.slice(at+1)}}).filter(item=>item.kb&&item.id))
+const mixedParents=computed(()=>new Set(selectedRefs.value.map(item=>item.kb)).size>1)
+const filtered=computed(()=>candidates.value.filter(v=>(parentKB.value!==props.kb||v.document_id!==props.documentId)&&(v.title||v.document_id).toLowerCase().includes(query.value.toLowerCase())))
+const title=(kb:string,id:string)=>titles.get(`${kb}:${id}`)||id
 const date=(raw:string)=>new Date(raw).toLocaleString()
-async function loadCandidates(){
- const token=candidateFence.begin(),kb=props.kb
- candidateBusy.value=true;candidateError.value=''
- try{const result=await api.overview(kb,page.value,'active');if(candidateFence.current(token)){candidates.value=result.documents;total.value=result.total;for(const row of result.documents)if(row.title)titles.set(row.document_id,row.title)}}catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
+function setSelected(view:api.SupplementView){
+ const kbs=view.parent_knowledge_base_ids||[]
+ selected.value=view.parents.map((id,index)=>selectionKey(kbs[index]||props.kb,id))
 }
+function removeSelected(kb:string,id:string){selected.value=selected.value.filter(value=>value!==selectionKey(kb,id))}
+async function loadCandidates(){
+ const token=candidateFence.begin(),kb=parentKB.value
+ candidateBusy.value=true;candidateError.value=''
+ try{const result=await api.overview(kb,page.value,'active');if(candidateFence.current(token)){candidates.value=result.documents;total.value=result.total;for(const row of result.documents)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)}}catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
+}
+function changeParentKB(){page.value=1;query.value='';candidates.value=[];void loadCandidates()}
 function move(delta:number){page.value+=delta;void loadCandidates()}
 async function reload(){
  const token=fence.begin();loading.value=true;error.value='';success.value='';conflict.value=false;value.value=undefined
- try{const result=await api.supplements(props.kb,props.documentId);if(fence.current(token)){value.value=result.supplements;selected.value=[...result.supplements.parents]}}catch(e){if(fence.current(token))error.value=errorMessage(e)}finally{if(fence.current(token))loading.value=false}
+ try{const result=await api.supplements(props.kb,props.documentId);if(fence.current(token)){value.value=result.supplements;setSelected(result.supplements);const kbs=[...new Set((result.supplements.parent_knowledge_base_ids||[]).filter(Boolean))];if(!kbs.includes(parentKB.value))parentKB.value=kbs[0]||props.kb}}catch(e){if(fence.current(token))error.value=errorMessage(e)}finally{if(fence.current(token))loading.value=false}
 }
 async function save(){
  if(!value.value||!props.canWrite||locked.value||conflict.value)return
  const token=fence.begin();saving.value=true;emit('busy',true);error.value='';success.value=''
- try{const body=supplementCommand(value.value.revision,selected.value,props.documentId,crypto.randomUUID());const result=await api.saveSupplements(props.kb,props.documentId,body);if(!fence.current(token))return;value.value=result.supplements;selected.value=[...result.supplements.parents];success.value=result.evaluation_status==='pending'?'关系已保存，状态待后台重新核验。':'依赖已保存，状态已重新核验。';emit('saved')}catch(e){if(fence.current(token)){error.value=errorMessage(e);conflict.value=true}}finally{if(fence.current(token)){saving.value=false;emit('busy',false)}}
+ try{const refs=selectedRefs.value;const body=supplementCommand(value.value.revision,refs.map(item=>item.id),props.documentId,crypto.randomUUID(),refs.map(item=>item.kb));const result=await api.saveSupplements(props.kb,props.documentId,body);if(!fence.current(token))return;value.value=result.supplements;setSelected(result.supplements);success.value=result.evaluation_status==='pending'?'关系已保存，状态待后台重新核验。':'依赖已保存，状态已重新核验。';emit('saved')}catch(e){if(fence.current(token)){error.value=errorMessage(e);conflict.value=true}}finally{if(fence.current(token)){saving.value=false;emit('busy',false)}}
 }
-watch(()=>[props.kb,props.documentId],()=>{fence.invalidate();candidateFence.invalidate();saving.value=false;emit('busy',false);titles.clear();page.value=1;query.value='';selected.value=[];candidates.value=[];void reload();void loadCandidates()},{immediate:true})
+watch(()=>[props.kb,props.documentId],()=>{fence.invalidate();candidateFence.invalidate();saving.value=false;emit('busy',false);titles.clear();parentKB.value=props.kb;page.value=1;query.value='';selected.value=[];candidates.value=[];void reload();void loadCandidates()},{immediate:true})
 onBeforeUnmount(()=>{fence.invalidate();candidateFence.invalidate();emit('busy',false)})
 </script>
 

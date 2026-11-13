@@ -16,11 +16,12 @@ import (
 
 // SupplementCommand is native-authorized explicit governance, not model inference.
 type SupplementCommand struct {
-	Scope            dependencies.Scope `json:"scope"`
-	ActorID          string             `json:"actor_id"`
-	OperationID      string             `json:"operation_id"`
-	ExpectedRevision int64              `json:"expected_revision"`
-	Parents          []string           `json:"parents"`
+	Scope                  dependencies.Scope `json:"scope"`
+	ActorID                string             `json:"actor_id"`
+	OperationID            string             `json:"operation_id"`
+	ExpectedRevision       int64              `json:"expected_revision"`
+	Parents                []string           `json:"parents"`
+	ParentKnowledgeBaseIDs []string           `json:"parent_knowledge_base_ids,omitempty"`
 }
 
 // SupplementReceipt proves a historical declaration commit, not current permission.
@@ -32,11 +33,12 @@ type SupplementReceipt struct {
 
 // SupplementView includes current revision and effective dependency assessment.
 type SupplementView struct {
-	Revision      int64                   `json:"revision"`
-	DeclarationID string                  `json:"declaration_id"`
-	Status        string                  `json:"status"`
-	Parents       []string                `json:"parents"`
-	Assessment    dependencies.Assessment `json:"assessment"`
+	Revision               int64                   `json:"revision"`
+	DeclarationID          string                  `json:"declaration_id"`
+	Status                 string                  `json:"status"`
+	Parents                []string                `json:"parents"`
+	ParentKnowledgeBaseIDs []string                `json:"parent_knowledge_base_ids"`
+	Assessment             dependencies.Assessment `json:"assessment"`
 }
 
 // Supplements owns critical declarations/edges/audit in the shared extension transaction.
@@ -57,9 +59,16 @@ func supplementScope(s dependencies.Scope) provenance.Scope {
 	return provenance.Scope{TenantID: s.TenantID, KnowledgeBaseID: s.KnowledgeBaseID}
 }
 
+func supplementDocumentKey(kb, doc string) string { return kb + "\x00" + doc }
+
 func validateSupplementSources(a dependencies.Assessment, versions map[string]Version) error {
 	for _, ref := range a.Sources {
-		if versions[ref.DocumentID].ID != ref.VersionID {
+		key := supplementDocumentKey(ref.KnowledgeBaseID, ref.DocumentID)
+		version, ok := versions[key]
+		if !ok {
+			version = versions[ref.DocumentID]
+		}
+		if version.ID != ref.VersionID {
 			return ErrConflict
 		}
 	}
@@ -68,7 +77,7 @@ func validateSupplementSources(a dependencies.Assessment, versions map[string]Ve
 
 // Get is a scoped repository view; the native facade must authorize the child first.
 func (s *Supplements) Get(ctx context.Context, scope dependencies.Scope) (SupplementView, error) {
-	view := SupplementView{Parents: []string{}}
+	view := SupplementView{Parents: []string{}, ParentKnowledgeBaseIDs: []string{}}
 	if s == nil || s.db == nil {
 		return view, ErrUnavailable
 	}
@@ -78,16 +87,20 @@ func (s *Supplements) Get(ctx context.Context, scope dependencies.Scope) (Supple
 			return e
 		}
 		if e == nil && view.Status == "active" {
-			rows, e := tx.QueryContext(ctx, "SELECT parent_document_id FROM ext_supplement_parents WHERE declaration_id=? ORDER BY parent_document_id", view.DeclarationID)
+			rows, e := tx.QueryContext(ctx, `SELECT knowledge_base_id,parent_document_id FROM ext_supplement_parents WHERE declaration_id=?
+				UNION ALL
+				SELECT parent_knowledge_base_id,parent_document_id FROM ext_supplement_cross_parents WHERE declaration_id=?
+				ORDER BY 1,2`, view.DeclarationID, view.DeclarationID)
 			if e != nil {
 				return e
 			}
 			for rows.Next() {
-				var id string
-				if e = rows.Scan(&id); e != nil {
+				var kb, id string
+				if e = rows.Scan(&kb, &id); e != nil {
 					rows.Close()
 					return e
 				}
+				view.ParentKnowledgeBaseIDs = append(view.ParentKnowledgeBaseIDs, kb)
 				view.Parents = append(view.Parents, id)
 			}
 			e = rows.Err()
@@ -139,33 +152,53 @@ func effectiveNow(ctx context.Context, tx *sql.Tx, scope dependencies.Scope, now
 	}
 	return nil
 }
-func supplementCycle(ctx context.Context, tx *sql.Tx, scope dependencies.Scope, parents []string) error {
-	queue := append([]string(nil), parents...)
+func supplementCycle(ctx context.Context, tx *sql.Tx, scope dependencies.Scope, parents []string, parentKBs []string) error {
+	type ref struct {
+		kb  string
+		doc string
+	}
+	queue := make([]ref, 0, len(parents))
+	for i, doc := range parents {
+		queue = append(queue, ref{parentKBs[i], doc})
+	}
 	seen := map[string]bool{}
 	for len(queue) > 0 {
-		doc := queue[0]
+		current := queue[0]
 		queue = queue[1:]
-		if doc == scope.DocumentID {
+		if current.kb == scope.KnowledgeBaseID && current.doc == scope.DocumentID {
 			return ErrConflict
 		}
-		if seen[doc] {
+		key := supplementDocumentKey(current.kb, current.doc)
+		if seen[key] {
 			continue
 		}
-		seen[doc] = true
+		seen[key] = true
 		if len(seen) > 64 {
 			return ErrEvidence
 		}
-		rows, e := tx.QueryContext(ctx, `SELECT p.parent_document_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.declaration_id=c.declaration_id AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scopeArgs(supplementScope(scope), doc)...)
+		rows, e := tx.QueryContext(ctx, `SELECT c.knowledge_base_id,p.parent_document_id
+			FROM ext_supplement_current c
+			JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision
+			JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id
+			WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.status='active'
+			UNION ALL
+			SELECT cp.parent_knowledge_base_id,cp.parent_document_id
+			FROM ext_supplement_current c
+			JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision
+			JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id
+			WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.status='active'`,
+			strconv.FormatUint(scope.TenantID, 10), current.kb, current.doc,
+			strconv.FormatUint(scope.TenantID, 10), current.kb, current.doc)
 		if e != nil {
 			return e
 		}
 		for rows.Next() {
-			var id string
-			if e = rows.Scan(&id); e != nil {
+			var parent ref
+			if e = rows.Scan(&parent.kb, &parent.doc); e != nil {
 				rows.Close()
 				return e
 			}
-			queue = append(queue, id)
+			queue = append(queue, parent)
 		}
 		e = rows.Err()
 		rows.Close()
@@ -183,19 +216,47 @@ func (s *Supplements) Put(ctx context.Context, c SupplementCommand) (SupplementR
 	if s == nil || s.db == nil || s.registry == nil || c.Scope.TenantID == 0 || !validID(c.Scope.KnowledgeBaseID) || !validID(c.Scope.DocumentID) || !validID(c.ActorID) || !validID(c.OperationID) || c.ExpectedRevision < 0 || len(c.Parents) > 8 {
 		return SupplementReceipt{}, ErrEvidence
 	}
-	c.Parents = append([]string{}, c.Parents...)
-	sort.Strings(c.Parents)
-	for i, id := range c.Parents {
-		if !validID(id) || id == c.Scope.DocumentID || i > 0 && id == c.Parents[i-1] {
-			return SupplementReceipt{}, ErrEvidence
+	if len(c.ParentKnowledgeBaseIDs) == 0 {
+		c.ParentKnowledgeBaseIDs = make([]string, len(c.Parents))
+		for i := range c.ParentKnowledgeBaseIDs {
+			c.ParentKnowledgeBaseIDs[i] = c.Scope.KnowledgeBaseID
 		}
 	}
+	if len(c.ParentKnowledgeBaseIDs) != len(c.Parents) {
+		return SupplementReceipt{}, ErrEvidence
+	}
+	type parentRef struct {
+		knowledgeBaseID string
+		documentID      string
+	}
+	refs := make([]parentRef, len(c.Parents))
+	for i, id := range c.Parents {
+		if !validID(id) || !validID(c.ParentKnowledgeBaseIDs[i]) || (id == c.Scope.DocumentID && c.ParentKnowledgeBaseIDs[i] == c.Scope.KnowledgeBaseID) {
+			return SupplementReceipt{}, ErrEvidence
+		}
+		refs[i] = parentRef{c.ParentKnowledgeBaseIDs[i], id}
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].knowledgeBaseID != refs[j].knowledgeBaseID {
+			return refs[i].knowledgeBaseID < refs[j].knowledgeBaseID
+		}
+		return refs[i].documentID < refs[j].documentID
+	})
+	c.Parents = make([]string, len(refs))
+	c.ParentKnowledgeBaseIDs = make([]string, len(refs))
+	for i, ref := range refs {
+		if i > 0 && refs[i-1] == ref {
+			return SupplementReceipt{}, ErrEvidence
+		}
+		c.ParentKnowledgeBaseIDs[i], c.Parents[i] = ref.knowledgeBaseID, ref.documentID
+	}
 	payload, _ := json.Marshal(struct {
-		Scope    dependencies.Scope
-		Actor    string
-		Expected int64
-		Parents  []string
-	}{c.Scope, c.ActorID, c.ExpectedRevision, c.Parents})
+		Scope                  dependencies.Scope
+		Actor                  string
+		Expected               int64
+		Parents                []string
+		ParentKnowledgeBaseIDs []string
+	}{c.Scope, c.ActorID, c.ExpectedRevision, c.Parents, c.ParentKnowledgeBaseIDs})
 	hash := sha(payload)
 	var receipt SupplementReceipt
 	var replayed bool
@@ -210,17 +271,23 @@ func (s *Supplements) Put(ctx context.Context, c SupplementCommand) (SupplementR
 	if replayed {
 		return receipt, nil
 	}
-	scope := supplementScope(c.Scope)
-	docs := map[string]bool{c.Scope.DocumentID: true}
+	type documentRef struct {
+		knowledgeBaseID string
+		documentID      string
+	}
+	docs := map[string]documentRef{
+		supplementDocumentKey(c.Scope.KnowledgeBaseID, c.Scope.DocumentID): {c.Scope.KnowledgeBaseID, c.Scope.DocumentID},
+	}
 	e = s.db.View(ctx, func(tx *sql.Tx) error {
-		for _, parent := range c.Parents {
-			docs[parent] = true
-			a, e := dependencies.LoadTx(ctx, tx, dependencies.Scope{TenantID: c.Scope.TenantID, KnowledgeBaseID: c.Scope.KnowledgeBaseID, DocumentID: parent})
+		for _, ref := range refs {
+			key := supplementDocumentKey(ref.knowledgeBaseID, ref.documentID)
+			docs[key] = documentRef{ref.knowledgeBaseID, ref.documentID}
+			a, e := dependencies.LoadTx(ctx, tx, dependencies.Scope{TenantID: c.Scope.TenantID, KnowledgeBaseID: ref.knowledgeBaseID, DocumentID: ref.documentID})
 			if e != nil {
 				return e
 			}
-			for _, ref := range a.Sources {
-				docs[ref.DocumentID] = true
+			for _, source := range a.Sources {
+				docs[supplementDocumentKey(source.KnowledgeBaseID, source.DocumentID)] = documentRef{source.KnowledgeBaseID, source.DocumentID}
 			}
 		}
 		return nil
@@ -228,18 +295,19 @@ func (s *Supplements) Put(ctx context.Context, c SupplementCommand) (SupplementR
 	if e != nil {
 		return SupplementReceipt{}, ErrEvidence
 	}
-	ids := make([]string, 0, len(docs))
-	for id := range docs {
-		ids = append(ids, id)
+	keys := make([]string, 0, len(docs))
+	for key := range docs {
+		keys = append(keys, key)
 	}
-	sort.Strings(ids)
+	sort.Strings(keys)
 	versions := map[string]Version{}
-	for _, id := range ids {
-		v, e := s.registry.Refresh(ctx, scope, id)
+	for _, key := range keys {
+		ref := docs[key]
+		v, e := s.registry.Refresh(ctx, provenance.Scope{TenantID: c.Scope.TenantID, KnowledgeBaseID: ref.knowledgeBaseID}, ref.documentID)
 		if e != nil {
 			return SupplementReceipt{}, ErrEvidence
 		}
-		versions[id] = v
+		versions[key] = v
 	}
 	e = s.db.Write(ctx, func(tx *sql.Tx) error {
 		var e error
@@ -248,15 +316,16 @@ func (s *Supplements) Put(ctx context.Context, c SupplementCommand) (SupplementR
 			return e
 		}
 		var currentRevision int64
-		e = tx.QueryRowContext(ctx, "SELECT revision FROM ext_supplement_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scopeArgs(scope, c.Scope.DocumentID)...).Scan(&currentRevision)
+		e = tx.QueryRowContext(ctx, "SELECT revision FROM ext_supplement_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scopeArgs(supplementScope(c.Scope), c.Scope.DocumentID)...).Scan(&currentRevision)
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
 			return e
 		}
 		if currentRevision != c.ExpectedRevision {
 			return ErrConflict
 		}
-		for doc, observed := range versions {
-			v, e := currentVersion(ctx, tx, scope, doc)
+		for key, observed := range versions {
+			ref := docs[key]
+			v, e := currentVersion(ctx, tx, provenance.Scope{TenantID: c.Scope.TenantID, KnowledgeBaseID: ref.knowledgeBaseID}, ref.documentID)
 			if e != nil || v.ID != observed.ID {
 				return ErrConflict
 			}
@@ -265,18 +334,19 @@ func (s *Supplements) Put(ctx context.Context, c SupplementCommand) (SupplementR
 		if e != nil {
 			return ErrEvidence
 		}
-		if len(c.Parents) > 0 && (childState != "active" && childState != "pending" && childState != "scheduled") {
+		if len(refs) > 0 && (childState != "active" && childState != "pending" && childState != "scheduled") {
 			return ErrEvidence
 		}
 		parentEvents := map[string]string{}
 		now := s.now().UTC()
-		for _, parent := range c.Parents {
-			state, event, e := store.ReadLifecycleCurrentTx(ctx, tx, c.Scope.TenantID, c.Scope.KnowledgeBaseID, parent)
+		for _, ref := range refs {
+			key := supplementDocumentKey(ref.knowledgeBaseID, ref.documentID)
+			state, event, e := store.ReadLifecycleCurrentTx(ctx, tx, c.Scope.TenantID, ref.knowledgeBaseID, ref.documentID)
 			if e != nil || state != "active" {
 				return ErrEvidence
 			}
-			parentEvents[parent] = event
-			parentScope := dependencies.Scope{TenantID: c.Scope.TenantID, KnowledgeBaseID: c.Scope.KnowledgeBaseID, DocumentID: parent}
+			parentEvents[key] = event
+			parentScope := dependencies.Scope{TenantID: c.Scope.TenantID, KnowledgeBaseID: ref.knowledgeBaseID, DocumentID: ref.documentID}
 			if e = effectiveNow(ctx, tx, parentScope, now, true); e != nil {
 				return ErrEvidence
 			}
@@ -288,12 +358,12 @@ func (s *Supplements) Put(ctx context.Context, c SupplementCommand) (SupplementR
 				return e
 			}
 		}
-		if len(c.Parents) > 0 {
+		if len(refs) > 0 {
 			if e = effectiveNow(ctx, tx, c.Scope, now, false); e != nil {
 				return ErrEvidence
 			}
 		}
-		if e = supplementCycle(ctx, tx, c.Scope, c.Parents); e != nil {
+		if e = supplementCycle(ctx, tx, c.Scope, c.Parents, c.ParentKnowledgeBaseIDs); e != nil {
 			return e
 		}
 		id, e := newID()
@@ -301,30 +371,51 @@ func (s *Supplements) Put(ctx context.Context, c SupplementCommand) (SupplementR
 			return e
 		}
 		status := "active"
-		if len(c.Parents) == 0 {
+		if len(refs) == 0 {
 			status = "revoked"
 		}
 		receipt = SupplementReceipt{id, currentRevision + 1, status}
 		stamp := now.Format(time.RFC3339Nano)
-		_, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_declarations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, receipt.Revision, versions[c.Scope.DocumentID].ID, childEvent, c.ActorID, c.OperationID, hash, status, stamp)
+		childKey := supplementDocumentKey(c.Scope.KnowledgeBaseID, c.Scope.DocumentID)
+		_, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_declarations VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, receipt.Revision, versions[childKey].ID, childEvent, c.ActorID, c.OperationID, hash, status, stamp)
 		if e != nil {
 			return e
 		}
-		for _, parent := range c.Parents {
-			if _, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_parents VALUES(?,?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, parent, versions[parent].ID, parentEvents[parent]); e != nil {
+		for _, ref := range refs {
+			key := supplementDocumentKey(ref.knowledgeBaseID, ref.documentID)
+			if ref.knowledgeBaseID == c.Scope.KnowledgeBaseID {
+				if _, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_parents VALUES(?,?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, ref.documentID, versions[key].ID, parentEvents[key]); e != nil {
+					return e
+				}
+				edgeID, e := newID()
+				if e != nil {
+					return e
+				}
+				if _, e = tx.ExecContext(ctx, "INSERT INTO ext_lineage_edge VALUES(?,?,?,?,?,'supplements','governance_critical',?) ON CONFLICT(tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type) DO NOTHING", edgeID, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, versions[childKey].ID, versions[key].ID, stamp); e != nil {
+					return e
+				}
+				if e = tx.QueryRowContext(ctx, "SELECT edge_id FROM ext_lineage_edge WHERE tenant_id=? AND knowledge_base_id=? AND from_node_id=? AND to_node_id=? AND edge_type='supplements'", scopeArgs(supplementScope(c.Scope), versions[childKey].ID, versions[key].ID)...).Scan(&edgeID); e != nil {
+					return e
+				}
+				if _, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_edge_facts VALUES(?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, ref.documentID, edgeID); e != nil {
+					return e
+				}
+				continue
+			}
+			if _, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_cross_parents VALUES(?,?,?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, ref.knowledgeBaseID, ref.documentID, versions[key].ID, parentEvents[key]); e != nil {
 				return e
 			}
-			edgeID, e := newID()
+			crossEdgeID, e := newID()
 			if e != nil {
 				return e
 			}
-			if _, e = tx.ExecContext(ctx, "INSERT INTO ext_lineage_edge VALUES(?,?,?,?,?,'supplements','governance_critical',?) ON CONFLICT(tenant_id,knowledge_base_id,from_node_id,to_node_id,edge_type) DO NOTHING", edgeID, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, versions[c.Scope.DocumentID].ID, versions[parent].ID, stamp); e != nil {
+			if _, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_cross_edges VALUES(?,?,?,?,?,?,'supplements','governance_critical',?) ON CONFLICT(tenant_id,source_knowledge_base_id,source_node_id,target_knowledge_base_id,target_node_id,edge_type) DO NOTHING", crossEdgeID, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, versions[childKey].ID, ref.knowledgeBaseID, versions[key].ID, stamp); e != nil {
 				return e
 			}
-			if e = tx.QueryRowContext(ctx, "SELECT edge_id FROM ext_lineage_edge WHERE tenant_id=? AND knowledge_base_id=? AND from_node_id=? AND to_node_id=? AND edge_type='supplements'", scopeArgs(scope, versions[c.Scope.DocumentID].ID, versions[parent].ID)...).Scan(&edgeID); e != nil {
+			if e = tx.QueryRowContext(ctx, "SELECT edge_id FROM ext_supplement_cross_edges WHERE tenant_id=? AND source_knowledge_base_id=? AND source_node_id=? AND target_knowledge_base_id=? AND target_node_id=? AND edge_type='supplements'", strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, versions[childKey].ID, ref.knowledgeBaseID, versions[key].ID).Scan(&crossEdgeID); e != nil {
 				return e
 			}
-			if _, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_edge_facts VALUES(?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, parent, edgeID); e != nil {
+			if _, e = tx.ExecContext(ctx, "INSERT INTO ext_supplement_cross_edge_facts VALUES(?,?,?,?,?,?,?)", id, strconv.FormatUint(c.Scope.TenantID, 10), c.Scope.KnowledgeBaseID, c.Scope.DocumentID, ref.knowledgeBaseID, ref.documentID, crossEdgeID); e != nil {
 				return e
 			}
 		}

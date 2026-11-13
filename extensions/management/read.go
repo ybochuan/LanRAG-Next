@@ -99,6 +99,9 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 			if err = rows.Scan(&state, &n); err != nil {
 				return err
 			}
+			if _, ok := counts[state]; !ok {
+				return errors.New("unknown lifecycle state")
+			}
 			counts[state] = n
 		}
 		return rows.Err()

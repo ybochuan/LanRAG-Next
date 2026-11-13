@@ -1,9 +1,10 @@
 import { get } from '@/utils/request'
 
-export type GraphMode = 'version-ancestry' | 'provenance' | 'relations' | 'renditions'
+export type GraphMode = 'version-ancestry' | 'provenance' | 'relations' | 'relations-cross' | 'renditions'
 export interface LineageNode {
   id: string
   type: string
+  knowledge_base_id?: string
   document_id: string
   business_family_id?: string
   sequence: number

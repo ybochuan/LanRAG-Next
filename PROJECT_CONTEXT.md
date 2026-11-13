@@ -7,7 +7,9 @@
 - 单文档关系从主件和补充通知两端展示当前依赖声明，沿用补充通知详情编辑。治理记录按两端展示建议确认／忽略及补充声明变更。拆分批次可从原件和已发布子件查看。上述视图读取既有扩展事实。
 - 扩展 schema 28 以原生已封存问答绑定保存用户明确提交的问答摘录和建议修订。摘录和核验引用仅对该库有治理权限的审核员可见。审核定稿独立保存，沿用冷静期与激活流程。问答反馈指导只在本库当前模型步骤使用同一来源分块及版本时可选取。
 - 扩展 schema 29 保存原生文档可用性观察（active/missing/deleted）。业务族读取和图投影展示可用性；发布头缺失只能通过显式确认的 `family_head_recover` 恢复，不自动提升成员。恢复以旧件缺失、新件当前可用、成员关系、依赖和版本链复核为前提，并写入替代事实、审计和投影意图。
-- 扩展 schema 30 支持跨库规范性文档关系：`amends`、`interprets` 和经二次确认的跨库 `related_to` 可指向另一知识库的主件；同库仍写 `ext_lineage_edge`，跨库关键边写 `ext_lineage_edge_cross_kb`，关系记录保留两端知识库。跨库补充声明（`supplements`）的依赖评估仍按同库模型运行，待独立改造。
+- 扩展 schema 30 支持跨库规范性文档关系：`amends`、`interprets` 和经二次确认的跨库 `related_to` 可指向另一知识库的主件；同库仍写 `ext_lineage_edge`，跨库关键边写 `ext_lineage_edge_cross_kb`，关系记录保留两端知识库。扩展 schema 31 支持跨库补充声明（`supplements`）：跨库父件写入 `ext_supplement_cross_parents`、`ext_supplement_cross_edges` 和 `ext_supplement_cross_edge_facts`，同库仍使用原表；依赖评估、关系查询、`relations-cross` 图和 MCP `query_related_docs` 均覆盖同库与跨库声明。
+- 关系声明、确认和撤销在同一事务写入持久 Outbox；`tag_projection`/`relation_tag` 处理器按文档重算当前 active 关系的 `gov:relation:<edge_type>` 命名空间。跨库关系分别给两端知识库的文档入队；投影失败只重试标签，不回写关系或生命周期事实。
+- 跨库关系图使用 `relations-cross` 模式：基础关系图追加 `ext_lineage_edge_cross_kb` 边和跨库节点，节点返回 `knowledge_base_id`；管理端按节点所属知识库加载标题，前端关系图提供“包含跨库关联”开关。
 
 ## 业务文档族（FAM-01）
 
@@ -37,7 +39,7 @@
 ## 附件自动归属（ATTACH-08A）
 
 - 扩展 schema 15 的 `ext_attachment_links` 保存提取导入意图和已确认的同库附件归属。Host 校验源字节与原生主件文件哈希，先持久领取上传回执再 POST，核对原生子件 scope、回执与文件哈希后登记。重复提取复用同一附件；上传结果未知时只按回执对账。父件和子件原生文件哈希用作版本标识，附件 SHA-256 用作提取内容标识。
-- 原生已有 JWT 文档关联列表呈现 `attachment_of` 自动登记项。单库图的文档关联视图仅将已登记关系投影到文件指纹相符的当前已观察版本；底层 `ext_lineage_edge` 枚举、内容溯源和版本历史语义保持各自独立。
+- 原生已有 JWT 文档关联列表呈现 `attachment_of` 自动登记项；生命周期快照在读取时动态继承父件的 `effective_from/effective_until`（子件持久注解不复制，父件日期变化即时反映；父件到期可在重评估时使附件进入 stale）。单库图的文档关联视图优先使用文件指纹相符的当前已观察版本；版本族缺失时以归属记录合成文档节点显示归属，合成节点只表示提取归属、不代表已观察版本。底层 `ext_lineage_edge` 枚举、内容溯源和版本历史语义保持各自独立。
 - 检索、关联文件 MCP 和原生附件下载沿用既有入口。附件许可额外检查同库父件仍可读；带新回执的附件还必须匹配持久归属、父版本和附件版本。历史附件兼容既有 Metadata 展示，盘点命令单独标为 legacy，语义映射和旧标签均不授予清理权限。
 - `attachment-backfill -audit-ownership` 只读统计旧附件、已核对归属、缺失父件、库归属冲突和回执或版本不符。
 
@@ -84,18 +86,18 @@
 
 - 原生导航 `/platform/lineage` 使用 AntV X6 3.1.8，提供版本历史、内容溯源、文档关联三个视图。库切换沿用原生可访问知识库列表，支持图中名称/编号搜索、缩放、平移、节点详情及指定节点展开。
 - 查询通过已有JWT接口 `GET /api/v1/knowledge-bases/:id/lifecycle/business/lineage_graph?mode=...&id=...`，mode为 `version-ancestry`、`provenance` 或 `relations`，id为可选根节点。原生仅鉴权和转发；`extensions/lineage/graph.go` 在同一只读事务内读取实际节点与边。根节点查询复用现有有界、带循环保护的遍历。
-- 图只包含当前库登记的节点和关系。版本历史使用supersedes/merged_into，内容溯源仅derived_from，关联使用supplements/amends/interprets/related_to及符合ATTACH-08A条件的attachment_of投影。最多256节点/512边，响应与界面显式标出截断。旧附件Metadata不作为图中的归属边。
+- 图只包含当前库登记的节点和关系。版本历史使用supersedes/merged_into，内容溯源仅derived_from，关联使用supplements/amends/interprets/related_to及符合ATTACH-08A条件的attachment_of投影；附件缺失版本族时以归属记录合成文档节点显示归属，合成节点不代表已观察版本。最多256节点/512边，响应与界面显式标出截断。旧附件Metadata不作为图中的归属边。
 - 节点名称来自当前原生文档标题，生命周期表示文档当前状态，观测序号和current标记来自已有观察版本族。普通编辑和当前观测版本均不自动代表制度已发布。浏览器验收使用 `frontend/src/views/lineage/browser.fixture.mjs` 的合成数据，真实接口验收通过 `AGENTRAG_LINEAGE_E2E=1` 与既有business E2E联合运行。
 
 ## 关联文件MCP接线（2026-11-03）
 
-- `extensions/mcp/server.go`在worker的现有回环端口挂载`/mcp` Streamable HTTP，提供只读query_related_docs；使用现有管理凭据。supplements查询当前版本边及当前声明、active许可，附件仍从Metadata读取；schema不支持attachment_of，本批不新增迁移。
+- `extensions/mcp/server.go`在worker的现有回环端口挂载`/mcp` Streamable HTTP，提供只读query_related_docs；使用现有管理凭据。supplements查询当前版本边及当前声明、active许可，覆盖同库与跨库父件；附件仍从Metadata读取；schema不支持attachment_of，本批不新增迁移。
 - 原生仅允许固定本机URL、匹配凭据及工具原名的可信例外；按需发现/审批保留。会话授权范围通过不持久化DTO随调用注入，工具目录缓存不授予其他会话的范围；未知外部MCP仍拒绝。
 - Agent系统提示词引导发现/调用；MCP structured_content复用关联文件卡片。注册脚本及实际模型验收步骤见`docs/operations/query-related-docs-MCP.md`；本轮未注册生产连接或运行真实模型自主调用验收。
 
 ## 附件检索、下载与父状态联动（2026-11-03，阶段二／三）
 
-- worker通过`weknora/attachment_read.go`的原生batch/list API读取阶段一Metadata；`retrieval/policy.go`在最终DB快照同时要求附件自身和同库父文档生命周期为active。父缺失、非active、读取失败均不能放行；不写附件血缘边或自动修改子状态。
+- worker通过`weknora/attachment_read.go`的原生batch/list API读取阶段一Metadata；`retrieval/policy.go`在最终DB快照同时要求附件自身和同库父文档生命周期为active。父缺失、非active、读取失败均不能放行；不写附件血缘边，也不把父件状态复制进子件持久事实；生命周期快照读取时动态继承父件有效日期，重评估时父件到期可使附件进入stale。
 - 已挂载`POST /bridge/after-retrieve`附件增强，沿用版本1、配置tenant/KB及服务端`AGENTRAG_MANAGEMENT_KEY`鉴权；命中主文档返回其附件，直接命中附件返回自身链接。原生RAG和Agent薄调用把JSON数组放入`SearchResult.metadata.related_attachments`，增强失败清除旧字段并省略卡片，保留回答流程。
 - 下载链接使用现有`/api/v1/knowledge/{id}/download`，沿用原生Editor/Contributor权限与登录凭证。`DownloadKnowledgeFile`仅对附件再调用现有before_retrieve；旧卡片点击时重新校验父状态，Host不可用关闭下载。原生`/files`存储代理、旧签发资源和已下载字节不属于本批撤销范围。
 - `frontend/src/components/RelatedAttachments.vue`以TDesign在RAG/Agent回答下显示去重下载卡片；复用现有登录Blob下载，Markdown中的同一已登记链接也可点击。历史卡片不后台推送状态，点击拒绝时显示制度过期/权限变化提示。启用、验证与截图见`docs/evidence/attachment-downloads-2026-11-03.md`。
@@ -133,8 +135,8 @@
 
 ## 补充文档依赖（T3，2026-11-01）
 
-- 生命周期详情的 `SupplementEditor.vue` 提供同库父文档选择；原生 GET/PUT `/api/v1/knowledge-bases/:id/lifecycle/documents/:document_id/supplements` 只做 JWT/读写权限、父子归属和 DTO 转发，actor 由登录上下文生成。Host 管理凭据不进入浏览器。
-- `extensions/lineage/supplements.go` 将声明、current revision、父版本、critical supplements edge/linkage、audit/receipt 同事务提交。0 个父文档撤销，最多 8 个；同库、禁止自依赖/重复/环，深度最多10/唯一节点最多64。声明关联独立版本族，不自动变成supersedes。
+- 生命周期详情的 `SupplementEditor.vue` 提供父文档选择，默认当前知识库，也可切换到已授权的其他知识库；原生 GET/PUT `/api/v1/knowledge-bases/:id/lifecycle/documents/:document_id/supplements` 只做 JWT/读写权限、父子归属和 DTO 转发，`parent_knowledge_base_ids` 与 `parents` 并行，actor 由登录上下文生成。Host 管理凭据不进入浏览器。
+- `extensions/lineage/supplements.go` 将声明、current revision、父版本、critical supplements edge/linkage、audit/receipt 同事务提交。0 个父文档撤销，最多 8 个；支持同库与跨库父件，禁止自依赖/重复/环，深度最多10/唯一节点最多64。声明关联独立版本族，不自动变成supersedes。
 - `extensions/dependencies/` 统一读取父级状态、日期和当前观察版本；检索每次使用真实Core快照重新核验，最后DB快照重查，未核验来源或并发扩大闭包拒绝。父失效/过期/版本变化拒绝子检索，后台将pending/scheduled/active子文档转stale，不自动复活。
 - 父review_due仅形成继承提醒，不改子日期/标签/状态。schema9新增review subject并保留旧提醒，支持没有自身标注的子文档；T4进一步增加schema10，当前版本识别见上节。每日来源刷新任务与Host同生命周期join；初次local ready不依赖Core。
 - 007/008保持不变。真实副本完整源集封存和生成中撤销未由T3完成；验收、重编译及隔离E2E证据见 `docs/evidence/m2-supplements-2026-11-01.md`。

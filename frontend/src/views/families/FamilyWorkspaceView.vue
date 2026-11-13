@@ -118,7 +118,7 @@
           </footer>
         </section>
         <FamilyDocumentPanel v-if="documentId" :key="kb+':'+documentId" :kb="kb" :document-id="documentId" :title="title(documentId)"
-          :can-write="canWrite" :disabled="saving || !!pending" @close="documentId=''" @saved="loadView" @busy="documentBusy=$event" />
+          :can-write="canWrite" :disabled="saving || !!pending" :knowledge-bases="bases" @close="documentId=''" @saved="loadView" @busy="documentBusy=$event" />
         <section v-else-if="canWrite && family && (tab==='members' || tab==='unassigned')" class="panel">
           <h2>加入成员</h2>
           <button v-if="documentId && familyId!==currentFamily" type="button" :disabled="locked" @click="addMember(documentId)">将当前文档加入此族</button>

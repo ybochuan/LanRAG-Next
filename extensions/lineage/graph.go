@@ -14,6 +14,7 @@ import (
 type GraphNode struct {
 	ID                 string    `json:"id"`
 	Type               string    `json:"type"`
+	KnowledgeBaseID    string    `json:"knowledge_base_id,omitempty"`
 	DocumentID         string    `json:"document_id"`
 	FamilyID           string    `json:"family_id,omitempty"`
 	ObservationChainID string    `json:"observation_chain_id,omitempty"`
@@ -51,6 +52,10 @@ func (r *Registry) Graph(ctx context.Context, s provenance.Scope, mode, root str
 	out := GraphSnapshot{Mode: mode, RootID: root, Nodes: []GraphNode{}, Edges: []GraphEdge{}}
 	if r == nil || r.db == nil || s.TenantID == 0 || !validID(s.KnowledgeBaseID) || root != "" && !validID(root) {
 		return out, ErrEvidence
+	}
+	includeCross := mode == "relations-cross"
+	if includeCross {
+		mode = "relations"
 	}
 	edges, condition, edgeStatus := "ext_lineage_edge", "", "''"
 	switch mode {
@@ -110,7 +115,7 @@ func (r *Registry) Graph(ctx context.Context, s provenance.Scope, mode, root str
 		} else if mode != "provenance" {
 			where = " AND n.node_type='document_version'"
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT n.node_id,n.node_type,
+		rows, err := tx.QueryContext(ctx, `SELECT n.node_id,n.node_type,n.knowledge_base_id,
 CASE WHEN n.node_type='document_version' THEN coalesce(v.document_id,n.native_id) ELSE '' END,
 coalesce(v.family_id,''),coalesce(m.business_family_id,''),coalesce(v.observation_sequence,0),
 coalesce(f.current_version_node_id=n.node_id,0),coalesce(c.state,''),coalesce(av.status,''),n.created_at
@@ -128,7 +133,7 @@ WHERE n.tenant_id=? AND n.knowledge_base_id=?`+where+" ORDER BY n.created_at DES
 		for rows.Next() {
 			var node GraphNode
 			var created string
-			if err := rows.Scan(&node.ID, &node.Type, &node.DocumentID, &node.FamilyID, &node.BusinessFamilyID, &node.Sequence, &node.Current, &node.State, &node.Availability, &created); err != nil {
+			if err := rows.Scan(&node.ID, &node.Type, &node.KnowledgeBaseID, &node.DocumentID, &node.FamilyID, &node.BusinessFamilyID, &node.Sequence, &node.Current, &node.State, &node.Availability, &created); err != nil {
 				rows.Close()
 				return err
 			}
@@ -183,11 +188,18 @@ ORDER BY e.created_at,e.edge_id LIMIT 513`, params...)
 		if err != nil {
 			return err
 		}
-		if mode == "relations" && len(ids) > 0 {
-			if err := appendNavigationEdges(ctx, tx, s, string(body), &out); err != nil {
+		if mode == "relations" {
+			if len(ids) > 0 {
+				if err := appendNavigationEdges(ctx, tx, s, string(body), &out); err != nil {
+					return err
+				}
+			}
+			if err := appendAttachmentEdges(ctx, tx, s, root, &out); err != nil {
 				return err
 			}
-			return appendAttachmentEdges(ctx, tx, s, string(body), &out)
+			if includeCross && len(ids) > 0 {
+				return appendCrossKBEges(ctx, tx, s, r.allowed, ids, &out)
+			}
 		}
 		return nil
 	})
@@ -267,42 +279,279 @@ func appendNavigationEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, 
 
 // appendAttachmentEdges projects stored ownership only onto current observed
 // versions whose file fingerprints match the binding.
-func appendAttachmentEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, ids string, out *GraphSnapshot) error {
-	rows, err := tx.QueryContext(ctx, `SELECT a.attachment_id,c.current_version_node_id,p.current_version_node_id,
-	a.attachment_file_hash,a.parent_file_hash,
-	json_extract(ce.snapshot_json,'$.header_fields.file_hash'),
-	json_extract(pe.snapshot_json,'$.header_fields.file_hash')
-	FROM ext_attachment_links a
-	JOIN ext_document_version_family c ON c.tenant_id=a.tenant_id AND c.knowledge_base_id=a.knowledge_base_id AND c.document_id=a.attachment_id
-	JOIN ext_document_version_family p ON p.tenant_id=a.tenant_id AND p.knowledge_base_id=a.knowledge_base_id AND p.document_id=a.parent_document_id
-	JOIN ext_source_snapshot_evidence ce ON ce.tenant_id=c.tenant_id AND ce.knowledge_base_id=c.knowledge_base_id AND ce.version_node_id=c.current_version_node_id
-	JOIN ext_source_snapshot_evidence pe ON pe.tenant_id=p.tenant_id AND pe.knowledge_base_id=p.knowledge_base_id AND pe.version_node_id=p.current_version_node_id
-	WHERE a.tenant_id=? AND a.knowledge_base_id=? AND a.removed_at IS NULL AND a.retired_at IS NULL
-	AND NOT EXISTS (SELECT 1 FROM ext_attachment_delete_intents d WHERE d.tenant_id=a.tenant_id
-	AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id)
-	AND c.current_version_node_id IN (SELECT value FROM json_each(?))
-	AND p.current_version_node_id IN (SELECT value FROM json_each(?))
-	ORDER BY a.attachment_id`, scopeArgs(s, ids, ids)...)
+func appendCrossKBEges(ctx context.Context, tx *sql.Tx, s provenance.Scope, allowed map[string]bool, ids []string, out *GraphSnapshot) error {
+	body, _ := json.Marshal(ids)
+	tenant := strconv.FormatUint(s.TenantID, 10)
+	rows, err := tx.QueryContext(ctx, `SELECT edge_id,source_knowledge_base_id,source_node_id,target_knowledge_base_id,target_node_id,edge_type
+FROM ext_lineage_edge_cross_kb
+WHERE tenant_id=? AND (
+ (source_knowledge_base_id=? AND source_node_id IN (SELECT value FROM json_each(?)))
+ OR (target_knowledge_base_id=? AND target_node_id IN (SELECT value FROM json_each(?)))
+)
+UNION ALL
+SELECT e.edge_id,e.source_knowledge_base_id,e.source_node_id,e.target_knowledge_base_id,e.target_node_id,'supplements'
+FROM ext_supplement_cross_edges e
+JOIN ext_supplement_cross_edge_facts f ON f.tenant_id=e.tenant_id AND f.cross_edge_id=e.edge_id
+JOIN ext_supplement_current c ON c.tenant_id=f.tenant_id AND c.knowledge_base_id=f.knowledge_base_id AND c.document_id=f.document_id AND c.declaration_id=f.declaration_id
+JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision
+WHERE e.tenant_id=? AND d.status='active' AND (
+ (e.source_knowledge_base_id=? AND e.source_node_id IN (SELECT value FROM json_each(?)))
+ OR (e.target_knowledge_base_id=? AND e.target_node_id IN (SELECT value FROM json_each(?)))
+)
+LIMIT 513`,
+		tenant, s.KnowledgeBaseID, string(body), s.KnowledgeBaseID, string(body),
+		tenant, s.KnowledgeBaseID, string(body), s.KnowledgeBaseID, string(body))
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	type crossEdge struct {
+		id, sourceKB, sourceNode, targetKB, targetNode, edgeType string
+	}
+	cross := []crossEdge{}
+	byKB := map[string][]string{}
+	seenNode := map[string]bool{}
+	known := map[string]bool{}
+	for _, node := range out.Nodes {
+		known[node.ID] = true
+	}
 	for rows.Next() {
-		var childID, childHash, parentHash string
-		var childEvidence, parentEvidence sql.NullString
-		edge := GraphEdge{Type: "attachment_of"}
-		if err := rows.Scan(&childID, &edge.From, &edge.To, &childHash, &parentHash, &childEvidence, &parentEvidence); err != nil {
+		var edge crossEdge
+		if err := rows.Scan(&edge.id, &edge.sourceKB, &edge.sourceNode, &edge.targetKB, &edge.targetNode, &edge.edgeType); err != nil {
+			rows.Close()
 			return err
 		}
-		if childEvidence.String != sha([]byte(strconv.Quote(childHash))) || parentEvidence.String != sha([]byte(strconv.Quote(parentHash))) {
+		if allowed != nil && (!allowed[edge.sourceKB] || !allowed[edge.targetKB]) {
+			continue
+		}
+		cross = append(cross, edge)
+		for _, ref := range [][2]string{{edge.sourceKB, edge.sourceNode}, {edge.targetKB, edge.targetNode}} {
+			key := ref[0] + "\x00" + ref[1]
+			if !seenNode[key] {
+				seenNode[key] = true
+				byKB[ref[0]] = append(byKB[ref[0]], ref[1])
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for kb, nodeIDs := range byKB {
+		nodes, err := loadCrossNodes(ctx, tx, s.TenantID, kb, nodeIDs)
+		if err != nil {
+			return err
+		}
+		for _, node := range nodes {
+			if known[node.ID] {
+				continue
+			}
+			if len(out.Nodes) == 256 {
+				out.Truncated = true
+				break
+			}
+			known[node.ID] = true
+			out.Nodes = append(out.Nodes, node)
+		}
+	}
+	for _, edge := range cross {
+		if !known[edge.sourceNode] || !known[edge.targetNode] {
 			continue
 		}
 		if len(out.Edges) == 512 {
 			out.Truncated = true
 			break
 		}
-		edge.ID = "attachment:" + childID
-		out.Edges = append(out.Edges, edge)
+		out.Edges = append(out.Edges, GraphEdge{ID: edge.id, From: edge.sourceNode, To: edge.targetNode, Type: edge.edgeType})
 	}
-	return rows.Err()
+	return nil
+}
+
+func loadCrossNodes(ctx context.Context, tx *sql.Tx, tenant uint64, kb string, ids []string) ([]GraphNode, error) {
+	body, _ := json.Marshal(ids)
+	rows, err := tx.QueryContext(ctx, `SELECT n.node_id,n.node_type,n.knowledge_base_id,
+CASE WHEN n.node_type='document_version' THEN coalesce(v.document_id,n.native_id) ELSE '' END,
+coalesce(v.family_id,''),coalesce(m.business_family_id,''),coalesce(v.observation_sequence,0),
+coalesce(f.current_version_node_id=n.node_id,0),coalesce(c.state,''),coalesce(av.status,''),n.created_at
+FROM ext_lineage_node n
+LEFT JOIN ext_document_version v ON v.tenant_id=n.tenant_id AND v.knowledge_base_id=n.knowledge_base_id AND v.version_node_id=n.node_id
+LEFT JOIN ext_document_version_family f ON f.tenant_id=v.tenant_id AND f.knowledge_base_id=v.knowledge_base_id AND f.family_id=v.family_id
+LEFT JOIN ext_lifecycle_current c ON c.tenant_id=v.tenant_id AND c.knowledge_base_id=v.knowledge_base_id AND c.document_id=v.document_id
+LEFT JOIN ext_document_availability av ON av.tenant_id=v.tenant_id AND av.knowledge_base_id=v.knowledge_base_id AND av.document_id=v.document_id
+LEFT JOIN ext_business_family_projection_scopes p ON p.tenant_id=v.tenant_id AND p.knowledge_base_id=v.knowledge_base_id AND p.enabled=1
+LEFT JOIN ext_business_document_family_members m ON m.tenant_id=p.tenant_id AND m.knowledge_base_id=p.knowledge_base_id AND m.document_id=v.document_id
+WHERE n.tenant_id=? AND n.knowledge_base_id=? AND n.node_id IN (SELECT value FROM json_each(?))
+ORDER BY n.created_at DESC,n.node_id`, strconv.FormatUint(tenant, 10), kb, string(body))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	nodes := []GraphNode{}
+	for rows.Next() {
+		var node GraphNode
+		var created string
+		if err := rows.Scan(&node.ID, &node.Type, &node.KnowledgeBaseID, &node.DocumentID, &node.FamilyID, &node.BusinessFamilyID, &node.Sequence, &node.Current, &node.State, &node.Availability, &created); err != nil {
+			return nil, err
+		}
+		createdAt, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, ErrUnavailable
+		}
+		node.CreatedAt = createdAt.UTC()
+		node.ObservationChainID = node.FamilyID
+		node.FamilyID, node.ObservationChainID = "", ""
+		nodes = append(nodes, node)
+	}
+	return nodes, rows.Err()
+}
+
+func appendAttachmentEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, root string, out *GraphSnapshot) error {
+	rows, err := tx.QueryContext(ctx, `SELECT a.attachment_id,a.parent_document_id,a.created_at,
+	a.attachment_file_hash,a.parent_file_hash,
+	cf.current_version_node_id,pf.current_version_node_id,
+	ce.snapshot_json,pe.snapshot_json,
+	COALESCE(cs.state,''),COALESCE(ps.state,''),
+	COALESCE(ca.status,''),COALESCE(pa.status,'')
+	FROM ext_attachment_links a
+	LEFT JOIN ext_document_version_family cf ON cf.tenant_id=a.tenant_id AND cf.knowledge_base_id=a.knowledge_base_id AND cf.document_id=a.attachment_id
+	LEFT JOIN ext_document_version_family pf ON pf.tenant_id=a.tenant_id AND pf.knowledge_base_id=a.knowledge_base_id AND pf.document_id=a.parent_document_id
+	LEFT JOIN ext_source_snapshot_evidence ce ON ce.tenant_id=cf.tenant_id AND ce.knowledge_base_id=cf.knowledge_base_id AND ce.version_node_id=cf.current_version_node_id
+	LEFT JOIN ext_source_snapshot_evidence pe ON pe.tenant_id=pf.tenant_id AND pe.knowledge_base_id=pf.knowledge_base_id AND pe.version_node_id=pf.current_version_node_id
+	LEFT JOIN ext_lifecycle_current cs ON cs.tenant_id=a.tenant_id AND cs.knowledge_base_id=a.knowledge_base_id AND cs.document_id=a.attachment_id
+	LEFT JOIN ext_lifecycle_current ps ON ps.tenant_id=a.tenant_id AND ps.knowledge_base_id=a.knowledge_base_id AND ps.document_id=a.parent_document_id
+	LEFT JOIN ext_document_availability ca ON ca.tenant_id=a.tenant_id AND ca.knowledge_base_id=a.knowledge_base_id AND ca.document_id=a.attachment_id
+	LEFT JOIN ext_document_availability pa ON pa.tenant_id=a.tenant_id AND pa.knowledge_base_id=a.knowledge_base_id AND pa.document_id=a.parent_document_id
+	WHERE a.tenant_id=? AND a.knowledge_base_id=? AND a.removed_at IS NULL AND a.retired_at IS NULL
+	AND NOT EXISTS (SELECT 1 FROM ext_attachment_delete_intents d WHERE d.tenant_id=a.tenant_id
+	AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id)
+	AND (?='' OR a.attachment_id=? OR a.parent_document_id=?)
+	ORDER BY a.attachment_id`, scopeArgs(s, root, root, root)...)
+	if err != nil {
+		return err
+	}
+	type link struct {
+		childID, parentID, created, childHash, parentHash          string
+		childState, parentState, childAvail, parentAvail           string
+		childVersion, parentVersion, childEvidence, parentEvidence sql.NullString
+	}
+	links := []link{}
+	missing := map[string]bool{}
+	known := map[string]bool{}
+	for _, node := range out.Nodes {
+		known[node.ID] = true
+	}
+	for rows.Next() {
+		var v link
+		if err := rows.Scan(&v.childID, &v.parentID, &v.created, &v.childHash, &v.parentHash,
+			&v.childVersion, &v.parentVersion, &v.childEvidence, &v.parentEvidence,
+			&v.childState, &v.parentState, &v.childAvail, &v.parentAvail); err != nil {
+			rows.Close()
+			return err
+		}
+		links = append(links, v)
+		if v.childVersion.Valid && v.childVersion.String != "" && !known[v.childVersion.String] {
+			missing[v.childVersion.String] = true
+		}
+		if v.parentVersion.Valid && v.parentVersion.String != "" && !known[v.parentVersion.String] {
+			missing[v.parentVersion.String] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(missing) > 0 {
+		ids := make([]string, 0, len(missing))
+		for id := range missing {
+			ids = append(ids, id)
+		}
+		nodes, err := loadCrossNodes(ctx, tx, s.TenantID, s.KnowledgeBaseID, ids)
+		if err != nil {
+			return err
+		}
+		for _, node := range nodes {
+			addGraphNode(out, known, node)
+		}
+	}
+	byDoc := map[string]string{}
+	for _, node := range out.Nodes {
+		if node.DocumentID != "" && node.Current && node.Type == "document_version" {
+			byDoc[node.DocumentID] = node.ID
+		}
+	}
+	for _, v := range links {
+		childNode := byDoc[v.childID]
+		parentNode := byDoc[v.parentID]
+		childCurrent := v.childVersion.Valid && v.childVersion.String != ""
+		parentCurrent := v.parentVersion.Valid && v.parentVersion.String != ""
+		if childCurrent && !attachmentEvidenceMatches(v.childEvidence, v.childHash) {
+			continue
+		}
+		if parentCurrent && !attachmentEvidenceMatches(v.parentEvidence, v.parentHash) {
+			continue
+		}
+		if !childCurrent || childNode == "" {
+			childNode = "document:" + v.childID
+			if !known[childNode] {
+				if len(out.Nodes) == 256 {
+					out.Truncated = true
+					break
+				}
+				created, err := time.Parse(time.RFC3339Nano, v.created)
+				if err != nil {
+					return ErrUnavailable
+				}
+				addGraphNode(out, known, GraphNode{ID: childNode, Type: "document", KnowledgeBaseID: s.KnowledgeBaseID,
+					DocumentID: v.childID, Current: true, State: v.childState, Availability: v.childAvail, CreatedAt: created.UTC()})
+			}
+		}
+		if !parentCurrent || parentNode == "" {
+			parentNode = "document:" + v.parentID
+			if !known[parentNode] {
+				if len(out.Nodes) == 256 {
+					out.Truncated = true
+					break
+				}
+				created, err := time.Parse(time.RFC3339Nano, v.created)
+				if err != nil {
+					return ErrUnavailable
+				}
+				addGraphNode(out, known, GraphNode{ID: parentNode, Type: "document", KnowledgeBaseID: s.KnowledgeBaseID,
+					DocumentID: v.parentID, Current: true, State: v.parentState, Availability: v.parentAvail, CreatedAt: created.UTC()})
+			}
+		}
+		if len(out.Edges) == 512 {
+			out.Truncated = true
+			break
+		}
+		out.Edges = append(out.Edges, GraphEdge{ID: "attachment:" + v.childID, From: childNode, To: parentNode, Type: "attachment_of"})
+	}
+	return nil
+}
+
+func addGraphNode(out *GraphSnapshot, known map[string]bool, node GraphNode) bool {
+	if known[node.ID] {
+		return true
+	}
+	if len(out.Nodes) == 256 {
+		out.Truncated = true
+		return false
+	}
+	out.Nodes = append(out.Nodes, node)
+	known[node.ID] = true
+	return true
+}
+
+func attachmentEvidenceMatches(raw sql.NullString, hash string) bool {
+	if !raw.Valid || hash == "" {
+		return false
+	}
+	var evidence struct {
+		HeaderFields map[string]string `json:"header_fields"`
+	}
+	if json.Unmarshal([]byte(raw.String), &evidence) != nil {
+		return false
+	}
+	return evidence.HeaderFields["file_hash"] == sha([]byte(strconv.Quote(hash)))
 }

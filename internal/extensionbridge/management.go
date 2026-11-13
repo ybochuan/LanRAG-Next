@@ -13,23 +13,24 @@ import (
 
 // ManagementRequest carries only server-resolved authority and independent JSON DTOs.
 type ManagementRequest struct {
-	Action           string          `json:"action"`
-	TenantID         uint64          `json:"tenant_id"`
-	KnowledgeBaseID  string          `json:"knowledge_base_id"`
-	DocumentID       string          `json:"document_id,omitempty"`
-	CanWrite         bool            `json:"can_write"`
-	Page             int             `json:"page,omitempty"`
-	PageSize         int             `json:"page_size,omitempty"`
-	State            string          `json:"state,omitempty"`
-	Title            string          `json:"title,omitempty"`
-	GraphMode        string          `json:"graph_mode,omitempty"`
-	ExpectedRevision int64           `json:"expected_revision"`
-	Annotations      json.RawMessage `json:"annotations,omitempty"`
-	Rules            json.RawMessage `json:"rules,omitempty"`
-	ActorID          string          `json:"actor_id,omitempty"`
-	OperationID      string          `json:"operation_id,omitempty"`
-	Parents          []string        `json:"parents,omitempty"`
-	Business         json.RawMessage `json:"business,omitempty"`
+	Action                 string          `json:"action"`
+	TenantID               uint64          `json:"tenant_id"`
+	KnowledgeBaseID        string          `json:"knowledge_base_id"`
+	DocumentID             string          `json:"document_id,omitempty"`
+	CanWrite               bool            `json:"can_write"`
+	Page                   int             `json:"page,omitempty"`
+	PageSize               int             `json:"page_size,omitempty"`
+	State                  string          `json:"state,omitempty"`
+	Title                  string          `json:"title,omitempty"`
+	GraphMode              string          `json:"graph_mode,omitempty"`
+	ExpectedRevision       int64           `json:"expected_revision"`
+	Annotations            json.RawMessage `json:"annotations,omitempty"`
+	Rules                  json.RawMessage `json:"rules,omitempty"`
+	ActorID                string          `json:"actor_id,omitempty"`
+	OperationID            string          `json:"operation_id,omitempty"`
+	Parents                []string        `json:"parents,omitempty"`
+	ParentKnowledgeBaseIDs []string        `json:"parent_knowledge_base_ids,omitempty"`
+	Business               json.RawMessage `json:"business,omitempty"`
 }
 
 // ManagementError exposes a safe status without upstream bodies or credentials.

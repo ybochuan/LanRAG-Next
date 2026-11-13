@@ -66,26 +66,35 @@ func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[s
 	if e != nil || len(excluded) > 0 {
 		return nil, errors.New("document inactive")
 	}
-	ids := []string{}
+	idsByKB := map[string][]string{}
 	e = s.DB.View(ctx, func(tx *sql.Tx) error {
 		// supplements edges point from the notice version to the parent version.
-		rows, e := tx.QueryContext(ctx, `SELECT DISTINCT child.document_id FROM ext_lineage_edge edge
+		rows, e := tx.QueryContext(ctx, `SELECT child.knowledge_base_id,child.document_id FROM ext_lineage_edge edge
    JOIN ext_document_version_family parent ON parent.tenant_id=edge.tenant_id AND parent.knowledge_base_id=edge.knowledge_base_id AND parent.current_version_node_id=edge.to_node_id
    JOIN ext_document_version_family child ON child.tenant_id=edge.tenant_id AND child.knowledge_base_id=edge.knowledge_base_id AND child.current_version_node_id=edge.from_node_id
    JOIN ext_supplement_edge_facts facts ON facts.tenant_id=edge.tenant_id AND facts.knowledge_base_id=edge.knowledge_base_id AND facts.edge_id=edge.edge_id
    JOIN ext_supplement_current current ON current.tenant_id=facts.tenant_id AND current.knowledge_base_id=facts.knowledge_base_id AND current.document_id=facts.document_id AND current.declaration_id=facts.declaration_id
-   WHERE edge.tenant_id=? AND edge.knowledge_base_id=? AND parent.document_id=? AND edge.edge_type='supplements'`, fmt.Sprint(s.Tenant), kb, id)
+   WHERE edge.tenant_id=? AND edge.knowledge_base_id=? AND parent.document_id=? AND edge.edge_type='supplements'
+   UNION ALL
+   SELECT cp.knowledge_base_id,cp.document_id FROM ext_supplement_cross_parents cp
+   JOIN ext_supplement_current current ON current.tenant_id=cp.tenant_id AND current.knowledge_base_id=cp.knowledge_base_id AND current.document_id=cp.document_id AND current.declaration_id=cp.declaration_id
+   JOIN ext_supplement_declarations declaration ON declaration.tenant_id=current.tenant_id AND declaration.knowledge_base_id=current.knowledge_base_id AND declaration.document_id=current.document_id AND declaration.declaration_id=current.declaration_id AND declaration.revision=current.revision AND declaration.status='active'
+   JOIN ext_document_version_family child ON child.tenant_id=cp.tenant_id AND child.knowledge_base_id=cp.knowledge_base_id AND child.document_id=cp.document_id AND child.current_version_node_id=declaration.child_version_node_id
+   JOIN ext_document_version_family parent ON parent.tenant_id=cp.tenant_id AND parent.knowledge_base_id=cp.parent_knowledge_base_id AND parent.document_id=cp.parent_document_id AND parent.current_version_node_id=cp.parent_version_node_id
+   WHERE cp.tenant_id=? AND cp.parent_knowledge_base_id=? AND cp.parent_document_id=? AND cp.parent_version_node_id=?`,
+			fmt.Sprint(s.Tenant), kb, id,
+			fmt.Sprint(s.Tenant), kb, id, id)
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var doc string
-			if e = rows.Scan(&doc); e != nil {
+			var childKB, doc string
+			if e = rows.Scan(&childKB, &doc); e != nil {
 				return e
 			}
-			if scope.allows(kb, doc) {
-				ids = append(ids, doc)
+			if scope.allows(childKB, doc) {
+				idsByKB[childKB] = append(idsByKB[childKB], doc)
 			}
 		}
 		return rows.Err()
@@ -94,7 +103,8 @@ func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[s
 		return nil, e
 	}
 	notices := []contract.RelatedAttachment{}
-	if len(ids) > 0 {
+	for childKB, ids := range idsByKB {
+		req.KnowledgeBaseIDs = []string{childKB}
 		req.KnowledgeIDs = ids
 		blocked, e := s.Policy.ExcludedDocumentIDs(ctx, req)
 		if e != nil {
@@ -104,16 +114,17 @@ func (s *Server) query(ctx context.Context, id string, scope nativeScope) (map[s
 		for _, v := range blocked {
 			deny[v] = true
 		}
-		found, e := s.Client.AttachmentDocuments(ctx, []string{kb}, ids)
+		found, e := s.Client.AttachmentDocuments(ctx, []string{childKB}, ids)
 		if e != nil {
 			return nil, e
 		}
 		for _, d := range found {
 			if !deny[d.ID] {
-				notices = append(notices, contract.RelatedAttachment{KnowledgeID: d.ID, KnowledgeBaseID: kb, ParentDocumentID: id, FileName: d.FileName, DownloadURL: "/api/v1/knowledge/" + url.PathEscape(d.ID) + "/download"})
+				notices = append(notices, contract.RelatedAttachment{KnowledgeID: d.ID, KnowledgeBaseID: childKB, ParentDocumentID: id, FileName: d.FileName, DownloadURL: "/api/v1/knowledge/" + url.PathEscape(d.ID) + "/download"})
 			}
 		}
 	}
+	req.KnowledgeBaseIDs = []string{kb}
 	req.KnowledgeIDs = []string{id}
 	links, e := s.Policy.AttachmentLinks(ctx, req)
 	if e != nil {

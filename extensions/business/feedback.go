@@ -338,9 +338,13 @@ CASE WHEN a.removed_at IS NOT NULL THEN 'attachment_removed'
      WHEN d.document_id IS NULL THEN 'linked'
      WHEN a.cleanup_error<>'' THEN 'attachment_cleanup_retry'
      ELSE 'attachment_cleanup_pending' END,1,a.knowledge_base_id,
-json_object('document_id',a.attachment_id,'target_knowledge_base_id',a.knowledge_base_id,'target_document_id',a.parent_document_id,'edge_type','attachment_of')
-FROM ext_attachment_links a LEFT JOIN ext_attachment_delete_intents d
+json_object('document_id',a.attachment_id,'target_knowledge_base_id',a.knowledge_base_id,'target_document_id',a.parent_document_id,'edge_type','attachment_of',
+ 'effective_from',ann.effective_from,'effective_until',ann.effective_until)
+FROM ext_attachment_links a
+LEFT JOIN ext_attachment_delete_intents d
 ON d.tenant_id=a.tenant_id AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id
+LEFT JOIN ext_document_annotations ann
+ON ann.tenant_id=a.tenant_id AND ann.knowledge_base_id=a.knowledge_base_id AND ann.document_id=a.parent_document_id
 WHERE a.attachment_id IS NOT NULL
 )`
 

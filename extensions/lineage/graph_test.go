@@ -77,6 +77,62 @@ func TestGraphReportsBoundedNodeWindow(t *testing.T) {
 	}
 }
 
+func TestGraphRelationsCrossIncludesCrossKBNodesAndEdges(t *testing.T) {
+	r, db, _, _ := registryFixture(t)
+	ctx := t.Context()
+	now := time.Now().UTC()
+	stamp := now.Format(time.RFC3339Nano)
+	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{
+		EventID: "source-event", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source-doc",
+		ToState: lifecycle.Active, Reason: "fixture", OccurredAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec("INSERT INTO ext_lineage_node VALUES('source-node','7','kb','document_version','source-doc',?)", stamp); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO ext_lineage_node VALUES('target-node','7','other','document_version','target-doc',?)", stamp); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO ext_document_version_family VALUES('family-source','7','kb','source-doc','','source-node','source-node',1,?,?)", stamp, stamp); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO ext_document_version VALUES('source-node','7','kb','family-source','source-doc',?,1,'source-event','','text',?)", strings.Repeat("a", 64), stamp); err != nil {
+			return err
+		}
+		_, err := tx.Exec("INSERT INTO ext_lineage_edge_cross_kb VALUES('cross-edge','7','kb','source-node','other','target-node','amends','governance_critical',?)", stamp)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	graph, err := r.Graph(ctx, fixtureScope, "relations-cross", "source-doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Nodes) != 2 || len(graph.Edges) != 1 || graph.Edges[0].ID != "cross-edge" || graph.Edges[0].Type != "amends" {
+		t.Fatalf("cross graph = %+v", graph)
+	}
+	byID := map[string]GraphNode{}
+	for _, node := range graph.Nodes {
+		byID[node.ID] = node
+	}
+	if byID["source-node"].KnowledgeBaseID != "kb" || byID["target-node"].KnowledgeBaseID != "other" {
+		t.Fatalf("cross node KBs = %+v", graph.Nodes)
+	}
+	same, err := r.Graph(ctx, fixtureScope, "relations", "source-doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(same.Nodes) != 1 || len(same.Edges) != 0 {
+		t.Fatalf("same-KB graph leaked cross edge: %+v", same)
+	}
+	restricted, err := r.WithKnowledgeBases([]string{"kb"}).Graph(ctx, fixtureScope, "relations-cross", "source-doc")
+	if err != nil || len(restricted.Nodes) != 1 || len(restricted.Edges) != 0 {
+		t.Fatalf("cross graph leaked disallowed KB: %+v %v", restricted, err)
+	}
+}
+
 func TestGraphProjectsOwnershipOnlyForMatchingObservedVersions(t *testing.T) {
 	r, db, reader, _ := registryFixture(t)
 	ctx := t.Context()
@@ -124,6 +180,33 @@ func TestGraphProjectsOwnershipOnlyForMatchingObservedVersions(t *testing.T) {
 	graph, err = r.Graph(ctx, fixtureScope, "relations", "")
 	if err != nil || len(graph.Edges) != 0 {
 		t.Fatalf("old attachment projected onto replacement: %+v, %v", graph.Edges, err)
+	}
+}
+
+func TestGraphProjectsAttachmentWithoutVersionFamily(t *testing.T) {
+	r, db, _, _ := registryFixture(t)
+	ctx := t.Context()
+	parentHash, childHash := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	importID, err := db.PrepareAttachmentImport(ctx, 7, "kb", "doc", parentHash, strings.Repeat("c", 64), childHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.ClaimAttachmentUpload(ctx, importID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.BindAttachments(ctx, 7, "kb", "doc", parentHash, []store.AttachmentBinding{{ImportID: importID, AttachmentID: "child"}}); err != nil {
+		t.Fatal(err)
+	}
+	graph, err := r.Graph(ctx, fixtureScope, "relations", "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Nodes) != 2 || len(graph.Edges) != 1 || graph.Edges[0] != (GraphEdge{ID: "attachment:child", Type: "attachment_of", From: "document:child", To: "document:doc"}) {
+		t.Fatalf("unversioned attachment graph = %+v", graph)
+	}
+	full, err := r.Graph(ctx, fixtureScope, "relations", "")
+	if err != nil || len(full.Nodes) != 2 || len(full.Edges) != 1 {
+		t.Fatalf("unversioned attachment full graph = %+v, %v", full, err)
 	}
 }
 

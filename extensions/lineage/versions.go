@@ -27,13 +27,34 @@ type Version struct {
 
 // Registry acquires and registers current native snapshots through the shared writer.
 type Registry struct {
-	db     *store.DB
-	reader SnapshotReader
+	db      *store.DB
+	reader  SnapshotReader
+	allowed map[string]bool
 }
 
 // NewRegistry does not own DB lifetime; nil readers can never register trusted versions.
 func NewRegistry(db *store.DB, reader SnapshotReader) *Registry {
 	return &Registry{db: db, reader: reader}
+}
+
+// WithKnowledgeBases restricts graph reads to the supplied native scopes.
+// A nil registry restriction (the default) keeps single-KB graph callers unchanged.
+func (r *Registry) WithKnowledgeBases(kbs []string) *Registry {
+	if r == nil {
+		return nil
+	}
+	clone := *r
+	clone.allowed = map[string]bool{}
+	for _, kb := range kbs {
+		if validID(kb) {
+			clone.allowed[kb] = true
+		}
+	}
+	return &clone
+}
+
+func (r *Registry) allowsKnowledgeBase(kb string) bool {
+	return r == nil || r.allowed == nil || r.allowed[kb]
 }
 func scopeArgs(s provenance.Scope, tail ...any) []any {
 	return append([]any{strconv.FormatUint(s.TenantID, 10), s.KnowledgeBaseID}, tail...)

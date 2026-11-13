@@ -9,13 +9,14 @@
       <select id="lineage-kb" v-model="kb" :disabled="catalogLoading" @change="root = ''">
         <option value="">选择知识库</option><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option>
       </select>
-      <span class="scope-note">仅当前知识库</span>
+      <span class="scope-note">默认仅当前知识库；关系图可包含跨库关联</span>
       <button :disabled="busy || !kb" @click="loadGraph">刷新</button>
     </section>
     <div v-if="!documentId" class="view-tabs" role="tablist" aria-label="血缘视图">
       <button v-for="item in modes" :key="item.key" role="tab" :aria-selected="mode === item.key" :class="{ selected: mode === item.key }" @click="switchMode(item.key)">{{ item.label }}</button>
     </div>
-    <p class="view-description">{{ modes.find(item => item.key === mode)?.description }}</p>
+    <p class="view-description">{{ modeDescription }}</p>
+    <label v-if="mode==='relations'" class="cross-toggle"><input v-model="includeCross" type="checkbox" /> 包含跨库关联</label>
     <button v-if="documentId && mode!=='relations'" class="return-all" @click="switchMode('relations')">返回文档关系图</button>
     <button v-else-if="root && !documentId" class="return-all" @click="root = ''">返回全库视图</button>
     <p v-if="error" class="notice error" role="alert">{{ error }} <button @click="knowledgeBases.length ? loadGraph() : loadCatalog()">重试</button></p>
@@ -45,6 +46,7 @@
         <div class="detail-title"><div><span class="eyebrow">{{ typeLabels[selected.type] || selected.type }}</span><h2>{{ nodeTitle(selected) }}</h2></div><button @click="selectedID = ''">关闭详情</button></div>
         <dl>
           <div><dt>节点编号</dt><dd>{{ selected.id }}</dd></div>
+          <div v-if="selected.knowledge_base_id"><dt>知识库</dt><dd>{{ kbName(selected.knowledge_base_id) }}</dd></div>
           <div v-if="selected.document_id"><dt>文档编号</dt><dd>{{ selected.document_id }}</dd></div>
           <div v-if="selected.sequence"><dt>观测版本</dt><dd>V{{ selected.sequence }}{{ selected.current ? ' · 当前观测版本' : '' }}</dd></div>
           <div v-if="selected.state"><dt>文档当前状态</dt><dd>{{ stateLabels[selected.state] || selected.state }}</dd></div>
@@ -73,32 +75,38 @@ defineEmits<{ open:[id:string,title:string] }>()
 const route = useRoute(), auth = useAuthStore()
 const knowledgeBases = ref<{ id: string; name: string }[]>([])
 const kb = ref(''), mode = ref<GraphMode>('version-ancestry'), root = ref(''), search = ref(''), selectedID = ref('')
+const includeCross = ref(false)
 const data = ref<LineageGraph>(), busy = ref(false), catalogLoading = ref(true), error = ref('')
 const canvas = ref<InstanceType<typeof LineageCanvas>>()
 const graphFence = requestFence(), catalogFence = requestFence()
 const selected = computed(() => data.value?.nodes.find(node => node.id === selectedID.value))
+const graphMode = computed<GraphMode>(() => mode.value === 'relations' && includeCross.value ? 'relations-cross' : mode.value)
+const modeDescription = computed(() => mode.value === 'relations' && includeCross.value
+  ? '跨库关系图：包含当前知识库与其他知识库之间的规范性关联。'
+  : modes.find(item => item.key === mode.value)?.description || '')
 const matches = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
   return data.value?.nodes.filter(node => !query || [nodeTitle(node), node.id, node.document_id].some(value => value.toLocaleLowerCase().includes(query))) || []
 })
 function selectNode(id: string) { selectedID.value = id; if (id) canvas.value?.focus(id) }
-function switchMode(value: GraphMode) { mode.value = value; root.value = value==='relations' ? props.documentId || '' : '' }
-function expandNode(value: GraphMode) { if (selectedID.value) { root.value = selectedID.value; mode.value = value } }
+function switchMode(value: GraphMode) { mode.value = value; includeCross.value = false; root.value = value==='relations' ? props.documentId || '' : '' }
+function expandNode(value: GraphMode) { if (selectedID.value) { root.value = selectedID.value; mode.value = value; includeCross.value = false } }
 function formatDate(value: string) { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString() : value }
+function kbName(id: string) { return knowledgeBases.value.find(item => item.id === id)?.name || id }
 async function loadGraph() {
   const token = graphFence.begin()
   data.value = undefined; selectedID.value = ''; search.value = ''; error.value = ''; busy.value = false
   if (!kb.value) return
   busy.value = true
   try {
-    const result = await loadLineageGraph(kb.value, mode.value, root.value)
+    const result = await loadLineageGraph(kb.value, graphMode.value, root.value)
     if (graphFence.current(token)) data.value = result
   } catch (reason) { if (graphFence.current(token)) error.value = graphError(reason) }
   finally { if (graphFence.current(token)) busy.value = false }
 }
 async function loadCatalog() {
   const token = catalogFence.begin()
-  graphFence.invalidate(); kb.value = ''; data.value = undefined; knowledgeBases.value = []; error.value = ''; catalogLoading.value = true
+  graphFence.invalidate(); kb.value = ''; data.value = undefined; knowledgeBases.value = []; error.value = ''; includeCross.value = false; catalogLoading.value = true
   if (props.scope) {
     kb.value = props.scope
     mode.value = props.documentId ? 'relations' : modes.find(item => item.key === route.query.mode)?.key || 'version-ancestry'
@@ -119,7 +127,7 @@ async function loadCatalog() {
   } catch { if (catalogFence.current(token)) error.value = '无法读取知识库，请检查登录状态后重试。' }
   finally { if (catalogFence.current(token)) catalogLoading.value = false }
 }
-watch([kb, mode, root], loadGraph)
+watch([kb, mode, root, includeCross], loadGraph)
 watch(() => auth.effectiveTenantId, () => void loadCatalog())
 watch(() => route.query, query => {
   if (props.scope) return
@@ -148,7 +156,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .view-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--td-component-border); }
 .view-tabs button { padding: 12px 0; border: 0; border-radius: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--td-text-color-secondary); }
 .view-tabs button.selected { color: var(--td-brand-color); border-bottom-color: var(--td-brand-color); font-weight: 600; }
-.view-description { margin: 14px 0 22px; } .notice { padding: 12px 16px; background: #fff8e7; color: #805f1c; border-radius: var(--app-radius-sm); font-size: var(--app-text-md); }
+.view-description { margin: 14px 0 22px; } .cross-toggle { display: inline-flex; align-items: center; gap: 8px; margin: -8px 0 14px; color: var(--td-text-color-secondary); font-size: var(--app-text-md); } .cross-toggle input { padding: 0; }
+.notice { padding: 12px 16px; background: #fff8e7; color: #805f1c; border-radius: var(--app-radius-sm); font-size: var(--app-text-md); }
 .return-all { margin-bottom: 14px; }
 .notice.error { background: #fcefee; color: #ad3b35; } .empty { padding: 80px 24px; text-align: center; color: var(--td-text-color-secondary); }
 .graph-toolbar { padding: 12px 16px; border: 1px solid var(--td-component-border); border-bottom: 0; border-radius: var(--app-radius-lg) var(--app-radius-lg) 0 0; background: var(--td-bg-color-container); font-size: var(--app-text-md); }

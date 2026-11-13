@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
 // ErrNotFound means a requested business object is absent from the authorized scope.
@@ -225,17 +227,11 @@ func workspacePage[T any](ctx context.Context, tx *sql.Tx, query string, params 
 }
 
 const workspaceMembersSQL = `SELECT m.document_id,
-	CASE WHEN c.state IS NOT NULL AND EXISTS(
-		SELECT 1 FROM ext_lifecycle_events e
-		WHERE e.tenant_id=c.tenant_id AND e.knowledge_base_id=c.knowledge_base_id AND e.document_id=c.document_id
-			AND e.event_id=c.last_event_id AND e.to_state=c.state
-			AND NOT EXISTS(SELECT 1 FROM ext_lifecycle_events newer
-				WHERE newer.tenant_id=e.tenant_id AND newer.knowledge_base_id=e.knowledge_base_id
-					AND newer.document_id=e.document_id AND newer.sequence>e.sequence)
-	) THEN c.state ELSE '' END,
+	CASE WHEN c.state IS NOT NULL AND ` + store.LifecycleCurrentVerifiedSQL + ` THEN c.state ELSE '' END,
 	COALESCE(a.status,''),m.removed_at,COALESCE(m.reason,'')
 	FROM ext_business_family_member_history m
 	LEFT JOIN ext_lifecycle_current c USING(tenant_id,knowledge_base_id,document_id)
+	` + store.LifecycleEventJoinSQL + `
 	LEFT JOIN ext_document_availability a USING(tenant_id,knowledge_base_id,document_id)
 	WHERE m.tenant_id=? AND m.knowledge_base_id=? AND m.business_family_id=? AND m.status=?
 	ORDER BY m.removed_at DESC,m.document_id LIMIT ? OFFSET ?`

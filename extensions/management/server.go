@@ -56,26 +56,37 @@ func New(db *store.DB, key string, scopes []lifecycle.PolicyScope) *Server {
 	return s
 }
 
+func (s *Server) knowledgeBases(tenant uint64) []string {
+	out := []string{}
+	for scope := range s.scopes {
+		if scope.TenantID == tenant {
+			out = append(out, scope.KnowledgeBaseID)
+		}
+	}
+	return out
+}
+
 // Request carries authority supplied exclusively by the native facade.
 type Request struct {
-	Action           string                `json:"action"`
-	TenantID         uint64                `json:"tenant_id"`
-	KnowledgeBaseID  string                `json:"knowledge_base_id"`
-	DocumentID       string                `json:"document_id,omitempty"`
-	ArtifactID       string                `json:"artifact_id,omitempty"`
-	Page             int                   `json:"page,omitempty"`
-	PageSize         int                   `json:"page_size,omitempty"`
-	State            string                `json:"state,omitempty"`
-	Title            string                `json:"title,omitempty"`
-	GraphMode        string                `json:"graph_mode,omitempty"`
-	CanWrite         bool                  `json:"can_write"`
-	ExpectedRevision int64                 `json:"expected_revision"`
-	Annotations      lifecycle.Annotations `json:"annotations"`
-	Rules            lifecycle.Rules       `json:"rules"`
-	ActorID          string                `json:"actor_id,omitempty"`
-	OperationID      string                `json:"operation_id,omitempty"`
-	Parents          []string              `json:"parents,omitempty"`
-	Business         json.RawMessage       `json:"business,omitempty"`
+	Action                 string                `json:"action"`
+	TenantID               uint64                `json:"tenant_id"`
+	KnowledgeBaseID        string                `json:"knowledge_base_id"`
+	DocumentID             string                `json:"document_id,omitempty"`
+	ArtifactID             string                `json:"artifact_id,omitempty"`
+	Page                   int                   `json:"page,omitempty"`
+	PageSize               int                   `json:"page_size,omitempty"`
+	State                  string                `json:"state,omitempty"`
+	Title                  string                `json:"title,omitempty"`
+	GraphMode              string                `json:"graph_mode,omitempty"`
+	CanWrite               bool                  `json:"can_write"`
+	ExpectedRevision       int64                 `json:"expected_revision"`
+	Annotations            lifecycle.Annotations `json:"annotations"`
+	Rules                  lifecycle.Rules       `json:"rules"`
+	ActorID                string                `json:"actor_id,omitempty"`
+	OperationID            string                `json:"operation_id,omitempty"`
+	Parents                []string              `json:"parents,omitempty"`
+	ParentKnowledgeBaseIDs []string              `json:"parent_knowledge_base_ids,omitempty"`
+	Business               json.RawMessage       `json:"business,omitempty"`
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {
@@ -113,6 +124,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.scopes[lifecycle.PolicyScope{TenantID: req.TenantID, KnowledgeBaseID: req.KnowledgeBaseID}] {
 		writeError(w, 403, "scope_not_configured")
 		return
+	}
+	for _, kb := range req.ParentKnowledgeBaseIDs {
+		if !s.scopes[lifecycle.PolicyScope{TenantID: req.TenantID, KnowledgeBaseID: kb}] {
+			writeError(w, 403, "scope_not_configured")
+			return
+		}
 	}
 	if req.Action == "rendition_bind" || req.Action == "rendition_download" {
 		s.serveRendition(w, r, req)
@@ -179,7 +196,7 @@ func (s *Server) execute(ctx context.Context, r Request) (any, error) {
 			if s.sources == nil {
 				return nil, errDatabase
 			}
-			saved, e := supplements.Put(ctx, lineage.SupplementCommand{Scope: ds, ActorID: r.ActorID, OperationID: r.OperationID, ExpectedRevision: r.ExpectedRevision, Parents: r.Parents})
+			saved, e := supplements.Put(ctx, lineage.SupplementCommand{Scope: ds, ActorID: r.ActorID, OperationID: r.OperationID, ExpectedRevision: r.ExpectedRevision, Parents: r.Parents, ParentKnowledgeBaseIDs: r.ParentKnowledgeBaseIDs})
 			if e != nil {
 				return nil, e
 			}

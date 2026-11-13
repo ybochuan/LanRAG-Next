@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
 // SuggestionPolicy is the scoring configuration for one knowledge base.
@@ -181,6 +183,7 @@ func (s *Service) FamilySuggestions(ctx context.Context, c Command) (FamilySugge
 			WHERE tenant_id=? AND knowledge_base_id=? AND business_family_id=?),'idle')`, args(c.Scope, c.ID)...).Scan(&out.ScanStatus); err != nil {
 			return err
 		}
+		asOf := s.now().UTC().Format(time.RFC3339Nano)
 		out.Items, out.HasNext, err = workspacePage(ctx, tx, `SELECT `+suggestionColumns+`
 			FROM ext_family_suggestions s
 			JOIN ext_document_version_family f ON f.tenant_id=s.tenant_id AND f.knowledge_base_id=s.knowledge_base_id
@@ -188,16 +191,21 @@ func (s *Service) FamilySuggestions(ctx context.Context, c Command) (FamilySugge
 			JOIN ext_document_version_family g ON g.tenant_id=s.tenant_id AND g.knowledge_base_id=s.knowledge_base_id
 				AND g.document_id=s.target_document_id AND g.current_version_node_id=s.target_version_id
 			JOIN ext_lifecycle_current c ON c.tenant_id=s.tenant_id AND c.knowledge_base_id=s.knowledge_base_id AND c.document_id=s.document_id
+			`+store.LifecycleEventJoinSQL+`
+			LEFT JOIN ext_document_annotations ann ON ann.tenant_id=c.tenant_id AND ann.knowledge_base_id=c.knowledge_base_id AND ann.document_id=c.document_id
 			JOIN ext_lifecycle_current d ON d.tenant_id=s.tenant_id AND d.knowledge_base_id=s.knowledge_base_id AND d.document_id=s.target_document_id
 			LEFT JOIN ext_business_document_family_members a ON a.tenant_id=s.tenant_id AND a.knowledge_base_id=s.knowledge_base_id AND a.document_id=s.document_id
 			LEFT JOIN ext_business_document_family_members b ON b.tenant_id=s.tenant_id AND b.knowledge_base_id=s.knowledge_base_id AND b.document_id=s.target_document_id
 			WHERE s.tenant_id=? AND s.knowledge_base_id=? AND s.business_family_id=?
 				AND s.status='pending' AND s.policy_revision=? AND c.state='active' AND d.state='active'
+				AND `+store.LifecycleReadableSQL+` AND NOT `+store.PublicationTargetPendingSQL+`
+				AND (ann.effective_from IS NULL OR ann.effective_from='' OR ann.effective_from<=?)
+				AND (ann.effective_until IS NULL OR ann.effective_until='' OR ann.effective_until>=?)
 				AND (?='' OR s.document_id=? OR s.target_document_id=?)
 				AND CASE WHEN s.kind='membership' THEN a.document_id IS NULL AND b.business_family_id=s.business_family_id
 					WHEN s.edge_type='supersedes' THEN a.business_family_id=s.business_family_id AND b.business_family_id=s.business_family_id
 					ELSE a.business_family_id=s.business_family_id OR b.business_family_id=s.business_family_id END
-			ORDER BY s.confidence DESC,s.suggestion_id LIMIT ? OFFSET ?`, args(c.Scope, c.ID, p.Revision, c.Payload.DocumentID, c.Payload.DocumentID, c.Payload.DocumentID, limit+1, offset), limit,
+			ORDER BY s.confidence DESC,s.suggestion_id LIMIT ? OFFSET ?`, args(c.Scope, c.ID, p.Revision, asOf, asOf, c.Payload.DocumentID, c.Payload.DocumentID, c.Payload.DocumentID, limit+1, offset), limit,
 			func(rows *sql.Rows) (FamilySuggestion, error) { return scanSuggestion(rows) })
 		return err
 	})

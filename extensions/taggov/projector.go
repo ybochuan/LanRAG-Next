@@ -38,7 +38,8 @@ func (p *Projector) Handle(ctx context.Context, item outbox.Item) (err error) {
 	}
 	family := item.ProjectionType == FamilyProjectionType &&
 		(item.CausationType == "document_version" || item.CausationType == BusinessFamilyCausation)
-	if !family && (item.ProjectionType != "tag_projection" || item.CausationType != "lifecycle_event") {
+	relation := item.ProjectionType == RelationProjectionType && item.CausationType == RelationCausation
+	if !family && !relation && (item.ProjectionType != "tag_projection" || item.CausationType != "lifecycle_event") {
 		return errors.New("unsupported tag projection intent")
 	}
 	defer func() {
@@ -72,6 +73,9 @@ func (p *Projector) Handle(ctx context.Context, item outbox.Item) (err error) {
 	}()
 	if family {
 		return p.projectFamily(ctx, scope)
+	}
+	if relation {
+		return p.projectRelation(ctx, scope)
 	}
 	lcScope := lifecycle.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, DocumentID: scope.DocumentID}
 	var projectedEvent string

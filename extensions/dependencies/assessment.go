@@ -1,5 +1,6 @@
-// Package dependencies reads declared same-KB governance dependencies. It owns
-// no scheduler and never modifies lifecycle, annotations or original documents.
+// Package dependencies reads declared governance dependencies across
+// knowledge bases. It owns no scheduler and never modifies lifecycle,
+// annotations or original documents.
 package dependencies
 
 import (
@@ -22,18 +23,20 @@ type Scope struct {
 
 // SourceRef pins an actual observed version; callers refresh these roots before permission.
 type SourceRef struct {
-	DocumentID string `json:"document_id"`
-	VersionID  string `json:"version_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	DocumentID      string `json:"document_id"`
+	VersionID       string `json:"version_id"`
 }
 
 // Parent describes a declared, scoped ancestor's current governance evidence.
 type Parent struct {
-	DocumentID     string     `json:"document_id"`
-	VersionID      string     `json:"version_id"`
-	State          string     `json:"state"`
-	EffectiveFrom  *time.Time `json:"effective_from,omitempty"`
-	EffectiveUntil *time.Time `json:"effective_until,omitempty"`
-	ReviewDue      *time.Time `json:"review_due,omitempty"`
+	KnowledgeBaseID string     `json:"knowledge_base_id"`
+	DocumentID      string     `json:"document_id"`
+	VersionID       string     `json:"version_id"`
+	State           string     `json:"state"`
+	EffectiveFrom   *time.Time `json:"effective_from,omitempty"`
+	EffectiveUntil  *time.Time `json:"effective_until,omitempty"`
+	ReviewDue       *time.Time `json:"review_due,omitempty"`
 }
 
 // Assessment is a snapshot of the complete declared dependency closure.
@@ -74,6 +77,8 @@ func scoped(s Scope, tail ...any) []any {
 	return append([]any{strconv.FormatUint(s.TenantID, 10), s.KnowledgeBaseID}, tail...)
 }
 
+func dependencyKey(kb, doc string) string { return kb + "\x00" + doc }
+
 // LoadTx reads current declarations, versions, lifecycle and dates in one view.
 // A malformed/cyclic graph returns an error, never an empty/allowed assessment.
 func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
@@ -84,20 +89,22 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 	path := map[string]bool{}
 	seen := map[string]bool{}
 	height := map[string]int{}
-	sources := map[string]string{}
-	addSource := func(doc, version string) {
-		if old, ok := sources[doc]; ok && old != version {
+	sources := map[string]SourceRef{}
+	addSource := func(kb, doc, version string) {
+		key := dependencyKey(kb, doc)
+		if old, ok := sources[key]; ok && old.VersionID != version {
 			a.StructuralReason = "source_version_changed"
 		}
-		sources[doc] = version
+		sources[key] = SourceRef{KnowledgeBaseID: kb, DocumentID: doc, VersionID: version}
 	}
-	var visit func(string, int) error
-	visit = func(doc string, depth int) error {
-		if path[doc] || depth > 10 {
+	var visit func(Scope, int) error
+	visit = func(sc Scope, depth int) error {
+		key := dependencyKey(sc.KnowledgeBaseID, sc.DocumentID)
+		if path[key] || depth > 10 {
 			return errors.New("dependency cycle or traversal limit")
 		}
-		if seen[doc] {
-			if depth+height[doc] > 10 {
+		if seen[key] {
+			if depth+height[key] > 10 {
 				return errors.New("dependency traversal limit")
 			}
 			return nil
@@ -105,15 +112,15 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 		if len(seen) >= 64 {
 			return errors.New("dependency traversal limit")
 		}
-		seen[doc] = true
-		path[doc] = true
-		defer delete(path, doc)
+		seen[key] = true
+		path[key] = true
+		defer delete(path, key)
 		var id, status, childVersion string
 		var revision int64
-		e := tx.QueryRowContext(ctx, `SELECT d.declaration_id,d.status,d.child_version_node_id,d.revision FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scoped(s, doc)...).Scan(&id, &status, &childVersion, &revision)
+		e := tx.QueryRowContext(ctx, `SELECT d.declaration_id,d.status,d.child_version_node_id,d.revision FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scoped(sc, sc.DocumentID)...).Scan(&id, &status, &childVersion, &revision)
 		if errors.Is(e, sql.ErrNoRows) {
 			var exists bool
-			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ext_supplement_declarations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?) OR EXISTS(SELECT 1 FROM ext_supplement_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?)`, append(scoped(s, doc), scoped(s, doc)...)...).Scan(&exists); e != nil {
+			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ext_supplement_declarations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?) OR EXISTS(SELECT 1 FROM ext_supplement_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?)`, append(scoped(sc, sc.DocumentID), scoped(sc, sc.DocumentID)...)...).Scan(&exists); e != nil {
 				return e
 			}
 			if exists {
@@ -125,13 +132,13 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 			return e
 		}
 		var latest int64
-		if e = tx.QueryRowContext(ctx, "SELECT MAX(revision) FROM ext_supplement_declarations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(s, doc)...).Scan(&latest); e != nil {
+		if e = tx.QueryRowContext(ctx, "SELECT MAX(revision) FROM ext_supplement_declarations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(sc, sc.DocumentID)...).Scan(&latest); e != nil {
 			return e
 		}
 		if latest != revision {
 			return errors.New("dependency head is not latest declaration")
 		}
-		if doc == s.DocumentID {
+		if sc.KnowledgeBaseID == s.KnowledgeBaseID && sc.DocumentID == s.DocumentID {
 			a.Revision = revision
 		}
 		if status == "revoked" {
@@ -141,23 +148,30 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 			return errors.New("invalid dependency declaration")
 		}
 		a.Configured = true
-		addSource(doc, childVersion)
+		addSource(sc.KnowledgeBaseID, sc.DocumentID, childVersion)
 		var current string
-		e = tx.QueryRowContext(ctx, "SELECT current_version_node_id FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(s, doc)...).Scan(&current)
+		e = tx.QueryRowContext(ctx, "SELECT current_version_node_id FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(sc, sc.DocumentID)...).Scan(&current)
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
 			return e
 		}
 		if e != nil || current != childVersion {
 			a.StructuralReason = "source_version_changed"
 		}
-		rows, e := tx.QueryContext(ctx, "SELECT parent_document_id,parent_version_node_id FROM ext_supplement_parents WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND declaration_id=? ORDER BY parent_document_id LIMIT 9", scoped(s, doc, id)...)
+		rows, e := tx.QueryContext(ctx, `SELECT knowledge_base_id,parent_document_id,parent_version_node_id
+			FROM ext_supplement_parents
+			WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND declaration_id=?
+			UNION ALL
+			SELECT parent_knowledge_base_id,parent_document_id,parent_version_node_id
+			FROM ext_supplement_cross_parents
+			WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND declaration_id=?
+			ORDER BY 1,2 LIMIT 9`, append(scoped(sc, sc.DocumentID, id), scoped(sc, sc.DocumentID, id)...)...)
 		if e != nil {
 			return e
 		}
 		refs := []SourceRef{}
 		for rows.Next() {
 			var ref SourceRef
-			if e = rows.Scan(&ref.DocumentID, &ref.VersionID); e != nil {
+			if e = rows.Scan(&ref.KnowledgeBaseID, &ref.DocumentID, &ref.VersionID); e != nil {
 				rows.Close()
 				return e
 			}
@@ -172,8 +186,9 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 			return errors.New("incomplete dependency declaration")
 		}
 		for _, ref := range refs {
-			addSource(ref.DocumentID, ref.VersionID)
-			state, _, e := store.ReadLifecycleCurrentTx(ctx, tx, s.TenantID, s.KnowledgeBaseID, ref.DocumentID)
+			addSource(ref.KnowledgeBaseID, ref.DocumentID, ref.VersionID)
+			parentScope := Scope{TenantID: s.TenantID, KnowledgeBaseID: ref.KnowledgeBaseID, DocumentID: ref.DocumentID}
+			state, _, e := store.ReadLifecycleCurrentTx(ctx, tx, parentScope.TenantID, parentScope.KnowledgeBaseID, parentScope.DocumentID)
 			if e != nil && !errors.Is(e, sql.ErrNoRows) {
 				return e
 			}
@@ -183,16 +198,16 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 			if state == "active" {
 				var repealDue, publicationPending bool
 				e = tx.QueryRowContext(ctx, `SELECT `+store.RepealDueSQL+`,`+store.PublicationTargetPendingSQL+` FROM ext_lifecycle_current c
-					WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scoped(s, ref.DocumentID)...).Scan(&repealDue, &publicationPending)
+					WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=?`, scoped(parentScope, ref.DocumentID)...).Scan(&repealDue, &publicationPending)
 				if e != nil {
 					return e
 				}
 				a.RepealHold = a.RepealHold || repealDue
 				a.PublicationHold = a.PublicationHold || publicationPending
 			}
-			p := Parent{DocumentID: ref.DocumentID, VersionID: ref.VersionID, State: state}
+			p := Parent{KnowledgeBaseID: ref.KnowledgeBaseID, DocumentID: ref.DocumentID, VersionID: ref.VersionID, State: state}
 			current = ""
-			e = tx.QueryRowContext(ctx, "SELECT current_version_node_id FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(s, ref.DocumentID)...).Scan(&current)
+			e = tx.QueryRowContext(ctx, "SELECT current_version_node_id FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(parentScope, ref.DocumentID)...).Scan(&current)
 			if e != nil && !errors.Is(e, sql.ErrNoRows) {
 				return e
 			}
@@ -200,7 +215,7 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 				a.StructuralReason = "source_version_changed"
 			}
 			var from, until, review sql.NullString
-			e = tx.QueryRowContext(ctx, "SELECT effective_from,effective_until,review_due FROM ext_document_annotations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(s, ref.DocumentID)...).Scan(&from, &until, &review)
+			e = tx.QueryRowContext(ctx, "SELECT effective_from,effective_until,review_due FROM ext_document_annotations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", scoped(parentScope, ref.DocumentID)...).Scan(&from, &until, &review)
 			if e != nil && !errors.Is(e, sql.ErrNoRows) {
 				return e
 			}
@@ -220,21 +235,27 @@ func LoadTx(ctx context.Context, tx *sql.Tx, s Scope) (Assessment, error) {
 				a.ReviewDue = p.ReviewDue
 			}
 			a.Parents = append(a.Parents, p)
-			if e = visit(ref.DocumentID, depth+1); e != nil {
+			if e = visit(parentScope, depth+1); e != nil {
 				return e
 			}
-			if height[ref.DocumentID]+1 > height[doc] {
-				height[doc] = height[ref.DocumentID] + 1
+			parentKey := dependencyKey(parentScope.KnowledgeBaseID, parentScope.DocumentID)
+			if height[parentKey]+1 > height[key] {
+				height[key] = height[parentKey] + 1
 			}
 		}
 		return nil
 	}
-	if e := visit(s.DocumentID, 0); e != nil {
+	if e := visit(s, 0); e != nil {
 		return Assessment{}, e
 	}
-	for doc, version := range sources {
-		a.Sources = append(a.Sources, SourceRef{doc, version})
+	for _, source := range sources {
+		a.Sources = append(a.Sources, source)
 	}
-	sort.Slice(a.Sources, func(i, j int) bool { return a.Sources[i].DocumentID < a.Sources[j].DocumentID })
+	sort.Slice(a.Sources, func(i, j int) bool {
+		if a.Sources[i].KnowledgeBaseID != a.Sources[j].KnowledgeBaseID {
+			return a.Sources[i].KnowledgeBaseID < a.Sources[j].KnowledgeBaseID
+		}
+		return a.Sources[i].DocumentID < a.Sources[j].DocumentID
+	})
 	return a, nil
 }

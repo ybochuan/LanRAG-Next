@@ -13,7 +13,7 @@ import (
 func projectionDispatcher(tags, alerts func(context.Context, outbox.Item) error) func(context.Context, outbox.Item) error {
 	return func(ctx context.Context, item outbox.Item) error {
 		switch item.ProjectionType {
-		case "tag_projection", taggov.FamilyProjectionType:
+		case "tag_projection", taggov.FamilyProjectionType, taggov.RelationProjectionType:
 			if tags != nil {
 				return tags(ctx, item)
 			}

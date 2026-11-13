@@ -3,6 +3,7 @@ package business
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
+	"github.com/ybochuan/LanRAG-Next/extensions/outbox"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/taggov"
 )
 
 // Related is a currently active relationship without document content. It is
@@ -166,6 +169,14 @@ func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
 				return Result{}, e
 			}
 		}
+		if out.Status == "active" || out.Status == "revoked" {
+			if e = s.enqueueRelationTagsTx(ctx, tx, c.Scope, doc, out.ID, out.Revision); e != nil {
+				return Result{}, e
+			}
+			if e = s.enqueueRelationTagsTx(ctx, tx, targetScope, dst, out.ID, out.Revision); e != nil {
+				return Result{}, e
+			}
+		}
 		// Navigation relationships have a business record and audit receipt,
 		// but carry no lifecycle or dependency semantics.
 		if navigationRelation(kind) {
@@ -189,6 +200,25 @@ func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
 			}
 		}
 		return out, e
+	})
+}
+
+func (s *Service) enqueueRelationTagsTx(ctx context.Context, tx *sql.Tx, scope provenance.Scope, document, relationID string, revision int64) error {
+	payload, err := json.Marshal(map[string]string{"relation_id": relationID})
+	if err != nil {
+		return err
+	}
+	return outbox.EnqueueTx(ctx, tx, outbox.Item{
+		ID:              fmt.Sprintf("relation-tag:%s:%s:%d", relationID, document, revision),
+		TenantID:        scope.TenantID,
+		KnowledgeBaseID: scope.KnowledgeBaseID,
+		ProjectionType:  taggov.RelationProjectionType,
+		AggregateType:   "document",
+		AggregateID:     document,
+		CausationType:   taggov.RelationCausation,
+		CausationID:     fmt.Sprintf("%s:%d", relationID, revision),
+		Payload:         payload,
+		CreatedAt:       s.now().UTC(),
 	})
 }
 
@@ -333,11 +363,13 @@ const relatedConfidenceSQL = `(r.edge_type<>'related_to' OR r.confidence>=0.7 OR
 const relatedSQL = `SELECT target_knowledge_base_id,target_document_id,edge_type,confidence,'outgoing',target_version_id FROM ext_document_relations r WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND source_version_id=? AND status='active' AND ` + relatedConfidenceSQL + `
  UNION SELECT knowledge_base_id,document_id,edge_type,confidence,'incoming',source_version_id FROM ext_document_relations r WHERE tenant_id=? AND target_knowledge_base_id=? AND target_document_id=? AND target_version_id=? AND status='active' AND ` + relatedConfidenceSQL + `
  UNION SELECT c.knowledge_base_id,p.parent_document_id,'supplements',1,'outgoing',p.parent_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.declaration_id=c.declaration_id AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.child_version_node_id=?
- UNION SELECT c.knowledge_base_id,c.document_id,'supplements',1,'incoming',d.child_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.declaration_id=c.declaration_id AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND p.parent_document_id=? AND p.parent_version_node_id=? LIMIT 101`
+ UNION SELECT c.knowledge_base_id,c.document_id,'supplements',1,'incoming',d.child_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.declaration_id=c.declaration_id AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND p.parent_document_id=? AND p.parent_version_node_id=?
+ UNION SELECT cp.parent_knowledge_base_id,cp.parent_document_id,'supplements',1,'outgoing',cp.parent_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.child_version_node_id=?
+ UNION SELECT cp.knowledge_base_id,cp.document_id,'supplements',1,'incoming',d.child_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id WHERE cp.tenant_id=? AND cp.parent_knowledge_base_id=? AND cp.parent_document_id=? AND cp.parent_version_node_id=? LIMIT 101`
 
 func relatedArgs(scope provenance.Scope, doc, version string) []any {
 	out := []any{}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 6; i++ {
 		out = append(out, args(scope, doc, version)...)
 	}
 	return out

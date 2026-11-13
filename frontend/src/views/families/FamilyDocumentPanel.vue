@@ -10,14 +10,15 @@
     <template v-if="detail">
       <p>文档状态 · {{ stateLabels[detail.snapshot.current.state] || detail.snapshot.current.state }}</p>
       <form @submit.prevent="save">
-        <label>生效时间<input v-model="fields.effective_from" type="datetime-local" :disabled="locked" /></label>
-        <label>失效时间<input v-model="fields.effective_until" type="datetime-local" :disabled="locked" /></label>
-        <label>复核时间<input v-model="fields.review_due" type="datetime-local" :disabled="locked" /></label>
+        <p v-if="inherited" class="subtle">此附件的生效/失效时间继承主件，请到主件编辑日期。</p>
+        <label>生效时间<input v-model="fields.effective_from" type="datetime-local" :disabled="locked || inherited" /></label>
+        <label>失效时间<input v-model="fields.effective_until" type="datetime-local" :disabled="locked || inherited" /></label>
+        <label>复核时间<input v-model="fields.review_due" type="datetime-local" :disabled="locked || inherited" /></label>
         <p class="subtle">时间按本机时区显示。过期立即失效，清空日期不会恢复已失效文档。</p>
-        <button v-if="canWrite" type="submit" class="primary" :disabled="locked">保存日期</button>
+        <button v-if="canWrite && !inherited" type="submit" class="primary" :disabled="locked">保存日期</button>
       </form>
       <SupplementEditor :kb="kb" :document-id="documentId" :can-write="canWrite" :parent-busy="busy || disabled"
-        @busy="supplementBusy=$event" @saved="$emit('saved')" />
+        :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="$emit('saved')" />
       <h3>生命周期记录</h3>
       <ol v-if="detail.events.length">
         <li v-for="event in detail.events" :key="event.event_id">
@@ -38,12 +39,13 @@ import { date } from '../business/model'
 import SupplementEditor from '../lifecycle/SupplementEditor.vue'
 import { annotationsForSave, errorMessage, requestFence, stateLabels, toLocalInput } from '../lifecycle/model'
 
-const props = defineProps<{ kb: string; documentId: string; title: string; canWrite: boolean; disabled: boolean }>()
+const props = defineProps<{ kb: string; documentId: string; title: string; canWrite: boolean; disabled: boolean; knowledgeBases: { id: string; name: string }[] }>()
 const emit = defineEmits<{ close: []; saved: []; busy: [value: boolean] }>()
 const fields = reactive({ effective_from: '', effective_until: '', review_due: '' })
 const detail = ref<Detail>(), busy = ref(false), supplementBusy = ref(false)
 const error = ref(''), notice = ref(''), reloadRequired = ref(false)
 const locked = computed(() => !props.canWrite || props.disabled || busy.value || supplementBusy.value || reloadRequired.value)
+const inherited = computed(() => !!detail.value?.snapshot.attachment_parent_document_id)
 const fence = requestFence()
 const label = (state: string) => stateLabels[state as LifecycleState] || state || '初始'
 

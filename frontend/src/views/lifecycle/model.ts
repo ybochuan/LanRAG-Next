@@ -14,9 +14,12 @@ export function annotationsForSave(original:Annotations,fields:Record<'effective
 export function ruleSourceLabel(value:ResolvedRules):string{return value.revision===0?'未配置（永久有效）':value.source.knowledge_base_id?'知识库规则':'租户默认规则'}
 export function validRules(rules:Rules):boolean{return Object.values(rules).length===3&&Object.values(rules).every(n=>Number.isInteger(n)&&n>=0&&n<=36500)}
 export function requestFence(){let version=0;return{begin:()=>++version,invalidate:()=>{version++},current:(token:number)=>version===token}}
-export function supplementCommand(revision:number,parents:string[],child:string,operation:string){
+export function supplementCommand(revision:number,parents:string[],child:string,operation:string,parentKBs:string[]=[]){
  if(!Number.isInteger(revision)||revision<0||!operation||parents.length>8||new Set(parents).size!==parents.length||parents.some(id=>!id||id===child))throw new Error('invalid_supplements')
- return {expected_revision:revision,operation_id:operation,parents:[...parents].sort()}
+ if(parentKBs.length&&(parentKBs.length!==parents.length||parentKBs.some(kb=>!kb)))throw new Error('invalid_supplements')
+ if(!parentKBs.length)return {expected_revision:revision,operation_id:operation,parents:[...parents].sort()}
+ const pairs=parents.map((id,index)=>({id,kb:parentKBs[index]})).sort((a,b)=>a.kb===b.kb?a.id.localeCompare(b.id):a.kb.localeCompare(b.kb))
+ return {expected_revision:revision,operation_id:operation,parents:pairs.map(pair=>pair.id),parent_knowledge_base_ids:pairs.map(pair=>pair.kb)}
 }
 export function dependencyReason(reason?:string):string{return reason==='source_version_changed'?'文档或父文档版本已改变，需要重新确认关系。':reason==='parent_missing'?'父文档缺少有效记录。':reason?'依赖信息无法核验。':''}
 export function errorMessage(error:unknown):string{

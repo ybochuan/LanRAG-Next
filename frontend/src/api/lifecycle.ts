@@ -9,10 +9,10 @@ export interface DocumentFamily {id:string;label:string}
 export interface DocumentRow {document_id:string;title?:string;state:LifecycleState;last_event_id:string;annotations:Annotations;business_family?:DocumentFamily}
 export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean}
 export interface LifecycleEvent {event_id:string;from_state:string;to_state:string;reason:string;occurred_at:string;source_event_id?:string}
-export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null}
+export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean;attachment_parent_document_id?:string};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null}
 export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string}
-export interface DependencyParent {document_id:string;version_id:string;state:LifecycleState;effective_until?:string;review_due?:string}
-export interface SupplementView {revision:number;declaration_id:string;status:string;parents:string[];assessment:{configured:boolean;reason?:string;parents:DependencyParent[];review_due?:string}}
+export interface DependencyParent {knowledge_base_id:string;document_id:string;version_id:string;state:LifecycleState;effective_until?:string;review_due?:string}
+export interface SupplementView {revision:number;declaration_id:string;status:string;parents:string[];parent_knowledge_base_ids:string[];assessment:{configured:boolean;reason?:string;parents:DependencyParent[];review_due?:string}}
 export interface SupplementDetail {supplements:SupplementView;evaluation_status?:string}
 interface Envelope<T> {success:boolean;data:T;error?:{code:string}}
 const base=(kb:string)=>`/api/v1/knowledge-bases/${encodeURIComponent(kb)}/lifecycle`
@@ -27,4 +27,4 @@ export const saveAnnotations=(kb:string,id:string,expected_revision:number,annot
 export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules})).then(value=>{invalidateCache('document-picker-active');return value})
 export const reviews=(kb:string)=>unwrap<{alerts:ReviewAlert[];truncated:boolean}>(get(`${base(kb)}/reviews`))
 export const supplements=(kb:string,id:string)=>unwrap<SupplementDetail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`))
-export const saveSupplements=(kb:string,id:string,body:{expected_revision:number;operation_id:string;parents:string[]})=>unwrap<SupplementDetail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`,body)).then(value=>{invalidateCache('document-picker-active');return value})
+export const saveSupplements=(kb:string,id:string,body:{expected_revision:number;operation_id:string;parents:string[];parent_knowledge_base_ids?:string[]})=>unwrap<SupplementDetail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`,body)).then(value=>{invalidateCache('document-picker-active');return value})
