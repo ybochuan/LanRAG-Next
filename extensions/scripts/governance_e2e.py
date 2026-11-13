@@ -338,6 +338,15 @@ def main():
             http.api("PUT", quick_id, quick_update)
             if reviewed_text not in matching or reviewed_text in irrelevant or context["answer_excerpt"] in matching or context["suggested_revision"] in matching:
                 raise RuntimeError("reviewed guidance was not limited to a matching source or included raw user feedback")
+            # This temporary source only exercises the guidance negative
+            # control. Remove it before the later Agent-search controls so it
+            # cannot pollute the single-document provenance assertion.
+            http.api("DELETE", "/knowledge/" + unrelated)
+            def unrelated_deleted():
+                with sqlite3.connect((work / "core.db").as_uri() + "?mode=ro", uri=True) as db:
+                    row = db.execute("SELECT deleted_at FROM knowledges WHERE id=?", (unrelated,)).fetchone()
+                return row is not None and bool(row[0])
+            startup.until(unrelated_deleted, 30)
             emit("[DOCUMENT-FEEDBACK] PASS: shared excerpt, reviewed wording, controlled activation and exact citation match")
         status, response, captured = ask("rag-fallback-active", False)
         if status != 200 or desc_canary not in captured or model.old_answer not in response:

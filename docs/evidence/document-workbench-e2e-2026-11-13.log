@@ -1,0 +1,36 @@
+[SCOPE] Real patched core + real worker Host; isolated SQLite; local model fixture; original user documents untouched
+[RAG-ACTIVE] PASS: active document body reached actual generation prompt
+[PROVENANCE-RAG] PASS: native identity and actual model call persisted by real worker Host
+[M5-QA-FEEDBACK] PASS: authorized Quick QA answer bound exact native chunk IDs; retries produced one staged feedback
+[DOCUMENT-FEEDBACK] PASS: shared excerpt, reviewed wording, controlled activation and exact citation match
+[RAG-FALLBACK-ACTIVE] PASS: independent description canary reached actual empty-search fallback prompt
+[AGENT-SEARCH-ACTIVE] PASS: real tool ran and permitted source reached actual follow-up prompt
+[M5-QA-RERANK] PASS: reranker consumed the active source and the sealed Agent answer accepted staged feedback
+[AGENT-READ-ACTIVE] PASS: real tool ran and permitted source reached actual follow-up prompt
+[AGENT-LIST-ACTIVE] PASS: real tool ran and permitted source reached actual follow-up prompt
+[M5-GUIDANCE] PASS: default Quick QA received guidance and remained unattributed; exact RAG and Agent sealed; foreign/quarantined instructions omitted; persistent budgets respected
+[PROVENANCE-AGENT] PASS: actual native execution sealed; real fields verified against native source snapshots; unsupported composition remains unattributed; FK check clean
+[M5-FEEDBACK] PASS: real staging/approval -> early activation409 -> isolated fixture deadline advance -> real API activation/guidance; no claim of waiting 48h
+[M5-PUBLISH-GATE] PASS: indexed but unreleased target withheld in RAG and Agent; permit switched only after governance commit
+[M5-PUBLISH] PASS: activated feedback guidance -> reviewed proposal -> real native Markdown ingest/index -> supersedes; repeated publish retained target
+[M5-PUBLISH-LEGACY] PASS: indexed old-format sidecar withheld before binding; retry reconciled the same native target
+[M5-PUBLISH-DEPENDENCY] PASS: an ineligible replacement rolls back cutover and the old document remains retrievable
+[M5-FAMILY-TAG] PASS: real worker projected a shared native family ID to both versions and preserved the business tag
+[M4-RELATED] PASS: native JWT declaration/query/revoke; current native version + active permit + critical edge transaction
+[M5-FACTS] PASS: source superseded, single published proposal, two family projection intents and FK integrity
+[LIFECYCLE] PASS: real startup sweep active -> stale from annotation input
+[RAG-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[RAG-FALLBACK-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[AGENT-SEARCH-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[AGENT-READ-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[AGENT-LIST-STALE] PASS: same session/known IDs; no body, description or old-answer canary in ANY model request
+[PROVENANCE-TERMINAL] PASS: finished requests leave no open run
+[GOVERNANCE-LIST] PASS: authenticated Core API forwarded title and state to the read-only join
+[AGENT-ARCHIVE] PASS: native discovery and MCP call delivered only the authorized stale excerpt with the warning
+[FAM-01] PASS: native writes, scoped Host reads, cross-KB 409, three observation chains in one family, idempotent receipt, removal and unchanged lifecycle
+[DOCUMENT-WORKBENCH] PASS: current family, scoped graph, document audit and foreign document rejection
+[FAM-04-WORKSPACE] PASS: real native writes, read-only Host workbench, external relation, revocation history and scoped audit
+[WORKBENCH-SUPPLEMENTS] PASS: both endpoints list and reopen each declaration, and parent audit retains revocation
+[RAG-OFFLINE] PASS: Host unavailable; answer_generation_calls=0; no governed source content in query-understanding requests
+[AGENT-SEARCH-OFFLINE] PASS: Host unavailable; answer_generation_calls=0; no governed source content in query-understanding requests
+[RESULT] Governance leak E2E PASS; exit=0; local fixtures only, no cloud model claim

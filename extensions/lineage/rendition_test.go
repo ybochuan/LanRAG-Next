@@ -131,6 +131,24 @@ func (r renditionSnapshotReader) Capture(ctx context.Context, scope provenance.S
 	return r(ctx, scope, doc)
 }
 
+func TestRenditionGraphRootsByDocumentID(t *testing.T) {
+	reg, _, _, id, source := renditionFixture(t)
+	ctx := t.Context()
+	if _, err := NewRenditions(reg, func(context.Context, string) (string, error) { return source, nil }).Bind(ctx, fixtureScope, "doc", id); err != nil {
+		t.Fatal(err)
+	}
+	graph, err := reg.Graph(ctx, fixtureScope, "renditions", "doc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.RootID != "doc" || len(graph.Nodes) != 2 || len(graph.Edges) != 1 {
+		t.Fatalf("document root: %+v", graph)
+	}
+	if graph.Edges[0].Type != "rendition_of" || graph.Edges[0].From == "" || graph.Edges[0].To == "" {
+		t.Fatalf("document root edge: %+v", graph.Edges[0])
+	}
+}
+
 func TestRenditionRefreshesNativeSupplementParent(t *testing.T) {
 	reg, db, child, id, source := renditionFixture(t)
 	ctx := t.Context()

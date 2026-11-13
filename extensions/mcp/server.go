@@ -44,6 +44,8 @@ type relatedDocument struct {
 	Direction       string  `json:"direction"`
 }
 
+func relatedDocumentKey(kb, id string) string { return kb + "\x00" + id }
+
 func (scope nativeScope) allows(kb, id string) bool {
 	return slices.Contains(scope.KBs, kb) && (slices.Contains(scope.IDs, id) || slices.Contains(scope.WholeKBs, kb))
 }
@@ -229,7 +231,7 @@ func (s *Server) relatedDocuments(ctx context.Context, kb, id string, scope nati
 	byKB := map[string][]string{}
 	seen := map[string]bool{}
 	for _, row := range candidates {
-		key := row.KnowledgeBaseID + "\x00" + row.DocumentID
+		key := relatedDocumentKey(row.KnowledgeBaseID, row.DocumentID)
 		if !seen[key] {
 			seen[key] = true
 			byKB[row.KnowledgeBaseID] = append(byKB[row.KnowledgeBaseID], row.DocumentID)
@@ -243,12 +245,12 @@ func (s *Server) relatedDocuments(ctx context.Context, kb, id string, scope nati
 			return nil, err
 		}
 		for _, doc := range excluded {
-			blocked[targetKB+"\\x00"+doc] = true
+			blocked[relatedDocumentKey(targetKB, doc)] = true
 		}
 	}
 	out := []relatedDocument{}
 	for _, row := range candidates {
-		if !blocked[row.KnowledgeBaseID+"\\x00"+row.DocumentID] {
+		if !blocked[relatedDocumentKey(row.KnowledgeBaseID, row.DocumentID)] {
 			out = append(out, row)
 		}
 	}

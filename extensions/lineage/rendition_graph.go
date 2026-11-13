@@ -9,6 +9,7 @@ import (
 )
 
 // renditionGraph reports verified bindings for the latest observed versions.
+// Root may identify a document, an artifact node, or a version node.
 // It does not fetch originals or expose result bytes.
 func (r *Registry) renditionGraph(ctx context.Context, s provenance.Scope, out GraphSnapshot) (GraphSnapshot, error) {
 	type candidate struct {
@@ -26,8 +27,8 @@ func (r *Registry) renditionGraph(ctx context.Context, s provenance.Scope, out G
 			AND v.version_node_id=e.to_node_id AND v.document_id=b.document_id
 			JOIN ext_document_version_family f ON f.tenant_id=v.tenant_id AND f.knowledge_base_id=v.knowledge_base_id
 			AND f.document_id=v.document_id AND f.current_version_node_id=v.version_node_id
-			WHERE e.tenant_id=? AND e.knowledge_base_id=? AND (?='' OR e.from_node_id=? OR e.to_node_id=?)
-			ORDER BY e.created_at DESC,e.edge_id LIMIT 129`, scopeArgs(s, out.RootID, out.RootID, out.RootID)...)
+			WHERE e.tenant_id=? AND e.knowledge_base_id=? AND (?='' OR e.from_node_id=? OR e.to_node_id=? OR b.document_id=?)
+			ORDER BY e.created_at DESC,e.edge_id LIMIT 129`, scopeArgs(s, out.RootID, out.RootID, out.RootID, out.RootID)...)
 		if err != nil {
 			return err
 		}
