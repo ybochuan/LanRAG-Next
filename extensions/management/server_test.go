@@ -50,6 +50,21 @@ func TestManagementRejectsCredentialsScopeAndReadonly(t *testing.T) {
 	}
 }
 
+func TestRenditionManagementRequiresWriteAndConfiguration(t *testing.T) {
+	s := fixture(t)
+	key := "management-test-credential-32-bytes"
+	body := `{"action":"rendition_bind","tenant_id":7,"knowledge_base_id":"kb","document_id":"doc","artifact_id":"artifact"}`
+	if w := call(s, strings.Replace(body, `"artifact_id":"artifact"`, `"artifact_id":"artifact","can_write":false`, 1), key); w.Code != 403 {
+		t.Fatalf("read-only rendition bind status=%d", w.Code)
+	}
+	if w := call(s, strings.Replace(body, `"artifact_id":"artifact"`, `"artifact_id":"artifact","can_write":true`, 1), key); w.Code != 503 {
+		t.Fatalf("unconfigured rendition bind status=%d", w.Code)
+	}
+	if w := call(s, strings.Replace(body, `"knowledge_base_id":"kb"`, `"knowledge_base_id":"other"`, 1), key); w.Code != 403 {
+		t.Fatalf("foreign rendition scope status=%d", w.Code)
+	}
+}
+
 func TestManagementSupplementReadAndUnavailableWriter(t *testing.T) {
 	s := fixture(t)
 	if _, e := lifecycle.NewStore(s.db).Append(context.Background(), lifecycle.Event{EventID: "doc", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "doc", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()}); e != nil {

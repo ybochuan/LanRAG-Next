@@ -42,6 +42,7 @@
           <RouterLink v-if="family.published_version_node_id" :to="{path:'/platform/lineage',query:{kb,mode:'version-ancestry',id:family.published_version_node_id}}">版本历史</RouterLink>
         </p>
         <p v-else>尚未确认发布头。</p>
+        <p v-if="family.published_document_id && family.published_head_availability==='missing'" class="notice error" role="alert">当前发布件在原生文档中不可用。请从当前成员中选择新的发布头并显式确认恢复。</p>
       </section>
       <nav v-if="visibleTabs.length > 1" class="sub-tabs" aria-label="文档族视图">
         <button v-for="item in visibleTabs" :key="item.key" type="button" :class="{selected:tab===item.key}"
@@ -64,6 +65,18 @@
                 </li>
               </ul>
               <p v-else class="empty">{{ tab==='members' && !familyId ? '请选择或创建文档族。' : '这一页没有文档。' }}</p>
+              <form v-if="canWrite && family && family.published_head_availability==='missing' && tab==='members'" class="family-recovery" @submit.prevent="recoverHead">
+                <h3>恢复发布头</h3>
+                <p>当前发布件已不可用。恢复会以显式确认的成员替换发布头，并保留历史记录。</p>
+                <label>新的发布头
+                  <select v-model="recoverDocument" required :disabled="locked || saving">
+                    <option value="">选择当前族内可用成员</option>
+                    <option v-for="row in members.filter(row=>row.document_id!==family?.published_document_id && row.availability!=='missing' && row.availability!=='deleted')" :key="row.document_id" :value="row.document_id">{{ title(row.document_id) }}</option>
+                  </select>
+                </label>
+                <label>恢复原因<input v-model.trim="recoverReason" maxlength="512" required :disabled="locked || saving" placeholder="说明原发布件不可用的依据" /></label>
+                <button type="submit" class="primary" :disabled="locked || saving || !recoverDocument || !recoverReason">确认恢复发布头</button>
+              </form>
               <form v-if="removing && canWrite" class="family-remove" @submit.prevent="removeMember">
                 <p>移出「{{ title(removing) }}」后保留文档和治理记录。</p>
                 <label>移出原因<input v-model.trim="removalReason" maxlength="160" required :disabled="locked" /></label>
@@ -193,7 +206,7 @@ import FamilyDocumentPanel from './FamilyDocumentPanel.vue'
 import FamilySuggestionPanel from './FamilySuggestionPanel.vue'
 import '../business/business.css'
 
-const props = defineProps<{ scope?:string; documentId?:string; currentFamily?:string; initialView?:api.FamilyTab }>()
+const props = defineProps<{ scope?:string; documentId?:string; currentFamily?:string; initialView?:api.FamilyTab; canWrite?:boolean }>()
 const emit = defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string]; changed:[]; locked:[value:boolean] }>()
 
 const tabs: {key:api.FamilyTab; label:string}[] = [
@@ -207,7 +220,7 @@ const visibleTabs = computed(() => props.documentId
 const familyActions: Partial<Record<string,string>> = {
   family_create:'创建文档族', family_member_add:'加入成员', family_member_remove:'移出成员',
   family_replace_create:'提交替代计划', family_replace_approve:'批准替代', family_replace_cancel:'撤回替代',
-  family_replace_apply:'同族替代生效', family_replace_history:'补录历史版本链', family_backfill_apply:'确认历史回填',
+  family_replace_apply:'同族替代生效', family_replace_history:'补录历史版本链', family_head_recover:'恢复发布头', family_backfill_apply:'确认历史回填',
   supplements_active:'登记补充关系', supplements_revoked:'撤销补充关系',
   family_suggestion_scan:'申请扫描', family_suggestion_confirm:'确认建议',
   family_suggestion_ignore:'忽略建议', family_suggestion_policy_set:'保存建议权重',
@@ -229,6 +242,7 @@ const names = ref<Record<string,string>>({})
 const crossNames = ref(new Map<string,string>())
 const nameKey = (scope:string,id:string) => scope+'\u0000'+id
 const relationMember = ref(''), relationEnd = ref<'source'|'target'>('source'), relationMembers = ref<api.FamilyMember[]>([])
+const recoverDocument = ref(''), recoverReason = ref('')
 const memberPage = ref(1), moreMembers = ref(false)
 const saving = ref(false)
 type PendingOperation = {kb:string;action:BusinessAction|FamilyAction;body:BusinessBody}
@@ -279,10 +293,12 @@ async function loadFamilies(select = false) {
   if (!scope) return
   listBusy.value = true
   try {
-    const [rows, access] = await Promise.all([api.listFamilies(scope,familyPage.value), overview(scope,1,'','',1)])
+    const rowsPromise = api.listFamilies(scope,familyPage.value)
+    const accessPromise = props.canWrite === undefined ? overview(scope,1,'','',1) : Promise.resolve(undefined)
+    const [rows, access] = await Promise.all([rowsPromise, accessPromise])
     if (!listFence.current(token)) return
     families.value = rows
-    canWrite.value = access.can_write
+    canWrite.value = props.canWrite ?? access?.can_write ?? false
     if (select && !familyId.value) {
       familyId.value = props.documentId
         ? props.currentFamily || (props.initialView==='suggestions' ? rows[0]?.business_family_id || '' : '')
@@ -408,6 +424,11 @@ function removeMember() {
     familyWrite('family_member_remove',{document_id:removing.value,reason:removalReason.value},family.value.business_family_id,family.value.revision)
   }
 }
+function recoverHead() {
+  if (!canWrite.value || locked.value || !family.value || !recoverDocument.value || !recoverReason.value.trim()) return
+  if (!window.confirm(`确认将「${title(recoverDocument.value)}」恢复为当前发布头？`)) return
+  familyWrite('family_head_recover',{document_id:recoverDocument.value,reason:recoverReason.value.trim(),second_confirmation:true},family.value.business_family_id,family.value.revision)
+}
 function createReplacement() {
   if (!family.value || !newDocument.value || !oldDocument.value || newDocument.value===oldDocument.value) return
   const parsed = Date.parse(effectiveAt.value)
@@ -531,6 +552,7 @@ async function perform() {
       if (command.action==='family_member_add') addId.value = ''
       if (command.action==='family_member_remove') removing.value = ''
       if (command.action==='family_replace_create') newDocument.value = ''
+      if (command.action==='family_head_recover') { recoverDocument.value = ''; recoverReason.value = '' }
     }
     if (batch.value) notice.value = `已确认 ${batch.value.completed} 条建议。`
     pending.value = undefined
@@ -551,17 +573,20 @@ async function perform() {
   }
 }
 
+watch(() => props.canWrite, value => { if (value !== undefined) canWrite.value = value })
 watch(kb,()=>{
   listFence.invalidate()
   viewFence.invalidate()
   family.value=undefined; familyId.value=''; familyPage.value=1; families.value=[]; canWrite.value=false
   pending.value=undefined; batch.value=undefined; saving.value=false; names.value={}; crossNames.value.clear(); error.value=''; notice.value=''
   documentId.value=''; documentBusy.value=false; removing.value=''; addId.value=''; newLabel.value=''
+  recoverDocument.value=''; recoverReason.value=''
   if (kb.value) void loadFamilies(true)
 })
 watch(familyId,()=>{
   family.value=families.value.find(row=>row.business_family_id===familyId.value)
   documentId.value=''; removing.value=''; relationMember.value=''; memberPage.value=1; inbox.value=undefined
+  recoverDocument.value=''; recoverReason.value=''
   oldDocument.value=''; newDocument.value=''; effectiveAt.value=''; page.value=1
 })
 watch(tab,()=>{ page.value=1; removing.value='' })
@@ -588,6 +613,7 @@ onBeforeUnmount(()=>{clearTimeout(scanPoll); catalogFence.invalidate(); listFenc
 .family-items { padding-inline-start:1.25rem; }
 .family-items li { padding:.6rem 0; border-bottom:1px solid var(--td-component-border); overflow-wrap:anywhere; }
 .family-items li > :is(button,span,small) { margin-inline-end:.5rem; }
-.family-remove { margin-top:1rem; }
+.family-remove, .family-recovery { margin-top:1rem; }
+.family-recovery h3 { margin-bottom:.35rem; }
 @media (max-width:680px) { .family-create { display:block; } }
 </style>

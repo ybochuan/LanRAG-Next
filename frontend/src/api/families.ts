@@ -9,10 +9,12 @@ export interface BusinessFamily {
   revision: number
   published_document_id?: string
   published_version_node_id?: string
+  published_head_availability?: string
 }
 export interface FamilyMember {
   document_id: string
   state?: string
+  availability?: string
   removed_at?: string
   reason?: string
 }

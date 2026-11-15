@@ -8,9 +8,10 @@ import * as model from './model'
 import { requestFence } from '../lifecycle/model'
 
 // Execute the actual setup script with controlled API completion and router hooks.
-function mountSetup(api: Record<string, unknown>, lifecycle: Record<string, unknown> = {}, props: { section: 'associations' | 'feedback-governance' | 'revisions' } = { section: 'revisions' }) {
+function mountSetup(api: Record<string, unknown>, lifecycle: Record<string, unknown> = {}, props: { section: 'associations' | 'feedback-governance' | 'revisions'; scope?: string; canWrite?: boolean } = { section: 'revisions' }) {
   const guards: (() => boolean | void)[] = []
   const scope = vue.effectScope()
+  let overviewCalls = 0
   const source = parse(readFileSync(new URL('./BusinessView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const modules: Record<string, unknown> = {
@@ -18,14 +19,14 @@ function mountSetup(api: Record<string, unknown>, lifecycle: Record<string, unkn
     'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({}), onBeforeRouteLeave: (guard: () => boolean) => guards.push(guard), onBeforeRouteUpdate: (guard: () => boolean) => guards.push(guard) },
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
     '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }) },
-    '@/api/lifecycle': { overview: async () => ({ can_write: true, documents: [] }), ...lifecycle },
+    '@/api/lifecycle': { overview: async () => { overviewCalls++; return { can_write: true, documents: [] } }, ...lifecycle },
     '@/api/business': { documentTitle: async () => '', ...api },
     './CreateForm.vue': {}, './DocumentPicker.vue': {}, '../lifecycle/model': { requestFence }, './model': model,
   }
   const state = scope.run(() => new Function('require', 'defineProps', 'defineEmits', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated};`)(
     (id: string) => modules[id], () => props, () => () => {}, () => 0, () => {}, { addEventListener() {}, removeEventListener() {} }, {},
   ))
-  return { state, guards, props, stop: () => scope.stop() }
+  return { state, guards, props, overviewCalls: () => overviewCalls, stop: () => scope.stop() }
 }
 
 test('unknown write keeps its original retry when navigating to another business view', async () => {
@@ -102,6 +103,16 @@ test('overview authority failure is separated from the record-list error', async
     await view.state.loadAuthority()
     assert.equal(view.state.error.value, '')
     assert.match(view.state.authorityError.value, /权限信息暂不可用/)
+  } finally { view.stop() }
+})
+
+test('embedded business view reuses the authority supplied by LifecycleView without loading overview', async () => {
+  const view = mountSetup({ list: async () => [] }, {}, { section: 'revisions', scope: 'kb-a', canWrite: true })
+  try {
+    view.state.kb.value = 'kb-a'; await vue.nextTick(); await vue.nextTick()
+    await view.state.loadAuthority()
+    assert.equal(view.state.canWrite.value, true)
+    assert.equal(view.overviewCalls(), 0)
   } finally { view.stop() }
 })
 

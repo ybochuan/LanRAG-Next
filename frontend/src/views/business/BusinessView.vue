@@ -173,7 +173,7 @@ import DocumentPicker from './DocumentPicker.vue'
 import { requestFence } from '../lifecycle/model'
 import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, shortID, statusLabels, type WriteIntent } from './model'
 
-const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string}}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
+const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
 const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string]}>()
 const sections=[{key:'associations',label:'关联关系'},{key:'feedback-governance',label:'反馈审核'},{key:'revisions',label:'修订发布'}]
 const riskLabels:Record<string,string>={low:'低风险',medium:'中风险',high:'高风险'}
@@ -246,6 +246,7 @@ async function loadRecords(){
   finally{if(listFence.current(token))loading.value=false}
 }
 async function loadAuthority(){
+  if (props.canWrite !== undefined) { canWrite.value = props.canWrite; authorityError.value = ''; return }
   const token=kbFence.begin(),scope=kb.value;canWrite.value=false;authorityError.value=''
   try{const value=await overview(scope,1,'','',1);if(!kbFence.current(token))return;canWrite.value=value.can_write;for(const row of value.documents)if(row.title)titles.value.set(row.document_id,row.title)}
   catch(e){if(kbFence.current(token))authorityError.value=`权限信息暂不可用：${businessError(e)}。记录列表仍可查看。`}
@@ -336,6 +337,7 @@ async function loadKBs(){
   catch{if(catalogFence.current(token))error.value='无法载入可访问的知识库，请检查登录状态后重试。'}finally{if(catalogFence.current(token))loadingKB.value=false}
 }
 watch(kb,()=>{resetScope();if(kb.value){void loadAuthority();void loadRecords()}})
+watch(() => props.canWrite, value => { if (value !== undefined) { canWrite.value = value; authorityError.value = '' } })
 watch(kind,()=>{queryDocument.value='';clearRelatedResult();if(!kb.value)return;listFence.invalidate();detailFence.invalidate();records.value=[];detail.value=undefined;page.value=1;error.value='';loading.value=false;void loadRecords()})
 watch(feedbackStatus,()=>{detailFence.invalidate();detail.value=undefined;detailLoading.value=false;page.value=1;void loadRecords()})
 watch(queryDocument,clearRelatedResult,{flush:'sync'})

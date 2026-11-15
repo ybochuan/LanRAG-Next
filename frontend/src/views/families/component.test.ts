@@ -8,12 +8,13 @@ import * as businessModel from '../business/model'
 import * as lifecycleModel from '../lifecycle/model'
 import type { BusinessBody } from '@/api/business'
 
-function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstResponse=false) {
+function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstResponse=false, props: Record<string, unknown> = {}) {
   const script = parse(readFileSync(new URL('./FamilyWorkspaceView.vue',import.meta.url),'utf8')).descriptor.scriptSetup!.content
   const code = ts.transpileModule(script,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
   const scope = vue.effectScope()
   const calls: {kb:string;action:string;body:BusinessBody}[] = []
   let approved = false
+  let overviewCalls = 0
   const prompts: string[] = []
   const modules: Record<string,unknown> = {
     vue: {...vue,onMounted(){},onBeforeUnmount(){}},
@@ -21,7 +22,7 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
     '@/stores/auth': {useAuthStore:()=>({effectiveTenantId:7})},
     '@/api/families': {workspace,listFamilies:async()=>[]},
     '@/api/knowledge-base': {},
-    '@/api/lifecycle': {overview:async()=>({can_write:true})},
+    '@/api/lifecycle': {overview:async()=>{overviewCalls++;return {can_write:true}}},
     '@/api/business': {documentTitles:async()=>({}),write:async(kb:string,action:string,body:BusinessBody)=>{
       calls.push({kb,action,body})
       if (loseFirstResponse && calls.length===1) throw new Error('fixture response lost')
@@ -32,9 +33,9 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
   }
   const window = {confirm(message:string){prompts.push(message);return approved}}
   const state = scope.run(()=>new Function('require','exports','window','defineProps','defineEmits',`${code}
-    return {kb,familyId,family,canWrite,members,loadView,approve,confirmSuggestions,perform,pending};
-  `)((id:string)=>modules[id],{},window,()=>({}),()=>()=>{}))
-  return {state,calls,prompts,allow:()=>{approved=true},stop:()=>scope.stop()}
+    return {kb,familyId,family,canWrite,members,recoverDocument,recoverReason,loadFamilies,loadView,recoverHead,approve,confirmSuggestions,perform,pending};
+  `)((id:string)=>modules[id],{},window,()=>props,()=>()=>{}))
+  return {state,calls,prompts,allow:()=>{approved=true},overviewCalls:()=>overviewCalls,stop:()=>scope.stop()}
 }
 
 const snapshot = (id: string) => ({family:{business_family_id:id,revision:2},can_write:true,members:[{document_id:id}],has_next:false})
@@ -119,5 +120,35 @@ test('a stale replacement or a replacement ahead of its predecessor cannot promp
     view.state.approve({...row,family_revision:7,old_document_id:'2020',old_version_node_id:'v2020'})
     assert.equal(view.prompts.length,0)
     assert.equal(view.calls.length,0)
+  } finally { view.stop() }
+})
+
+test('missing published head can be recovered through an explicit member selection', async () => {
+  const view=setup(async()=>[])
+  try {
+    view.state.kb.value='kb'
+    await vue.nextTick()
+    view.state.canWrite.value=true
+    view.state.family.value={business_family_id:'family',revision:4,published_document_id:'old',published_head_availability:'missing'}
+    view.state.members.value=[{document_id:'new',availability:'active'}]
+    view.state.recoverDocument.value='new'
+    view.state.recoverReason.value='old source deleted'
+    view.allow()
+    view.state.recoverHead()
+    assert.equal(view.calls.length,1)
+    assert.equal(view.calls[0]?.action,'family_head_recover')
+    assert.equal(view.calls[0]?.body.expected_revision,4)
+    assert.deepEqual(view.calls[0]?.body.business.payload,{document_id:'new',reason:'old source deleted',second_confirmation:true})
+  } finally { view.stop() }
+})
+
+test('embedded workspace reuses the authority supplied by LifecycleView without loading overview', async () => {
+  const view=setup(async()=>[], false, {scope:'kb', canWrite:true})
+  try {
+    view.state.kb.value='kb'
+    await vue.nextTick()
+    await view.state.loadFamilies()
+    assert.equal(view.state.canWrite.value,true)
+    assert.equal(view.overviewCalls(),0)
   } finally { view.stop() }
 })

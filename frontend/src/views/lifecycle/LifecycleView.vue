@@ -16,9 +16,9 @@
     <button role="tab" :aria-selected="workspaceView==='feedback-governance'" :class="{selected:workspaceView==='feedback-governance'}" :disabled="viewLocked" @click="showFeedback">反馈审核</button>
    </div>
    <template v-if="workspaceView">
-    <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" @changed="loadAll" @locked="viewLocked=$event" />
+    <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" :can-write="data?.can_write" @changed="loadAll" @locked="viewLocked=$event" />
     <LineageView v-else-if="workspaceView==='lineage'" :key="kb+String(route.query.mode)+String(route.query.node||route.query.id)" :scope="kb" @open="openWorkspaceDocument" />
-    <BusinessView v-else :key="kb+workspaceView" :section="workspaceView" :scope="kb" @locked="viewLocked=$event" @open="openWorkspaceDocument" />
+    <BusinessView v-else :key="kb+workspaceView" :section="workspaceView" :scope="kb" :can-write="data?.can_write" @locked="viewLocked=$event" @open="openWorkspaceDocument" />
    </template>
    <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
@@ -80,11 +80,11 @@
       </form>
      </template>
      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
-      :current-family="detail.business_family?.id" :initial-view="detailTab==='suggestions'?'suggestions':'members'"
+      :current-family="detail.business_family?.id" :initial-view="detailTab==='suggestions'?'suggestions':'members'" :can-write="detailCanWrite"
       @open="openWorkspaceDocument" @changed="refreshDocumentMembership" @locked="childLocked=$event" />
      <template v-else-if="detailTab==='relations'">
       <SupplementEditor :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" :parent-busy="childLocked" :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="supplementSaved" />
-      <BusinessView :key="selectedKB+':'+selectedID+':'+supplementRevision" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" section="associations" @open="openRelatedDocument" @locked="childLocked=$event" />
+      <BusinessView :key="selectedKB+':'+selectedID+':'+supplementRevision" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="associations" @open="openRelatedDocument" @locked="childLocked=$event" />
      </template>
      <LineageView v-else-if="detailTab==='graph'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document-id="selectedID" @open="openGraphDocument" />
      <template v-else-if="detailTab==='audit'">
@@ -106,7 +106,7 @@
      </div>
       <button type="button" class="secondary" @click="closeDocument(); showFeedback()">查看反馈审核</button>
      </template>
-     <BusinessView v-else-if="detailTab==='revisions'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" section="revisions" @locked="childLocked=$event" />
+     <BusinessView v-else-if="detailTab==='revisions'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="revisions" @locked="childLocked=$event" />
     </template>
    </aside>
   </div>

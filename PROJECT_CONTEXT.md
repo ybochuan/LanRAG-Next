@@ -6,7 +6,7 @@
 - 台账和详情从已确认的业务族成员读取名称。面向文档的关系图省略观察链标识，观察节点及旧接口字段仍用于历史核对和兼容。
 - 单文档关系从主件和补充通知两端展示当前依赖声明，沿用补充通知详情编辑。治理记录按两端展示建议确认／忽略及补充声明变更。拆分批次可从原件和已发布子件查看。上述视图读取既有扩展事实。
 - 扩展 schema 28 以原生已封存问答绑定保存用户明确提交的问答摘录和建议修订。摘录和核验引用仅对该库有治理权限的审核员可见。审核定稿独立保存，沿用冷静期与激活流程。问答反馈指导只在本库当前模型步骤使用同一来源分块及版本时可选取。
-- 扩展 schema 29 保存原生文档可用性观察（active/missing/deleted）。业务族读取和图投影展示可用性；发布头缺失只能通过显式确认的 `family_head_recover` 恢复，不自动提升成员。恢复以旧件缺失、新件当前可用、成员关系、依赖和版本链复核为前提，并写入替代事实、审计和投影意图。
+- 扩展 schema 29 保存原生文档可用性观察（active/missing/deleted）。业务族读取和图投影展示可用性；发布头缺失只能通过显式确认的 `family_head_recover` 恢复，不自动提升成员。恢复以旧件缺失、新件当前可用、成员关系、依赖和版本链复核为前提，并写入替代事实、审计和投影意图。工作台在发布头缺失时显示告警，并在当前成员页提供选择可用成员、填写原因和二次确认的恢复入口。
 - 扩展 schema 30 支持跨库规范性文档关系：`amends`、`interprets` 和经二次确认的跨库 `related_to` 可指向另一知识库的主件；同库仍写 `ext_lineage_edge`，跨库关键边写 `ext_lineage_edge_cross_kb`，关系记录保留两端知识库。扩展 schema 31 支持跨库补充声明（`supplements`）：跨库父件写入 `ext_supplement_cross_parents`、`ext_supplement_cross_edges` 和 `ext_supplement_cross_edge_facts`，同库仍使用原表；依赖评估、关系查询、`relations-cross` 图和 MCP `query_related_docs` 均覆盖同库与跨库声明。
 - 关系声明、确认和撤销在同一事务写入持久 Outbox；`tag_projection`/`relation_tag` 处理器按文档重算当前 active 关系的 `gov:relation:<edge_type>` 命名空间。跨库关系分别给两端知识库的文档入队；投影失败只重试标签，不回写关系或生命周期事实。
 - 跨库关系图使用 `relations-cross` 模式：基础关系图追加 `ext_lineage_edge_cross_kb` 边和跨库节点，节点返回 `knowledge_base_id`；管理端按节点所属知识库加载标题，前端关系图提供“包含跨库关联”开关。
