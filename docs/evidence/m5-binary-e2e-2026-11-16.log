@@ -1,0 +1,8 @@
+[M5-BINARY E2E] 2026-11-16
+[COMMAND] wsl.exe -d Ubuntu --exec unshare -Urn bash -c 'ip link set lo up && cd /mnt/d/LanRAG-Next && CORE_BINARY=/mnt/d/LanRAG-Next/tmp/rel08-core-20261115 AGENTRAG_BINARY_E2E=1 python3 -B extensions/scripts/governance_e2e.py'
+[SCOPE] Real patched core + real worker Host; isolated SQLite; local model fixture; original user documents untouched
+[M5-BINARY] PASS: native uploaded file bound to binary revision and published atomically
+[RESULT] FAIL: active RAG body positive control failed
+[PRIVATE-DIAGNOSTICS] /mnt/d/LanRAG-Next/tmp/governance-e2e-rhffxp5z
+
+[M5-BINARY] The binary revision path itself passed: a second native file was uploaded through the native file API, bound to a binary proposal, approved and published atomically. The later RAG-active control failure occurred in a separate governance phase and is not treated as a pass for the full governance suite.

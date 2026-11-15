@@ -218,6 +218,39 @@ def main():
                 row = db.execute("SELECT state FROM ext_lifecycle_current WHERE document_id=?", (doc["id"],)).fetchone()
                 return row[0] if row else None
         startup.until(lambda: state() == "active", 20)
+        if os.environ.get("AGENTRAG_BINARY_E2E") == "1":
+            target_boundary = "binary-" + nonce
+            target_text = "AGENTRAG_BINARY_TARGET. Formal revision file uploaded through the native file API."
+            target_payload = (f'--{target_boundary}\r\nContent-Disposition: form-data; name="file"; filename="target.txt"\r\nContent-Type: text/plain\r\n\r\n{target_text}\r\n--{target_boundary}--\r\n').encode()
+            target_request = urllib.request.Request(http.base_url + "/api/v1/knowledge-bases/" + kb["id"] + "/knowledge/file", data=target_payload, headers={"Authorization": "Bearer " + http.token, "Content-Type": "multipart/form-data; boundary=" + target_boundary}, method="POST")
+            with http.opener.open(target_request, timeout=30) as response:
+                target = json.load(response)["data"]
+            startup.until(lambda: http.api("GET", "/knowledge/" + target["id"])["data"]["parse_status"] == "completed", 30)
+            def target_state():
+                with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
+                    row = db.execute("SELECT state FROM ext_lifecycle_current WHERE document_id=?", (target["id"],)).fetchone()
+                    return row[0] if row else None
+            startup.until(lambda: target_state() == "active", 20)
+            business_route = "/knowledge-bases/" + kb["id"] + "/lifecycle/business/"
+            created = http.api("PUT", business_route + "revision_create_binary", {
+                "operation_id": uuid.uuid4().hex, "expected_revision": 0,
+                "business": {"payload": {"document_id": doc["id"]}},
+            })["data"]
+            approved = http.api("PUT", business_route + "revision_approve", {
+                "operation_id": uuid.uuid4().hex, "expected_revision": created["revision"],
+                "business": {"id": created["id"], "payload": {}},
+            })["data"]
+            bound = http.api("PUT", business_route + "revision_bind_binary", {
+                "operation_id": uuid.uuid4().hex, "expected_revision": approved["revision"],
+                "business": {"id": created["id"], "payload": {"target_document_id": target["id"]}},
+            })["data"]
+            published = http.api("PUT", business_route + "revision_publish", {
+                "operation_id": uuid.uuid4().hex, "expected_revision": bound["revision"],
+                "business": {"id": created["id"], "payload": {}},
+            })["data"]
+            if published.get("status") != "published" or published.get("target_document_id") != target["id"]:
+                raise RuntimeError("binary revision did not publish atomically")
+            emit("[M5-BINARY] PASS: native uploaded file bound to binary revision and published atomically")
         model.doc_id, model.kb_id = doc["id"], kb["id"]
         sessions = {}
         def ask(phase, agent, document_id=None):
