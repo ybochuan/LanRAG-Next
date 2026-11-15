@@ -44,6 +44,14 @@
         <p v-else>尚未确认发布头。</p>
         <p v-if="family.published_document_id && family.published_head_availability==='missing'" class="notice error" role="alert">当前发布件在原生文档中不可用。请从当前成员中选择新的发布头并显式确认恢复。</p>
       </section>
+      <section v-if="family && projection" class="panel family-projection" aria-labelledby="family-projection-title">
+        <div class="section-heading"><h3 id="family-projection-title">投影设置</h3><span class="access-badge">{{ projection.enabled?'已启用':'未启用' }}</span></div>
+        <p class="subtle">启用后按业务族成员和确认关系重算旧图与标签；关闭后沿用旧规则。</p>
+        <p v-if="projection.pending" role="status">待处理投影任务 {{ projection.pending }} 条。</p>
+        <p v-if="projection.failed" class="notice error" role="alert">失败投影任务 {{ projection.failed }} 条，请检查 Outbox。</p>
+        <button v-if="canWrite" type="button" class="primary" :disabled="locked || saving" @click="toggleProjection">{{ projection.enabled?'关闭投影':'启用投影' }}</button>
+        <p v-else class="source-note">当前账号仅有查看权限。</p>
+      </section>
       <nav v-if="visibleTabs.length > 1" class="sub-tabs" aria-label="文档族视图">
         <button v-for="item in visibleTabs" :key="item.key" type="button" :class="{selected:tab===item.key}"
           :aria-pressed="tab===item.key" :disabled="locked || (!familyId && item.key!=='unassigned')"
@@ -220,7 +228,7 @@ const visibleTabs = computed(() => props.documentId
 const familyActions: Partial<Record<string,string>> = {
   family_create:'创建文档族', family_member_add:'加入成员', family_member_remove:'移出成员',
   family_replace_create:'提交替代计划', family_replace_approve:'批准替代', family_replace_cancel:'撤回替代',
-  family_replace_apply:'同族替代生效', family_replace_history:'补录历史版本链', family_head_recover:'恢复发布头', family_backfill_apply:'确认历史回填',
+  family_replace_apply:'同族替代生效', family_replace_history:'补录历史版本链', family_head_recover:'恢复发布头', family_projection_set:'切换投影', family_backfill_apply:'确认历史回填',
   supplements_active:'登记补充关系', supplements_revoked:'撤销补充关系',
   family_suggestion_scan:'申请扫描', family_suggestion_confirm:'确认建议',
   family_suggestion_ignore:'忽略建议', family_suggestion_policy_set:'保存建议权重',
@@ -228,6 +236,7 @@ const familyActions: Partial<Record<string,string>> = {
 const route = useRoute(), auth = useAuthStore()
 const bases = ref<{id:string;name:string}[]>([]), kb = ref(''), familyId = ref('')
 const families = ref<api.BusinessFamily[]>([]), family = ref<api.BusinessFamily>()
+const projection = ref<api.FamilyProjectionSetting>()
 const familyPage = ref(1), page = ref(1), tab = ref<api.FamilyTab>(props.initialView || 'members')
 const catalogBusy = ref(false), listBusy = ref(false), busy = ref(false), canWrite = ref(false)
 const error = ref(''), notice = ref(''), newLabel = ref(''), addId = ref('')
@@ -321,6 +330,7 @@ async function loadView() {
   relations.value = []
   plans.value = []
   activity.value = []
+  projection.value = undefined
   hasNext.value = false
   busy.value = !!scope && (view==='unassigned' || !!id)
   if (!busy.value) return
@@ -336,6 +346,7 @@ async function loadView() {
       plans.value = rows
       hasNext.value = rows.length===20
       family.value = header.family
+      projection.value = header.projection
       canWrite.value = header.can_write
       oldDocument.value = header.family.published_document_id || oldDocument.value
     } else if (view==='suggestions') {
@@ -344,6 +355,7 @@ async function loadView() {
       inbox.value = result
       hasNext.value = result.has_next
       family.value = header.family
+      projection.value = header.projection
       canWrite.value = header.can_write
       if (result.scan_status==='queued') scanPoll=setTimeout(()=>void loadView(),2500)
     } else {
@@ -351,6 +363,7 @@ async function loadView() {
         view==='relations' ? api.workspace(scope,id,'members',memberPage.value) : undefined])
       if (!viewFence.current(token)) return
       family.value = result.family
+      projection.value = result.projection
       canWrite.value = result.can_write
       members.value = result.members || []
       relations.value = result.relations || []
@@ -428,6 +441,12 @@ function recoverHead() {
   if (!canWrite.value || locked.value || !family.value || !recoverDocument.value || !recoverReason.value.trim()) return
   if (!window.confirm(`确认将「${title(recoverDocument.value)}」恢复为当前发布头？`)) return
   familyWrite('family_head_recover',{document_id:recoverDocument.value,reason:recoverReason.value.trim(),second_confirmation:true},family.value.business_family_id,family.value.revision)
+}
+function toggleProjection() {
+  const current = projection.value
+  if (!canWrite.value || locked.value || !current) return
+  if (!window.confirm(`确认${current.enabled?'关闭':'启用'}本库业务族投影？`)) return
+  familyWrite('family_projection_set',{projection_enabled:!current.enabled,second_confirmation:true},undefined,current.revision)
 }
 function createReplacement() {
   if (!family.value || !newDocument.value || !oldDocument.value || newDocument.value===oldDocument.value) return
@@ -580,13 +599,13 @@ watch(kb,()=>{
   family.value=undefined; familyId.value=''; familyPage.value=1; families.value=[]; canWrite.value=false
   pending.value=undefined; batch.value=undefined; saving.value=false; names.value={}; crossNames.value.clear(); error.value=''; notice.value=''
   documentId.value=''; documentBusy.value=false; removing.value=''; addId.value=''; newLabel.value=''
-  recoverDocument.value=''; recoverReason.value=''
+  recoverDocument.value=''; recoverReason.value=''; projection.value=undefined
   if (kb.value) void loadFamilies(true)
 })
 watch(familyId,()=>{
   family.value=families.value.find(row=>row.business_family_id===familyId.value)
   documentId.value=''; removing.value=''; relationMember.value=''; memberPage.value=1; inbox.value=undefined
-  recoverDocument.value=''; recoverReason.value=''
+  recoverDocument.value=''; recoverReason.value=''; projection.value=undefined
   oldDocument.value=''; newDocument.value=''; effectiveAt.value=''; page.value=1
 })
 watch(tab,()=>{ page.value=1; removing.value='' })

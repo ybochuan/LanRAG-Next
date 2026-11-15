@@ -120,7 +120,7 @@
 - 反馈沿用低/中/高风险 24/48/72 小时冷静期和审批流程。聊天页 `AnswerFeedback.vue` 为已完成且带单库引用的快速问答提供入口。`feedback_capture` 用原生登录身份匹配已封存的本人答复，分块从扩展账本读取。Agent 文本重排前核验实际候选，`search_knowledge` 只为最终返回的已核验正文登记反馈分块。缺少分块 ID 或完整来源证明的运行会被拒绝。同一答复只收一条反馈。
 - `extensions/guidance/` 在 `before_generate` 按置信度选择当前授权库的 active 指导。快速问答的流式、非流式调用和 Agent 每轮调用将指导作为临时消息追加到请求末尾。接口身份由原生已认证的 run 派生，有可绑定的 model step 时记录指导指纹。默认快速问答等 unattributed 运行也可接受指导，其来源状态仍保持 unattributed。缺少已认证run时省略指导。HTTP 500ms、失败省略指导；原生来源校验继续独立执行。
 - 指导预算按租户、会话 owner 与 session 持久化，跨重启及并发共用。每次最多3条，同一指导每会话最多2次。相同 run 和原始模型请求指纹重试复用回执，重新检查当前状态与版本。总预算800按每次追加内容的 UTF-8 字节数加16消息开销保守扣减，可能提前耗尽。当前没有跨库指导和语义匹配，选择顺序为置信度、创建时间及ID。
-- 原生manual源可创建新Markdown修订；PDF/DOCX等仍需修订原件上传。发布先持久意向、租约/CAS，再完整远端对账；未知ACK不得重放创建。最后将supersedes边、旧文档superseded生命周期/Outbox、family投影意向、提案状态及审计同事务提交。`lifecycle.AppendTx`复用原生命周期实现。
+- 原生manual源可创建新Markdown修订；PDF/DOCX等仍需修订原件上传。binary_source 建议可由 `revision_create_binary` 建立，`revision_bind_binary` 绑定用户已上传的同库 native 文档并记录观察版本，批准后 `Publish` 校验目标当前版本并原子 finalize；不覆盖源原件。发布先持久意向、租约/CAS，再完整远端对账；未知ACK不得重放创建。最后将supersedes边、旧文档superseded生命周期/Outbox、family投影意向、提案状态及审计同事务提交。`lifecycle.AppendTx`复用原生命周期实现。
 - 修订链保留逻辑 `family_id`，M3 的观察 family/current 按原生文档 ID 维护。Host 单写者消费 `family_tag` 并向新旧版本投影同库标签，原生标签读取未知时保留 C-10 拒绝。启动、API、页面与自动验证见 `docs/operations/M4-M5-业务验收.md`。
 
 ## T4 来源底座与未知来源拒绝（2026-11-02，接线进行中）

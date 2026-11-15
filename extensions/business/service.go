@@ -324,8 +324,10 @@ func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 		return s.relation(ctx, c)
 	case "feedback_create", "feedback_capture", "feedback_approve", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "guidance_seed", "guidance_quarantine_topic":
 		return s.feedback(ctx, c)
-	case "revision_create", "revision_approve", "revision_reject":
+	case "revision_create", "revision_create_binary", "revision_approve", "revision_reject":
 		return s.revision(ctx, c)
+	case "revision_bind_binary":
+		return s.bindBinaryRevision(ctx, c)
 	case "split_create", "split_approve", "split_reject":
 		return s.split(ctx, c)
 	case "repeal_create", "repeal_approve", "repeal_cancel":

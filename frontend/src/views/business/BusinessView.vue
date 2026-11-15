@@ -151,6 +151,7 @@
           <CreateForm :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="running||!!pending" :knowledge-bases="knowledgeBases"
             :initial-guidance="initialGuidance" :fixed-document="document && (kind==='relation'||kind==='revision') ? {...document,end:kind==='revision'?'source':relationEnd} : undefined"
             @submit="(action,payload)=>beginWrite(action,payload)" />
+          <BinaryRevisionPanel v-if="kind==='revision'" :kb="kb" :disabled="running||!!pending" @created="refresh" @locked="emit('locked',$event)" />
         </div>
         <p v-else-if="kind==='feedback'" class="subtle">在问答的回答块选择「评价与反馈」，提交后会进入此队列。</p>
         <section v-else class="panel"><h2>只读查看</h2><p>选择左侧记录查看完整内容。管理操作由知识库所有者、管理员或共享编辑者执行。</p></section>
@@ -169,6 +170,7 @@ import { overview } from '@/api/lifecycle'
 import * as api from '@/api/business'
 import ClauseEvidence from './ClauseEvidence.vue'
 import CreateForm from './CreateForm.vue'
+import BinaryRevisionPanel from './BinaryRevisionPanel.vue'
 import DocumentPicker from './DocumentPicker.vue'
 import { requestFence } from '../lifecycle/model'
 import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, shortID, statusLabels, type WriteIntent } from './model'
@@ -208,7 +210,7 @@ function recordTitle(row:api.BusinessRecord){
   if(row.record_kind==='split_part')return row.split_title||'拆分分件'
   return `修订 · ${docName(row.source_document_id, row.knowledge_base_id || kb.value)}`
 }
-const publicationError=(code:string)=>code==='binary_source_upload_required'?'源文档是上传文件：请上传修订后的正式源文件。本条目保留为修订建议。':code==='remote_identity_mismatch'?'已找到的远端文档与本次发布不匹配，请先核对发布记录。':'上次发布尚未确认完成，可核对并继续发布；不会直接重复创建文档。'
+const publicationError=(code:string)=>code==='binary_source_upload_required'?'源文档是上传文件：请上传修订后的正式源文件。本条目保留为修订建议。':code==='binary_source_version_changed'?'目标修订文件版本已变化，请重新绑定后再发布。':code==='remote_identity_mismatch'?'已找到的远端文档与本次发布不匹配，请先核对发布记录。':'上次发布尚未确认完成，可核对并继续发布；不会直接重复创建文档。'
 
 function readRecords(scope:string, recordKind:api.BusinessKind, number:number, id=''){
   if(props.document && (recordKind==='relation'||recordKind==='revision')) return api.documentRecords(scope,props.document.id,recordKind,number,id)

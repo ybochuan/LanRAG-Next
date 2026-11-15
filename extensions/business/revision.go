@@ -28,7 +28,9 @@ type Publication struct {
 	ContentHash        string           `json:"content_hash"`
 	Key                string           `json:"publication_key"`
 	TargetDocumentID   string           `json:"target_document_id,omitempty"`
+	TargetVersionID    string           `json:"target_version_id,omitempty"`
 	FamilyID           string           `json:"family_id"`
+	Binary             bool             `json:"binary"`
 	SplitID            string           `json:"-"`
 	SplitTitle         string           `json:"-"`
 	TargetMetadataHash string           `json:"-"`
@@ -66,9 +68,18 @@ func (s *Service) revision(ctx context.Context, c Command) (Result, error) {
 			return Result{}, e
 		}
 	}
+	if c.Action == "revision_create_binary" {
+		if !validID(c.Payload.DocumentID) || len(c.Payload.GuidanceIDs) > 3 || c.Payload.Text != "" || c.Payload.TargetDocumentID != "" {
+			return Result{}, ErrInvalid
+		}
+		source, e = s.verify(ctx, c.Scope, c.Payload.DocumentID)
+		if e != nil {
+			return Result{}, e
+		}
+	}
 	return s.transact(ctx, c, func(tx *sql.Tx) (Result, error) {
 		out := Result{ID: c.ID, Revision: c.ExpectedRevision + 1}
-		if c.Action == "revision_create" {
+		if c.Action == "revision_create" || c.Action == "revision_create_binary" {
 			if c.ExpectedRevision != 0 {
 				return Result{}, ErrConflict
 			}
@@ -85,6 +96,9 @@ func (s *Service) revision(ctx context.Context, c Command) (Result, error) {
 			out.Status = "pending_review"
 			content := strings.TrimSpace(strings.ReplaceAll(c.Payload.Text, "\r\n", "\n")) + "\n"
 			hash := textHash(content)
+			if c.Action == "revision_create_binary" {
+				content, hash = "", ""
+			}
 			out.PublicationKey = textHash(out.ID + source + hash)
 			guidance, _ := json.Marshal(c.Payload.GuidanceIDs)
 			var family string
@@ -111,6 +125,43 @@ func (s *Service) revision(ctx context.Context, c Command) (Result, error) {
 		return out, e
 	})
 }
+
+// bindBinaryRevision binds an already-uploaded native document to a binary
+// revision proposal. It never creates or modifies the native document itself.
+func (s *Service) bindBinaryRevision(ctx context.Context, c Command) (Result, error) {
+	if !validID(c.ID) || !validID(c.Payload.TargetDocumentID) || c.ExpectedRevision < 1 {
+		return Result{}, ErrInvalid
+	}
+	var source, status string
+	if err := s.db.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT source_document_id,status FROM ext_revision_proposals
+			WHERE tenant_id=? AND knowledge_base_id=? AND proposal_id=?`, args(c.Scope, c.ID)...).Scan(&source, &status)
+	}); err != nil {
+		return Result{}, ErrConflict
+	}
+	if source == c.Payload.TargetDocumentID || (status != "pending_review" && status != "approved") {
+		return Result{}, ErrConflict
+	}
+	targetVersion, err := s.verify(ctx, c.Scope, c.Payload.TargetDocumentID)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.transact(ctx, c, func(tx *sql.Tx) (Result, error) {
+		var revision int64
+		var currentStatus, currentTarget string
+		if err := tx.QueryRowContext(ctx, `SELECT revision,status,COALESCE(target_document_id,'') FROM ext_revision_proposals
+			WHERE tenant_id=? AND knowledge_base_id=? AND proposal_id=?`, args(c.Scope, c.ID)...).Scan(&revision, &currentStatus, &currentTarget); err != nil ||
+			revision != c.ExpectedRevision || currentTarget != "" || (currentStatus != "pending_review" && currentStatus != "approved") {
+			return Result{}, ErrConflict
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE ext_revision_proposals SET target_document_id=?,target_content_hash=?,revision=revision+1
+			WHERE tenant_id=? AND knowledge_base_id=? AND proposal_id=?`, append([]any{c.Payload.TargetDocumentID, targetVersion}, args(c.Scope, c.ID)...)...); err != nil {
+			return Result{}, err
+		}
+		return Result{ID: c.ID, Revision: revision + 1, Status: currentStatus, TargetDocumentID: c.Payload.TargetDocumentID}, nil
+	})
+}
+
 func requireRevisionGuidances(ctx context.Context, tx *sql.Tx, scope provenance.Scope, ids []string) error {
 	seen := map[string]bool{}
 	for _, id := range ids {
@@ -139,6 +190,12 @@ func (s *Service) publication(ctx context.Context, scope provenance.Scope, id st
 			args(scope, id)...).Scan(&p.SourceDocumentID, &p.SourceVersionID, &p.Content, &p.ContentHash, &p.Key, &p.TargetDocumentID,
 			&r.Status, &r.Revision, &lease, &p.FamilyID, &p.SplitID, &p.SplitTitle)
 	})
+	p.Binary = p.Content == "" && p.TargetDocumentID != ""
+	if p.Binary {
+		// For binary proposals target_content_hash stores the bound native
+		// version ID; keep it out of the Markdown content-hash field.
+		p.TargetVersionID, p.ContentHash = p.ContentHash, ""
+	}
 	r.PublicationKey = p.Key
 	r.TargetDocumentID = p.TargetDocumentID
 	return
@@ -194,9 +251,24 @@ func (s *Service) Publish(ctx context.Context, scope provenance.Scope, id string
 	if e != nil {
 		return Result{}, e
 	}
+	if p.Binary {
+		return s.publishBinary(ctx, p, r)
+	}
 	remoteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	return s.publishDraft(ctx, remoteCtx, p, r)
+}
+
+func (s *Service) publishBinary(ctx context.Context, p Publication, r Result) (Result, error) {
+	if p.TargetDocumentID == "" || p.TargetVersionID == "" {
+		return Result{}, ErrConflict
+	}
+	targetVersion, err := s.observeVersion(ctx, p.Scope, p.TargetDocumentID)
+	if err != nil || targetVersion != p.TargetVersionID {
+		_, _ = s.publishState(context.WithoutCancel(ctx), p, r, "publish_failed", "binary_source_version_changed", "", "")
+		return Result{}, ErrConflict
+	}
+	return s.publishState(ctx, p, r, "published", "", p.TargetDocumentID, targetVersion)
 }
 
 func (s *Service) publishFailure(ctx context.Context, p Publication, r Result, cause error) (Result, error) {
@@ -271,7 +343,7 @@ func (s *Service) finalizeRevision(ctx context.Context, tx *sql.Tx, p Publicatio
 	if target != p.TargetDocumentID || target == p.SourceDocumentID {
 		return ErrConflict
 	}
-	if s.registry != nil {
+	if s.registry != nil && !p.Binary {
 		var metadata string
 		err := tx.QueryRowContext(ctx, `SELECT COALESCE(json_extract(snapshot_json,'$.header_fields.metadata'),'')
 			FROM ext_source_snapshot_evidence WHERE tenant_id=? AND knowledge_base_id=? AND version_node_id=?`,

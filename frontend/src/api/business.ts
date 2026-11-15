@@ -14,7 +14,7 @@ export type BusinessAction = 'relation_declare' | 'relation_confirm' | 'relation
   | 'clause_create' | 'clause_confirm' | 'clause_resolve' | 'clause_revoke'
   | 'feedback_create' | 'feedback_approve' | 'feedback_reject' | 'feedback_quarantine'
   | 'feedback_activate' | 'feedback_withdraw' | 'guidance_seed' | 'guidance_quarantine_topic'
-  | 'revision_create' | 'revision_approve' | 'revision_reject' | 'revision_publish'
+  | 'revision_create' | 'revision_create_binary' | 'revision_bind_binary' | 'revision_approve' | 'revision_reject' | 'revision_publish'
   | 'split_create' | 'split_approve' | 'split_reject'
 export interface SplitPartInput { title: string; text: string }
 export interface ClauseAnchor { chunk_id: string; content_hash: string }

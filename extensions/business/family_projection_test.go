@@ -61,6 +61,10 @@ func TestFamilyProjectionSwitchIsScopedAndReplayable(t *testing.T) {
 		t.Fatal(replay, err)
 	}
 	graphMember(family.ID)
+	workspace, err := s.FamilyWorkspace(ctx, Command{Scope: fixture.Scope, ID: family.ID}, "members")
+	if err != nil || workspace.Projection == nil || !workspace.Projection.Enabled || workspace.Projection.Revision != 1 {
+		t.Fatalf("workspace projection setting: %+v %v", workspace.Projection, err)
+	}
 	unrelated, err := s.FamilyProjection(ctx, provenance.Scope{TenantID: 7, KnowledgeBaseID: "other"})
 	if err != nil || unrelated.Enabled || unrelated.Revision != 0 {
 		t.Fatal(unrelated, err)

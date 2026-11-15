@@ -27,6 +27,27 @@ func (relatedSnapshotFixture) Refresh(_ context.Context, _ provenance.Scope, id 
 	return lineage.Version{ID: "version-" + id, DocumentID: id}, nil
 }
 
+func TestQueryFailsClosedWhenNativeUpstreamUnavailable(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "ext.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	client, err := weknora.NewClient("http://127.0.0.1:1", "fixture-key", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := retrieval.NewPolicy(db, 7, []string{"kb-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{DB: db, Client: client, Policy: policy, Tenant: 7, KBs: []string{"kb-a"}}
+	if _, err := server.query(ctx, "parent", nativeScope{Tenant: 7, KBs: []string{"kb-a"}, IDs: []string{"parent"}}); err == nil {
+		t.Fatal("native upstream failure was not fail-closed")
+	}
+}
+
 func TestStreamableDiscoveryScopeAndLifecycle(t *testing.T) {
 	ctx := context.Background()
 	db, e := store.Open(ctx, filepath.Join(t.TempDir(), "ext.db"))
