@@ -2,10 +2,11 @@
 
 ## 检查
 
-- `AGENTRAG_E2E_DEEPSEEK_KEY`：未设置。
-- 本机 `data/agentrag-launcher.json` 的 `MODEL_SERVICES`：只有 embedding（8081）和 rerank（8082），没有 chat 模型。
-- `MCP_ADMIN_KEY`：未签发。
-- 因此无法在本机执行 M4-MCP 的“真实模型自主调用”和“真实模型下服务停用” E2E。
+- 2026-11-16 用户提供了测试用 `AGENTRAG_E2E_DEEPSEEK_KEY`；`m1_native_e2e.py --live-models` 已识别真实 embedding（2560 维）和 DeepSeek 生成配置。
+- 本机模型 supervisor 已启动，embedding/rerank 端口响应正常；另发现本地 chat 模型 `Qwen3.5-9B-Q4_K_M-imatrix.gguf`。
+- `m1_native_e2e.py --live-models` 因 Windows 保留端口范围占用 canonical Host `8090`，无法获得要求的 Host 端口，未进入真实联合 E2E。
+- `MCP_ADMIN_KEY`：仍未签发。
+- 因此 M4-MCP 的“真实模型自主调用”和“真实模型下服务停用” E2E 仍未执行。
 
 ## 已完成的替代验证
 
