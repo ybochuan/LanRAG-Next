@@ -27,8 +27,13 @@
 
 未出现任何 `query_related_docs`/MCP 工具调用。验证结束后已通过生产 API 恢复 `enabled:true`。
 
+## Host 停机
+
+- 使用 `SIGSTOP` 暂停生产 Extension Host（端口 8090 无响应），Core `18880` 保持 `health=200`。
+- 通过生产 JWT 发起 `knowledge-chat`：HTTP 200 SSE 中包含 `response_type:error`，没有 `answer` 事件。
+- 随后 `SIGCONT` 恢复 Host，`start.cmd status` 显示 Host/Core 均 UP。
+
 ## 边界
 
-- 本次仅验证 M4-MCP 的真实模型调用与服务停用/恢复；未执行文档修改。
-- Host 停机场景尚未单独验证。
-- M5-BINARY 生产上传→绑定→发布仍需独立在扩展 Host 的受管知识库范围内执行。
+- 本次仅验证 M4-MCP 的真实模型调用、服务停用/恢复和 Host 停机失败关闭；未执行文档修改。
+- M5-BINARY 生产上传→绑定→发布见 [m5-binary-production-2026-11-16.md](m5-binary-production-2026-11-16.md)。
