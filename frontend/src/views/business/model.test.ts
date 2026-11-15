@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { actionsFor, buildIntent, businessError, canActivate } from './model'
+import { actionsFor, buildIntent, businessError, canActivate, statusLabels } from './model'
 
 test('actions require write access and use the actual workflow state',()=>{
  const row={id:'r',revision:3,status:'candidate'}
@@ -64,6 +64,11 @@ test('retry retains the displayed revision, operation and immutable payload',()=
  assert.equal(update.body.expected_revision,8);assert.equal(update.body.business.id,'p')
  assert.throws(()=>buildIntent('revision_create',undefined,{...payload,text:'你'.repeat(16001)},'too-large'))
 })
+test('historical and removed statuses use the workbench vocabulary',()=>{
+ assert.equal(statusLabels.historical,'历史记录')
+ assert.equal(statusLabels.removed,'已移出')
+})
+
 test('errors describe conflict or unknown outcome without inventing rollback',()=>{
  assert.match(businessError({$httpStatus:409}),/重新载入/)
  assert.match(businessError({response:{status:403}}),/权限/)

@@ -7,6 +7,7 @@ export const statusLabels: Record<string, string> = {
   attachment_cleanup_pending: '附件清理中', attachment_cleanup_retry: '清理待重试', attachment_removed: '已随主件删除',
   attachment_retired: '旧版附件',
   supplement_declared: '已登记', confirmed: '已确认', ignored: '已忽略',
+  historical: '历史记录', removed: '已移出',
   scheduled: '待生效', applied: '已废止', needs_review: '需重新复核',
   awaiting_resolution: '待裁决', resolved: '已裁决',
 }

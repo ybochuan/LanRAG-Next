@@ -79,9 +79,17 @@ func TestRenditionBindsProvenBytesOnceAndRejectsChangedSource(t *testing.T) {
 	if firstErr != nil || secondErr != nil || first != second || first.VersionID == "" || first.NodeID == "" {
 		t.Fatal(first, second, firstErr, secondErr)
 	}
+	// A lost response must be replayable without creating a second binding.
+	retry, err := service.Bind(ctx, fixtureScope, "doc", id)
+	if err != nil || retry != first {
+		t.Fatalf("lost-response retry changed the binding: %+v %v", retry, err)
+	}
 	got, body, err := service.Read(ctx, fixtureScope, "doc", id)
 	if err != nil || got != first || string(body) != renditionBody {
 		t.Fatal(got, err)
+	}
+	if _, _, err := service.Read(ctx, foreign, "doc", id); !errors.Is(err, ErrEvidence) {
+		t.Fatalf("foreign KB read released bytes: %v", err)
 	}
 	reader.mu.Lock()
 	reader.snapshot.Chunks[0].ContentHash = sha([]byte("changed"))

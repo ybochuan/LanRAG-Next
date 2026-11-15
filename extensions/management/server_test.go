@@ -63,6 +63,13 @@ func TestRenditionManagementRequiresWriteAndConfiguration(t *testing.T) {
 	if w := call(s, strings.Replace(body, `"knowledge_base_id":"kb"`, `"knowledge_base_id":"other"`, 1), key); w.Code != 403 {
 		t.Fatalf("foreign rendition scope status=%d", w.Code)
 	}
+	download := strings.Replace(body, `"action":"rendition_bind"`, `"action":"rendition_download"`, 1)
+	if w := call(s, strings.Replace(download, `"artifact_id":"artifact"`, `"artifact_id":"artifact","can_write":false`, 1), key); w.Code != 403 {
+		t.Fatalf("read-only rendition download status=%d", w.Code)
+	}
+	if w := call(s, strings.Replace(download, `"artifact_id":"artifact"`, `"artifact_id":"artifact","can_write":true`, 1), key); w.Code != 503 {
+		t.Fatalf("unconfigured rendition download status=%d", w.Code)
+	}
 }
 
 func TestManagementSupplementReadAndUnavailableWriter(t *testing.T) {
