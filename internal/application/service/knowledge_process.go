@@ -4430,6 +4430,9 @@ func (s *knowledgeService) convert(
 		TenantID: knowledge.TenantID, KBID: knowledge.KnowledgeBaseID, DocID: knowledge.ID,
 	})
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	if err == nil && result == nil {
+		err = fmt.Errorf("document parser returned no result")
+	}
 	// Parser resource limits are permanent document rejections, not transient reader failures.
 	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
 		result, err = &types.ReadResult{Error: err.Error()}, nil
