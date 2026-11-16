@@ -34,7 +34,18 @@ source_state = ["superseded"]
 
 - 测试文档清理后生产知识库未保留上述临时文档。
 
+## 本批补充的故障覆盖
+
+生产环境本轮完成的是主链验证，不包含故障注入。代码侧新增并通过的故障覆盖见
+[`m5-binary-backend-2026-11-15.md`](m5-binary-backend-2026-11-15.md)：
+
+- 目标版本观察失败返回 `binary_source_version_unknown`，不再与版本漂移混淆；
+- 版本漂移返回 `binary_source_version_changed`，source 保持 `active`，无关键边；
+- finalize 审计失败整体回滚，source 与源快照不变；
+- 恢复后重试可发布，且源原件内容始终未被覆盖。
+
 ## 边界
 
 - 测试文档为文本 fixture，用于验证生产环境二进制修订发布链路；不代表 PDF/DOCX 解析质量验收。
+- 生产环境未注入远端 ACK 丢失、SQLite 进程崩溃或并发负载；这些场景由真实 SQLite 单元/事务测试覆盖，见 M5 验收证据。
 - 生产 M4-MCP 真实模型与服务停用已在 [m4-mcp-production-2026-11-16.md](m4-mcp-production-2026-11-16.md) 记录。

@@ -9,14 +9,14 @@ import (
 )
 
 func TestManualSchemaAdoption(t *testing.T) {
-	for _, version := range []int{1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31} {
+	for _, version := range []int{1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "manual.db")
 			raw, err := sql.Open("sqlite", path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			migrations := []string{lifecycleMigration, ingestTagMigration, parserMigration, lifecyclePolicyMigration, reviewAlertsMigration, provenanceMigration, lifecycleConsistencyMigration, lineageSourcesMigration, supplementsMigration, provenanceRunsMigration, businessMigration, qaFeedbackMigration, guidanceBudgetMigration, attachmentSemanticsMigration, attachmentLinksMigration, attachmentCleanupMigration, documentRelationsMigration, attachmentRevisionsMigration, revisionSplitsMigration, repealNoticesMigration, clauseRelationsMigration, parserRenditionsMigration, businessFamiliesMigration, familyReplacementsMigration, familyCutoverMigration, familyMemberHistoryMigration, familySuggestionsMigration, feedbackReviewContextMigration, documentAvailabilityMigration, crossKBRelationsMigration, crossKBRelationsSupplementMigration}
+			migrations := []string{lifecycleMigration, ingestTagMigration, parserMigration, lifecyclePolicyMigration, reviewAlertsMigration, provenanceMigration, lifecycleConsistencyMigration, lineageSourcesMigration, supplementsMigration, provenanceRunsMigration, businessMigration, qaFeedbackMigration, guidanceBudgetMigration, attachmentSemanticsMigration, attachmentLinksMigration, attachmentCleanupMigration, documentRelationsMigration, attachmentRevisionsMigration, revisionSplitsMigration, repealNoticesMigration, clauseRelationsMigration, parserRenditionsMigration, businessFamiliesMigration, familyReplacementsMigration, familyCutoverMigration, familyMemberHistoryMigration, familySuggestionsMigration, feedbackReviewContextMigration, documentAvailabilityMigration, crossKBRelationsMigration, crossKBRelationsSupplementMigration, feedbackAcceptanceMigration}
 			for _, migration := range migrations[:version] {
 				if _, err := raw.Exec(migration); err != nil {
 					t.Fatal(err)

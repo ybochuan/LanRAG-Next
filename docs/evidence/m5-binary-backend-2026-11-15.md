@@ -17,7 +17,7 @@
 ## 验证命令与结果
 
 ```text
-go test -mod=readonly ./business -count=1
+go test -mod=readonly ./business -run 'TestBinary' -count=1
 ok github.com/ybochuan/LanRAG-Next/extensions/business
 ```
 
@@ -27,10 +27,15 @@ ok github.com/ybochuan/LanRAG-Next/extensions/business
 2. `revision_approve` 批准；
 3. `revision_bind_binary` 绑定 native 目标文档；
 4. 目标版本漂移时 `Publish` 拒绝并记录 `binary_source_version_changed`，恢复后重试发布；
-5. `Publish` 发布并验证源文档 `superseded`、提案目标文档为绑定文档。
+5. 目标版本观察失败时 `Publish` 记录 `binary_source_version_unknown`，不把未知结果当作已发布；
+6. 最终业务审计触发器失败时，提案、source 生命周期、关键边及源原件均保持未提交；
+7. 发布成功及失败路径均断言 source 文档版本与源快照内容不变，源文档仅在成功 finalize 后 `superseded`；
+8. `Publish` 发布并验证提案目标文档为绑定文档。
+
+本轮二进制测试命令通过；完整扩展构建与全量测试结果见 `m5-acceptance-2026-11-16.md`。
 
 ## 边界
 
 - 本批不新增原生上传接口；目标文档必须由用户通过原生上传路径先进入同一知识库。
-- 工作台已提供正式文件上传、解析等待和自动绑定面板；真实 Core/Host 上传联合 E2E、未知 ACK、回滚与源原件保留仍需后续补齐。
+- 工作台已提供正式文件上传、解析等待和自动绑定面板；上述故障场景为真实 SQLite 单元/事务测试，未在生产环境注入远端 ACK 丢失或进程崩溃。
 - `go test -mod=readonly ./... -count=1` 扩展全量通过；前端 `npm run type-check`/`npm run build` 通过。

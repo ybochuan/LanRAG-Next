@@ -97,8 +97,11 @@ var crossKBRelationsMigration string
 //go:embed migrations/031_cross_kb_supplements.sql
 var crossKBRelationsSupplementMigration string
 
+//go:embed migrations/032_feedback_acceptance.sql
+var feedbackAcceptanceMigration string
+
 // LatestSchemaVersion is the last published migration supported by this Host.
-const LatestSchemaVersion = 31
+const LatestSchemaVersion = 32
 
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
@@ -369,6 +372,14 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(31)"); err != nil {
+				return err
+			}
+		}
+		if version < 32 {
+			if _, err := tx.ExecContext(ctx, feedbackAcceptanceMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(32)"); err != nil {
 				return err
 			}
 		}

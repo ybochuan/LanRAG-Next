@@ -11,10 +11,15 @@ import (
 
 // Strip a four-digit year only when it does not sit inside a longer identifier.
 var titleYear = regexp.MustCompile(`(^|[^0-9])((?:19|20)[0-9]{2})([^0-9]|$)`)
-var editionSuffix = regexp.MustCompile(`(?i)(?:年?(?:修订版|修正版|新版|版)|edition|revision|rev)\s*$`)
+var editionSuffix = regexp.MustCompile(`(?i)(?:年?(?:[0-9]{1,2}月)?(?:修订版|修正版|新版|版)|edition|revision|rev)\s*$`)
+var titleExtension = regexp.MustCompile(`(?i)\.(?:docx?|pdf|xlsx?|pptx?|txt)\s*$`)
+
+func trimTitleExtension(raw string) string {
+	return titleExtension.ReplaceAllString(strings.TrimSpace(raw), "")
+}
 
 func titleIdentity(raw string) (stem string, year int) {
-	title := strings.TrimSpace(raw)
+	title := trimTitleExtension(raw)
 	if match := titleYear.FindStringSubmatchIndex(title); len(match) != 0 {
 		year, _ = strconv.Atoi(title[match[4]:match[5]])
 		tail := strings.Trim(title[match[5]:], " ）)】]》-_")
@@ -108,8 +113,8 @@ func candidateSignals(family, published string, peer, anchor scanDocument) (Fami
 }
 
 func declaredDocumentRelation(from, to weknora.AttachmentDocument) (string, bool) {
-	target := normalizedEvidenceText(to.Title)
-	if len([]rune(target)) < 4 || !strings.Contains(normalizedEvidenceText(from.Title+" "+from.Description), target) {
+	target := normalizedEvidenceText(trimTitleExtension(to.Title))
+	if len([]rune(target)) < 4 || !strings.Contains(normalizedEvidenceText(trimTitleExtension(from.Title)+" "+from.Description), target) {
 		return "", false
 	}
 	switch {

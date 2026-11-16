@@ -204,7 +204,7 @@ func (s *Service) publication(ctx context.Context, scope provenance.Scope, id st
 // Publish persists intent, serializes attempts, then reconciles BEFORE any create.
 // A remote error ends this attempt; retry only the Saga, never blindly replay Create.
 func (s *Service) Publish(ctx context.Context, scope provenance.Scope, id string) (Result, error) {
-	if s == nil || s.db == nil || s.remote == nil {
+	if s == nil || s.db == nil {
 		return Result{}, ErrUnavailable
 	}
 	if !validID(id) {
@@ -219,6 +219,9 @@ func (s *Service) Publish(ctx context.Context, scope provenance.Scope, id string
 	}
 	if r.Status != "approved" && r.Status != "publishing" && r.Status != "publish_failed" && r.Status != "indexed" {
 		return Result{}, ErrConflict
+	}
+	if !p.Binary && s.remote == nil {
+		return Result{}, ErrUnavailable
 	}
 	if lease.Valid {
 		until, e := time.Parse(time.RFC3339Nano, lease.String)
@@ -264,7 +267,11 @@ func (s *Service) publishBinary(ctx context.Context, p Publication, r Result) (R
 		return Result{}, ErrConflict
 	}
 	targetVersion, err := s.observeVersion(ctx, p.Scope, p.TargetDocumentID)
-	if err != nil || targetVersion != p.TargetVersionID {
+	if err != nil {
+		_, _ = s.publishState(context.WithoutCancel(ctx), p, r, "publish_failed", "binary_source_version_unknown", "", "")
+		return Result{}, ErrUnavailable
+	}
+	if targetVersion != p.TargetVersionID {
 		_, _ = s.publishState(context.WithoutCancel(ctx), p, r, "publish_failed", "binary_source_version_changed", "", "")
 		return Result{}, ErrConflict
 	}

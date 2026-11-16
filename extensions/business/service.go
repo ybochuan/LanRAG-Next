@@ -52,6 +52,8 @@ type Payload struct {
 	Risk                  string            `json:"risk,omitempty"`
 	Negative              bool              `json:"negative,omitempty"`
 	SecondConfirmation    bool              `json:"second_confirmation,omitempty"`
+	SampleDecision        string            `json:"sample_decision,omitempty"`
+	ReviewNote            string            `json:"review_note,omitempty"`
 	GuidanceIDs           []string          `json:"guidance_ids,omitempty"`
 	SplitParts            []SplitPartInput  `json:"split_parts,omitempty"`
 	EffectiveAt           *time.Time        `json:"effective_at,omitempty"`
@@ -322,7 +324,7 @@ func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 		return s.reviewFamilySuggestion(ctx, c)
 	case "relation_declare", "relation_confirm", "relation_revoke":
 		return s.relation(ctx, c)
-	case "feedback_create", "feedback_capture", "feedback_approve", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "guidance_seed", "guidance_quarantine_topic":
+	case "feedback_create", "feedback_capture", "feedback_approve", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "feedback_sample_review", "feedback_topic_recover", "guidance_seed", "guidance_quarantine_topic":
 		return s.feedback(ctx, c)
 	case "revision_create", "revision_create_binary", "revision_approve", "revision_reject":
 		return s.revision(ctx, c)

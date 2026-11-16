@@ -284,6 +284,9 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 				if err := businessService.SweepFamilyReplacements(ctx, businessScopes); err != nil && ctx.Err() == nil {
 					report("family_replacement_scan_failed")
 				}
+				if err := businessService.SweepFeedbackActivations(ctx, businessScopes); err != nil && ctx.Err() == nil {
+					report("feedback_activation_scan_failed")
+				}
 				select {
 				case <-ctx.Done():
 					return ctx.Err()

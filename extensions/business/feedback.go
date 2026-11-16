@@ -43,14 +43,14 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 				}
 			}
 			if source == "seed" {
-				var negatives int
-				if e := tx.QueryRowContext(ctx, `SELECT count(*) FROM ext_feedback_events WHERE tenant_id=? AND knowledge_base_id=? AND topic=? AND negative=1`, args(c.Scope, p.Topic)...).Scan(&negatives); e != nil {
+				negatives, e := negativeFeedbackCount(ctx, tx, c.Scope, p.Topic)
+				if e != nil {
 					return Result{}, e
 				}
 				if negatives >= 2 {
 					out.Status = "quarantined"
 				}
-				_, e := tx.ExecContext(ctx, `INSERT INTO ext_feedback_guidances VALUES(?,?,?,NULL,'seed',?,?,0.75,?,1,?)`, args(c.Scope, out.ID, p.Topic, p.Text, out.Status, s.now().UTC().Format(time.RFC3339Nano))...)
+				_, e = tx.ExecContext(ctx, `INSERT INTO ext_feedback_guidances VALUES(?,?,?,NULL,'seed',?,?,0.75,?,1,?)`, args(c.Scope, out.ID, p.Topic, p.Text, out.Status, s.now().UTC().Format(time.RFC3339Nano))...)
 				return out, e
 			}
 			if p.Risk == "" {
@@ -65,8 +65,8 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 				ready = s.now().Add(24 * time.Hour).UTC().Format(time.RFC3339Nano)
 			}
 			if p.Negative {
-				var negatives int
-				if e := tx.QueryRowContext(ctx, `SELECT count(*) FROM ext_feedback_events WHERE tenant_id=? AND knowledge_base_id=? AND topic=? AND negative=1`, args(c.Scope, p.Topic)...).Scan(&negatives); e != nil {
+				negatives, e := negativeFeedbackCount(ctx, tx, c.Scope, p.Topic)
+				if e != nil {
 					return Result{}, e
 				}
 				if negatives >= 2 {
@@ -81,17 +81,40 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 			if p.Topic == "" {
 				return Result{}, ErrInvalid
 			}
-			var negatives int
-			if e := tx.QueryRowContext(ctx, `SELECT count(*) FROM ext_feedback_events WHERE tenant_id=? AND knowledge_base_id=? AND topic=? AND negative=1`, args(c.Scope, p.Topic)...).Scan(&negatives); e != nil {
+			negatives, e := negativeFeedbackCount(ctx, tx, c.Scope, p.Topic)
+			if e != nil {
 				return Result{}, e
 			}
 			if negatives < 2 {
 				return Result{}, ErrConflict
 			}
-			_, e := tx.ExecContext(ctx, `UPDATE ext_feedback_guidances SET status='quarantined',revision=revision+1 WHERE tenant_id=? AND knowledge_base_id=? AND topic=? AND status='active'`, args(c.Scope, p.Topic)...)
+			_, e = tx.ExecContext(ctx, `UPDATE ext_feedback_guidances SET status='quarantined',revision=revision+1 WHERE tenant_id=? AND knowledge_base_id=? AND topic=? AND status='active'`, args(c.Scope, p.Topic)...)
 			out.ID = p.Topic
 			out.Status = "quarantined"
 			return out, e
+		case "feedback_topic_recover":
+			if strings.TrimSpace(p.Topic) == "" || !p.SecondConfirmation {
+				return Result{}, ErrConflict
+			}
+			negatives, e := negativeFeedbackCount(ctx, tx, c.Scope, p.Topic)
+			if e != nil {
+				return Result{}, e
+			}
+			if negatives < 2 {
+				return Result{}, ErrConflict
+			}
+			id := newID()
+			if id == "" {
+				return Result{}, ErrUnavailable
+			}
+			if _, e := tx.ExecContext(ctx, `INSERT INTO ext_feedback_topic_recoveries
+(tenant_id,knowledge_base_id,topic,recovery_id,reviewer,note,recovered_at) VALUES(?,?,?,?,?,?,?)`,
+				append(args(c.Scope, p.Topic, id, c.ActorID, p.ReviewNote), s.now().UTC().Format(time.RFC3339Nano))...); e != nil {
+				return Result{}, e
+			}
+			out.ID = p.Topic
+			out.Status = "recovered"
+			return out, nil
 		}
 		var status, risk, topic, text string
 		var reviewContext bool
@@ -129,8 +152,8 @@ WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, append([]any{revie
 			ready = sql.NullString{String: s.now().Add(time.Duration(hours) * time.Hour).UTC().Format(time.RFC3339Nano), Valid: true}
 			out.Status = "approved"
 		case "feedback_activate":
-			var negatives int
-			if e := tx.QueryRowContext(ctx, `SELECT count(*) FROM ext_feedback_events WHERE tenant_id=? AND knowledge_base_id=? AND topic=? AND negative=1`, args(c.Scope, topic)...).Scan(&negatives); e != nil {
+			negatives, e := negativeFeedbackCount(ctx, tx, c.Scope, topic)
+			if e != nil {
 				return Result{}, e
 			}
 			if negatives >= 2 {
@@ -152,6 +175,41 @@ WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, args(c.Scope, c.ID
 			}
 			if _, e = tx.ExecContext(ctx, `INSERT INTO ext_feedback_guidances VALUES(?,?,?,?,'feedback',?,?,0.75,'active',1,?)`, args(c.Scope, c.ID, c.ID, topic, text, s.now().UTC().Format(time.RFC3339Nano))...); e != nil {
 				return Result{}, e
+			}
+			if risk == "low" && feedbackSampleSelected(c.ID) {
+				if _, e = tx.ExecContext(ctx, `INSERT INTO ext_feedback_sample_reviews(tenant_id,knowledge_base_id,feedback_id,decision,reviewer,note,selected_at,reviewed_at)
+VALUES(?,?,?, 'pending','','',?,NULL)`, args(c.Scope, c.ID, s.now().UTC().Format(time.RFC3339Nano))...); e != nil {
+					return Result{}, e
+				}
+			}
+		case "feedback_sample_review":
+			if status != "active" || strings.TrimSpace(c.ActorID) == "" {
+				return Result{}, ErrConflict
+			}
+			if p.SampleDecision != "passed" && p.SampleDecision != "failed" {
+				return Result{}, ErrInvalid
+			}
+			if len(p.ReviewNote) > 2000 {
+				return Result{}, ErrInvalid
+			}
+			var decision string
+			if e := tx.QueryRowContext(ctx, `SELECT decision FROM ext_feedback_sample_reviews
+WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, args(c.Scope, c.ID)...).Scan(&decision); e != nil || decision != "pending" {
+				return Result{}, ErrConflict
+			}
+			if _, e := tx.ExecContext(ctx, `UPDATE ext_feedback_sample_reviews
+SET decision=?,reviewer=?,note=?,reviewed_at=? WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=? AND decision='pending'`,
+				append([]any{p.SampleDecision, c.ActorID, p.ReviewNote, s.now().UTC().Format(time.RFC3339Nano)}, args(c.Scope, c.ID)...)...); e != nil {
+				return Result{}, e
+			}
+			out.Status = status
+			if p.SampleDecision == "failed" {
+				out.Status = "quarantined"
+				ready = sql.NullString{}
+				if _, e := tx.ExecContext(ctx, `UPDATE ext_feedback_guidances SET status='quarantined',revision=revision+1
+WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=? AND status='active'`, args(c.Scope, c.ID)...); e != nil {
+					return Result{}, e
+				}
 			}
 		case "feedback_reject":
 			if status != "pending_review" {
@@ -187,7 +245,7 @@ func (s *Service) List(ctx context.Context, scopeScope Command) ([]map[string]an
 	table, idcol := "ext_feedback_staging", "feedback_id"
 	fields := `json_object('text',text,'topic',topic,'risk',risk,'ready_at',ready_at,'source',CASE WHEN EXISTS (
 SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.tenant_id AND b.knowledge_base_id=ext_feedback_staging.knowledge_base_id AND b.feedback_id=ext_feedback_staging.feedback_id
-) THEN 'qa' ELSE 'manual' END)`
+) THEN 'qa' ELSE 'manual' END,'sample_decision',COALESCE((SELECT s.decision FROM ext_feedback_sample_reviews s WHERE s.tenant_id=ext_feedback_staging.tenant_id AND s.knowledge_base_id=ext_feedback_staging.knowledge_base_id AND s.feedback_id=ext_feedback_staging.feedback_id),''),'sample_selected_at',COALESCE((SELECT s.selected_at FROM ext_feedback_sample_reviews s WHERE s.tenant_id=ext_feedback_staging.tenant_id AND s.knowledge_base_id=ext_feedback_staging.knowledge_base_id AND s.feedback_id=ext_feedback_staging.feedback_id),''))`
 	switch c.Action {
 	case "relation_list":
 		table, idcol, fields = relationRecords, "relation_id", "details"
