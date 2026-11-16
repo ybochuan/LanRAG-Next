@@ -10,7 +10,7 @@ export interface DocumentRow {document_id:string;title?:string;state:LifecycleSt
 export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean;degraded?:boolean;degraded_reason?:string}
 export interface LifecycleEvent {event_id:string;from_state:string;to_state:string;reason:string;occurred_at:string;source_event_id?:string}
 export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean;attachment_parent_document_id?:string};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null;can_write?:boolean}
-export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string;title?:string}
+export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string;delivered_at?:string;title?:string}
 export interface DependencyParent {knowledge_base_id:string;document_id:string;version_id:string;state:LifecycleState;effective_until?:string;review_due?:string}
 export interface SupplementView {revision:number;declaration_id:string;status:string;parents:string[];parent_knowledge_base_ids:string[];assessment:{configured:boolean;reason?:string;parents:DependencyParent[];review_due?:string}}
 export interface SupplementDetail {supplements:SupplementView;evaluation_status?:string}

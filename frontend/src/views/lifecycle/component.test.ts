@@ -110,6 +110,14 @@ test('every workspace view has a top-level tab entry', () => {
   )
 })
 
+test('the review panel shows the notification delivery state', () => {
+  const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
+  assert.ok(template.includes('reviewDeliveryLabel(alert.delivery_state)'), 'the panel must name the delivery state')
+  assert.ok(template.includes('reviewDeliveryClass(alert.delivery_state)'), 'the panel must tone the delivery badge')
+  assert.ok(template.includes('alert.delivered_at'), 'the panel must show when the local callback accepted the reminder')
+  assert.ok(!template.includes('待复核 →'), 'the fixed pill must not hide the real delivery state')
+  assert.ok(template.includes('不代表人工已读'), 'the panel must not present a delivered reminder as human-read')
+})
 test('the workspace tab label set matches the router view contract', () => {
   const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
   const tabs = source.match(/const workspaceTabs=\[([\s\S]*?)\] as const/)?.[1] ?? ''

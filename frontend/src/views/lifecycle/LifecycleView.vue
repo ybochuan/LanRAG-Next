@@ -47,7 +47,7 @@
      <footer class="pagination"><span>第 {{ page }} 页 · 共 {{ data.total }} 项</span><button class="secondary" :disabled="page<=1" @click="changePage(-1)">上一页</button><button class="secondary" :disabled="page*20>=data.total" @click="changePage(1)">下一页</button></footer>
     </section>
     </template>
-    <section v-if="tab==='reviews'" class="panel" role="tabpanel" aria-labelledby="tab-reviews"><div class="section-heading"><div><h2>待复核</h2><p>到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。</p></div></div><p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p><p v-if="reviewBusy" role="status">正在加载提醒…</p><div v-else-if="reviewItems.length" class="review-list"><button v-for="alert in reviewItems" :key="alert.alert_id" class="review-item" @click="openDocument(alert.document_id, alert.title)"><span><strong>{{ alert.title || alert.document_id }}</strong><small>复核到期 {{ date(alert.review_due) }}</small></span><span class="review-pill">待复核 →</span></button></div><p v-else-if="!reviewError" class="empty">当前没有待复核提醒。</p><p v-if="reviewsTruncated" class="notice">最多展示 1000 条提醒；当前列表可能尚未包含全部待办。</p></section>
+    <section v-if="tab==='reviews'" class="panel" role="tabpanel" aria-labelledby="tab-reviews"><div class="section-heading"><div><h2>待复核</h2><p>到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。</p></div></div><p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p><p v-if="reviewBusy" role="status">正在加载提醒…</p><div v-else-if="reviewItems.length" class="review-list"><button v-for="alert in reviewItems" :key="alert.alert_id" class="review-item" @click="openDocument(alert.document_id, alert.title)"><span><strong>{{ alert.title || alert.document_id }}</strong><small>复核到期 {{ date(alert.review_due) }}</small><small v-if="alert.delivered_at">本地投递已接受 {{ date(alert.delivered_at) }}</small></span><span class="review-pill" :class="reviewDeliveryClass(alert.delivery_state)">{{ reviewDeliveryLabel(alert.delivery_state) }}</span></button></div><p v-else-if="!reviewError" class="empty">当前没有待复核提醒。</p><p v-if="reviewsTruncated" class="notice">最多展示 1000 条提醒；当前列表可能尚未包含全部待办。</p><p class="source-note">投递状态取自通知队列；「已投递」表示本地回调已接受该提醒，不代表人工已读。</p></section>
     <template v-if="data"><section v-if="tab==='rules'" class="panel rules-panel" role="tabpanel" aria-labelledby="tab-rules"><span class="eyebrow">仅应用于后续初始化的文档</span><h2>知识库默认规则</h2><p>已存在文档的日期保持原值。0 表示不设置该项默认日期；未设置失效日期即永久有效。</p><p class="source-note">当前来源：{{ ruleSourceLabel(data.rules) }} · 本库版本 {{ data.rule_revision }}</p><form @submit.prevent="submitRules"><label>延迟生效天数<input v-model.number="ruleForm.effective_delay_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><label>有效天数<input v-model.number="ruleForm.valid_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><label>复核间隔天数<input v-model.number="ruleForm.review_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><p v-if="ruleError" class="notice error" role="alert">{{ ruleError }}</p><p v-if="ruleSuccess" class="notice success" role="status">规则已保存，将用于后续初始化的文档。</p><button v-if="data.can_write" class="primary" :disabled="savingRules || !validRules(ruleForm)">{{ savingRules?'正在保存…':'保存规则' }}</button><p v-else class="source-note">当前账号仅有查看权限。</p></form></section></template>
    </template>
   </template>
@@ -123,7 +123,7 @@ import { listKnowledgeBases } from '@/api/knowledge-base'
 import * as api from '@/api/lifecycle'
 import SupplementEditor from './SupplementEditor.vue'
 import { useAuthStore } from '@/stores/auth'
-import { annotationsForSave, errorMessage, requestFence, ruleSourceLabel, stateLabels, states, toLocalInput, validRules } from './model'
+import { annotationsForSave, errorMessage, requestFence, reviewDeliveryClass, reviewDeliveryLabel, ruleSourceLabel, stateLabels, states, toLocalInput, validRules } from './model'
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
@@ -576,6 +576,15 @@ form label {
   color:var(--td-warning-color);
   white-space:nowrap;
   font-size:var(--app-text-xs);
+}
+.review-pill.done {
+  color:var(--td-brand-color);
+}
+.review-pill.dead {
+  color:var(--td-error-color-6);
+}
+.review-pill.processing,.review-pill.pending,.review-pill.missing {
+  color:var(--td-text-color-secondary);
 }
 .drawer-backdrop {
   position:fixed;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { annotationsForSave, toLocalInput, requestFence, validRules, ruleSourceLabel, supplementCommand } from './model'
+import { annotationsForSave, toLocalInput, requestFence, validRules, ruleSourceLabel, supplementCommand, reviewDeliveryClass, reviewDeliveryLabel } from './model'
 
 test('date edit preserves invisible labels and sends UTC while cleared dates are null', () => {
  const result=annotationsForSave({revision:3,labels:{classification:'private',unrelated:'keep'}}, {effective_from:'',effective_until:'2026-11-01T12:30',review_due:''})
@@ -21,6 +21,23 @@ test('rules reject fractional, missing and negative day counts',()=>{
 test('untouched dates retain their exact server precision and timezone',()=>{
  const original={revision:4,labels:{},effective_until:'2026-11-02T03:04:59.123456789Z'}
  assert.equal(annotationsForSave(original,{effective_from:'',review_due:'',effective_until:toLocalInput(original.effective_until)}).effective_until,original.effective_until)
+})
+test('the delivery label names the queue state without claiming a human read',()=>{
+ assert.equal(reviewDeliveryLabel('done'),'已投递')
+ assert.equal(reviewDeliveryLabel('pending'),'待投递')
+ assert.equal(reviewDeliveryLabel('processing'),'投递中')
+ assert.equal(reviewDeliveryLabel('dead'),'投递失败')
+ assert.equal(reviewDeliveryLabel('missing'),'未入队')
+ assert.equal(reviewDeliveryLabel(''),'未知')
+ assert.equal(reviewDeliveryLabel('weird'),'weird')
+})
+test('the delivery badge tone follows the queue state',()=>{
+ assert.equal(reviewDeliveryClass('done'),'done')
+ assert.equal(reviewDeliveryClass('dead'),'dead')
+ assert.equal(reviewDeliveryClass('processing'),'processing')
+ assert.equal(reviewDeliveryClass('pending'),'pending')
+ assert.equal(reviewDeliveryClass('missing'),'missing')
+ assert.equal(reviewDeliveryClass(''),'missing')
 })
 test('unconfigured rules are distinguished from a KB override',()=>{
  const rules={rules:{effective_delay_days:0,valid_days:0,review_days:0},source:{tenant_id:7,knowledge_base_id:'kb'},revision:0,token:'fixture'}

@@ -14,6 +14,24 @@ export function annotationsForSave(original:Annotations,fields:Record<'effective
 export function ruleSourceLabel(value:ResolvedRules):string{return value.revision===0?'未配置（永久有效）':value.source.knowledge_base_id?'知识库规则':'租户默认规则'}
 export function validRules(rules:Rules):boolean{return Object.values(rules).length===3&&Object.values(rules).every(n=>Number.isInteger(n)&&n>=0&&n<=36500)}
 export function requestFence(){let version=0;return{begin:()=>++version,invalidate:()=>{version++},current:(token:number)=>version===token}}
+// reviewDeliveryLabel names the notification queue state of one overdue
+// reminder. "已投递" means the local callback accepted the reminder; it
+// does not mean a person read it.
+export function reviewDeliveryLabel(state:string):string{
+  switch(state){
+    case 'done':return '已投递'
+    case 'processing':return '投递中'
+    case 'pending':return '待投递'
+    case 'dead':return '投递失败'
+    case 'missing':return '未入队'
+    default:return state||'未知'
+  }
+}
+// reviewDeliveryClass maps the queue state onto the badge tones the
+// workbench already uses for lifecycle states.
+export function reviewDeliveryClass(state:string):string{
+  return state==='done'?'done':state==='dead'?'dead':state==='processing'?'processing':state==='pending'?'pending':'missing'
+}
 export function supplementCommand(revision:number,parents:string[],child:string,operation:string,parentKBs:string[]=[]){
  if(!Number.isInteger(revision)||revision<0||!operation||parents.length>8||new Set(parents).size!==parents.length||parents.some(id=>!id||id===child))throw new Error('invalid_supplements')
  if(parentKBs.length&&(parentKBs.length!==parents.length||parentKBs.some(kb=>!kb)))throw new Error('invalid_supplements')
