@@ -13,7 +13,7 @@
   <template v-if="kb">
    <div class="tabs" role="tablist" aria-label="工作台视图">
     <button v-for="item in tabs" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">{{ item.label }}</button>
-    <button role="tab" :aria-selected="workspaceView==='feedback-governance'" :class="{selected:workspaceView==='feedback-governance'}" :disabled="viewLocked" @click="showFeedback">反馈审核</button>
+    <button v-for="item in workspaceTabs" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ item.label }}</button>
    </div>
    <template v-if="workspaceView">
     <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" :can-write="data?.can_write" @changed="loadAll" @locked="viewLocked=$event" />
@@ -104,7 +104,7 @@
       <button class="secondary" :disabled="activityBusy || activityPage<=1" @click="activityPage--">上一页</button>
       <button class="secondary" :disabled="activityBusy || activity.length<20" @click="activityPage++">下一页</button>
      </div>
-      <button type="button" class="secondary" @click="closeDocument(); showFeedback()">查看反馈审核</button>
+      <button type="button" class="secondary" @click="closeDocument(); showWorkspace('feedback-governance')">查看反馈审核</button>
      </template>
      <BusinessView v-else-if="detailTab==='revisions'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="revisions" @locked="childLocked=$event" />
     </template>
@@ -128,6 +128,16 @@ const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWor
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
 const tabs=[{key:'documents',label:'全部文档'},{key:'reviews',label:'待复核'},{key:'rules',label:'库级规则'}] as const
+// Every workspace view the router accepts is reachable from the top tab bar.
+// The URL keeps its ?view= contract, so old links and bookmarks still land
+// on the same view; only the missing entry points are added.
+const workspaceTabs=[
+ {key:'families',label:'业务族'},
+ {key:'associations',label:'关联关系'},
+ {key:'feedback-governance',label:'反馈审核'},
+ {key:'revisions',label:'修订发布'},
+ {key:'lineage',label:'关系图'},
+] as const
 const detailTabs=[
  {key:'life',label:'生命周期'},{key:'family',label:'版本族'},{key:'relations',label:'关联关系'},
  {key:'graph',label:'关系图'},{key:'audit',label:'治理记录'},{key:'suggestions',label:'关联建议'},{key:'revisions',label:'修订发布'},
@@ -237,7 +247,7 @@ function showList(value:(typeof tabs)[number]['key']){
  tab.value=value
  if(workspaceView.value)void router.replace({name:'documents',query:listQuery()})
 }
-function showFeedback(){void router.push({name:'documents',query:{kb:kb.value,view:'feedback-governance'}})}
+function showWorkspace(value:(typeof workspaceTabs)[number]['key']){void router.push({name:'documents',query:{kb:kb.value,view:value}})}
 function openWorkspaceDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'life',kbOverride)}
 function openGraphDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'graph',kbOverride)}
 function openRelatedDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'relations',kbOverride)}

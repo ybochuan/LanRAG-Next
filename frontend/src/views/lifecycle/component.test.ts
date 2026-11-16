@@ -91,3 +91,30 @@ test('route query seeds the list tab, page, state and title', () => {
     assert.equal(view.state.titleQuery.value, '合同')
   } finally { view.stop() }
 })
+test('every workspace view has a top-level tab entry', () => {
+  const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
+  const views = ['families', 'associations', 'feedback-governance', 'revisions', 'lineage']
+  const tabs = source.match(/const workspaceTabs=\[([\s\S]*?)\] as const/)?.[1] ?? ''
+  assert.ok(tabs.length > 0, 'workspaceTabs must be declared')
+  for (const view of views) {
+    assert.ok(tabs.includes(`key:'${view}'`), `workspaceTabs must contain ${view}`)
+  }
+  const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
+  assert.ok(
+    template.includes('v-for="item in workspaceTabs"'),
+    'the top tab bar must render the workspace tabs',
+  )
+  assert.ok(
+    !template.includes('showFeedback'),
+    'the removed showFeedback helper must not be referenced any more',
+  )
+})
+
+test('the workspace tab label set matches the router view contract', () => {
+  const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
+  const tabs = source.match(/const workspaceTabs=\[([\s\S]*?)\] as const/)?.[1] ?? ''
+  for (const view of ['families', 'lineage', 'associations', 'feedback-governance', 'revisions']) {
+    assert.ok(source.includes(`view==='${view}'`), `router must accept ${view}`)
+    assert.ok(tabs.includes(`key:'${view}'`), `workspaceTabs must expose ${view}`)
+  }
+})
