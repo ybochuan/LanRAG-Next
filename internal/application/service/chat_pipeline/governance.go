@@ -64,7 +64,13 @@ func isGovernanceWebResult(r *types.SearchResult) bool {
 // sourceInputsForModel describes the fields actually rendered by this pipeline.
 // Unsupported composition remains unattributed; citations never fill the gaps.
 func sourceInputsForModel(cm *types.ChatManage) ([]extensionbridge.SourceInput, bool) {
-	if len(cm.History) != 0 || cm.MemoryPrompt != "" || len(cm.Images) != 0 || len(cm.ContextImages) != 0 || cm.ImageDescription != "" || len(cm.Attachments) != 0 || cm.QuotedContext != "" || cm.DataAnalysisEnabled || cm.EnableRewrite || cm.RerankModelID != "" {
+	// A configured rerank model is deliberately NOT a reason to give up: rerank
+	// only selects and reorders candidates, it never rewrites the bytes that are
+	// rendered. The rendered context comes from MergeResult, and each entry is
+	// still checked below for a native chunk ID and unmodified content. A query
+	// rewrite (EnableRewrite) stays refused because the rewritten query is model
+	// output, not a native field.
+	if len(cm.History) != 0 || cm.MemoryPrompt != "" || len(cm.Images) != 0 || len(cm.ContextImages) != 0 || cm.ImageDescription != "" || len(cm.Attachments) != 0 || cm.QuotedContext != "" || cm.DataAnalysisEnabled || cm.EnableRewrite {
 		return nil, false
 	}
 	if !cm.NeedsRetrieval() {

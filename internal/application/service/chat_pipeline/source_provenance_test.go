@@ -28,7 +28,21 @@ func TestSourceInputsBindActualBodyTitleAndDescription(t *testing.T) {
 			t.Fatalf("wrong native field binding: %+v", input)
 		}
 	}
-	for _, mode := range []string{"rewritten", "image", "metadata", "web", "faq", "history"} {
+	// Selecting and reordering candidates does not change the bytes that reach
+	// the model, so a configured rerank model keeps the same native bindings.
+	withRerank := *cm
+	withRerank.RerankModelID = "rerank-model"
+	withRerank.RerankResult = []*types.SearchResult{{ID: "chunk", KnowledgeID: "doc", Content: "BODY"}}
+	reranked, complete := sourceInputsForModel(&withRerank)
+	if !complete || len(reranked) != 3 {
+		t.Fatalf("rerank hid native bindings: complete=%v inputs=%+v", complete, reranked)
+	}
+	for _, input := range reranked {
+		if input.DocumentID != "doc" || input.ValueHash != want[input.Field] {
+			t.Fatalf("rerank changed a native binding: %+v", input)
+		}
+	}
+	for _, mode := range []string{"rewritten", "image", "metadata", "web", "faq", "history", "query-rewrite"} {
 		t.Run(mode, func(t *testing.T) {
 			copyCM := *cm
 			result := *cm.MergeResult[0]
@@ -46,6 +60,10 @@ func TestSourceInputsBindActualBodyTitleAndDescription(t *testing.T) {
 				result.ChunkType = string(types.ChunkTypeFAQ)
 			case "history":
 				copyCM.History = []*types.History{{}}
+			case "query-rewrite":
+				// The rewritten query is model output, not a native field, so a
+				// model sees bytes no native snapshot can vouch for.
+				copyCM.EnableRewrite = true
 			}
 			if _, known := sourceInputsForModel(&copyCM); known {
 				t.Fatal("unproved composition was declared complete")
