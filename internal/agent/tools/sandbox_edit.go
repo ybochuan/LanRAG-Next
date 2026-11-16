@@ -20,6 +20,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -281,6 +282,15 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 		}, nil
 	}
 
+	// Reserve the producer against the bytes this edit will store. The
+	// reservation happens under the file lock, so the base the edit read is
+	// the base the reservation describes.
+	producer, reserveErr := reserveSandboxWrite(ctx, clean, content, producerOwnerID(ctx), sessionID)
+	if reserveErr != nil && !errors.Is(reserveErr, errSandboxProducerUnavailable) {
+		logger.Warnf(ctx, "[Tool][EditSandboxFile] producer reservation failed: session=%s path=%s err=%v",
+			sessionID, clean, reserveErr)
+	}
+
 	if err := t.editor.WriteSessionWorkspaceFile(ctx, sessionID, clean, content); err != nil {
 		logger.Warnf(ctx, "[Tool][EditSandboxFile] write failed: session=%s path=%s err=%v",
 			sessionID, clean, err)
@@ -292,6 +302,16 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 
 	logger.Infof(ctx, "[Tool][EditSandboxFile] session=%s path=%s replacements=%d bytes=%d",
 		sessionID, clean, replacements, len(content))
+
+	// Acknowledge only the bytes that are actually stored after the edit.
+	if producer != nil {
+		readBack, readErr := t.editor.ReadSessionFile(ctx, sessionID, clean)
+		if readErr != nil {
+			noteSandboxProducerOutcome(ctx, clean, readErr)
+		} else {
+			noteSandboxProducerOutcome(ctx, clean, commitSandboxWrite(ctx, producer, readBack, producerOwnerID(ctx), sessionID))
+		}
+	}
 
 	added, removed := sandboxEditDiffStats(string(raw), input.Edits)
 

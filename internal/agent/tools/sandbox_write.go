@@ -19,6 +19,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -325,6 +326,15 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 		content = append(content, chunk...)
 	}
 
+	// Reserve the producer against the bytes this write will store. A run
+	// without a provenance handle simply has no producer: the write proceeds
+	// and the file stays unattributed rather than being claimed falsely.
+	producer, reserveErr := reserveSandboxWrite(ctx, clean, content, producerOwnerID(ctx), sessionID)
+	if reserveErr != nil && !errors.Is(reserveErr, errSandboxProducerUnavailable) {
+		logger.Warnf(ctx, "[Tool][WriteSandboxFile] producer reservation failed: session=%s path=%s err=%v",
+			sessionID, clean, reserveErr)
+	}
+
 	if err := t.sink.WriteSessionWorkspaceFile(ctx, sessionID, clean, content); err != nil {
 		logger.Warnf(ctx, "[Tool][WriteSandboxFile] write failed: session=%s path=%s err=%v",
 			sessionID, clean, err)
@@ -336,6 +346,18 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 
 	logger.Infof(ctx, "[Tool][WriteSandboxFile] session=%s path=%s mode=%s chunk_bytes=%d total_bytes=%d",
 		sessionID, clean, mode, len(chunk), len(content))
+
+	// Acknowledge only the bytes that are actually stored. A read-back that
+	// differs from the reservation is not committed: a producer must never
+	// attest bytes the write did not produce.
+	if producer != nil {
+		readBack, readErr := t.sink.ReadSessionFile(ctx, sessionID, clean)
+		if readErr != nil {
+			noteSandboxProducerOutcome(ctx, clean, readErr)
+		} else {
+			noteSandboxProducerOutcome(ctx, clean, commitSandboxWrite(ctx, producer, readBack, producerOwnerID(ctx), sessionID))
+		}
+	}
 
 	// Check the whole file, not just this chunk: a chunk boundary lands in the
 	// middle of the source, so only the assembled result can be judged.
