@@ -480,3 +480,9 @@ M2边界：本批没有新增原生补丁，没有接入active检索过滤，也
 独立复核发现Important1：scheduled在failed/processing/缺失最新观察时会被Timer激活。三例先RED再修复，事务内要求completed；修复后全suite/race补证，不派二次复核。普通文档命中还必须位于返回允许集，避免原生目标范围较宽时混入未判定文档；WebSearch类型保留，排除优先。
 
 后续待办：适配历史M0/M1完整上传/问答E2E的worker凭证与DB配置；当前新增extensions/scripts/m2-policy-e2e.sh专门验证本批跨模块策略链路。Agent直接读/旧handle/独立图谱/生成中停用、C-10标签null拒绝限制、whole-KB授权文档枚举不因本批接线消失。
+
+## 检索缺陷：knowledge-chat 检索为空（2026-11-16 修复）
+
+| 任务／状态 | 期望结果＋文件 | 依据 | 验证及何时重新审视 |
+|---|---|---|---|
+| BUG-KB-CHAT-EMPTY／已修复并生产验证 | 整库聊天在 `before_retrieve` 前枚举原生授权文档；`guardPromptResults` 把空 `KnowledgeIDs` 视为无文档级限制。文件：`internal/application/service/chat_pipeline/{search_parallel,governance}.go`。 | 用户报告 `hybrid-search` 返回 50 条而 `chunk_search_parallel` 返回 `search_nothing`，要求排查阈值、改写与原始召回。 | 实测原始召回 30 条、策略放行 64/75、合并 14、进入提示词 13，回答带原生 kb 引用。阈值与改写均非原因；`rerank_threshold` 未参与。证据见[`docs/evidence/knowledge-chat-search-nothing-2026-11-16.md`](docs/evidence/knowledge-chat-search-nothing-2026-11-16.md)。枚举上限 200，超限与标签范围继续 fail-closed。 |

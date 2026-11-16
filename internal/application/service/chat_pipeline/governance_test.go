@@ -44,6 +44,31 @@ func TestGovernanceUsesAuthorizedMultiKBScopeAndPreservesNativeWeb(t *testing.T)
 	}
 }
 
+// A request that carries no per-document restriction must not be read as an
+// empty allowlist. The native request uses an empty (non-nil) slice for a
+// whole-KB chat, and treating that as "allow nothing" dropped every retrieved
+// passage before the model saw it.
+func TestGovernanceTreatsEmptyKnowledgeIDsAsNoDocumentRestriction(t *testing.T) {
+	original := extensionbridge.EvaluateDocuments
+	t.Cleanup(func() { extensionbridge.EvaluateDocuments = original })
+	extensionbridge.EvaluateDocuments = func(_ context.Context, tenant uint64, kbs, ids []string) (map[string]bool, error) {
+		if tenant != 7 || len(kbs) != 1 || kbs[0] != "kb" || len(ids) != 2 {
+			t.Fatalf("incorrect native authority: %v %v", kbs, ids)
+		}
+		return map[string]bool{ids[0]: true, ids[1]: true}, nil
+	}
+	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{TenantID: 7, KnowledgeBaseIDs: []string{"kb"}, KnowledgeIDs: []string{}}, PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+		{KnowledgeID: "doc-a", KnowledgeBaseID: "kb", Content: "A"},
+		{KnowledgeID: "doc-b", KnowledgeBaseID: "kb", Content: "B"},
+	}}}
+	if err := guardPromptResults(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	if len(cm.MergeResult) != 2 {
+		t.Fatalf("empty knowledge ids dropped %d of 2 passages", 2-len(cm.MergeResult))
+	}
+}
+
 func TestGovernanceRejectsOldAnswerAffinityBeforeQueryRewrite(t *testing.T) {
 	plugin := &PluginQueryUnderstand{memoryService: &stubRetrievalMemory{retrieval: interfaces.RetrievalContext{Documents: []string{"REVOKED_TITLE_CANARY"}}}}
 	if !strings.Contains(plugin.memoryBackground(context.Background(), &types.ChatManage{}), "REVOKED_TITLE_CANARY") {

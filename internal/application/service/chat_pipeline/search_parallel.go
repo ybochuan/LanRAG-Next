@@ -101,13 +101,22 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	}
 
 	requestID, _ := types.RequestIDFromContext(ctx)
+	// The Bridge contract requires knowledge_ids to be an already enumerated
+	// native-authorized document set; a whole-KB target carries none, and an
+	// empty list is answered with deny_all. Expand a plain KB target into its
+	// documents here so the policy can subtract non-active ones instead of
+	// refusing the whole request.
+	candidates := chatManage.KnowledgeIDs
+	if len(candidates) == 0 {
+		candidates = p.enumerateAuthorizedDocuments(ctx, chatManage)
+	}
 	decision, err := extensionbridge.BeforeRetrieve(ctx, map[string]any{
 		"request_id":         requestID,
 		"session_id":         chatManage.SessionID,
 		"mode":               "rag",
 		"tenant_id":          chatManage.TenantID,
 		"knowledge_base_ids": chatManage.KnowledgeBaseIDs,
-		"knowledge_ids":      chatManage.KnowledgeIDs,
+		"knowledge_ids":      candidates,
 		"original_query":     chatManage.Query,
 		"rewritten_query":    chatManage.RewriteQuery,
 	})
@@ -119,6 +128,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 			ErrorType:   "bridge_before_retrieve_failed",
 		}
 	}
+	pipelineInfo(ctx, "SearchParallel", "policy_decision", map[string]interface{}{"candidates": len(candidates), "allowed": len(decision.KnowledgeIDs), "excluded": len(decision.ExcludedDocumentIDs), "deny_all": decision.DenyAll})
 	if decision.DenyAll {
 		chatManage.SearchResult = nil
 		return ErrSearchNothing
@@ -202,6 +212,45 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	}
 
 	return next()
+}
+
+// enumerateAuthorizedDocuments expands plain whole-KB targets into the
+// explicit document IDs the Bridge policy takes as its candidate set. It never
+// guesses a broader scope: a tag-scoped or document-scoped target, a service
+// error, or a KB larger than the bound returns nil, which leaves the request
+// with an empty candidate list and therefore deny_all - the same fail-closed
+// behaviour as before this change.
+func (p *PluginSearchParallel) enumerateAuthorizedDocuments(ctx context.Context, cm *types.ChatManage) []string {
+	const maxEnumeratedDocuments = 200
+	if p.knowledgeService == nil || len(cm.SearchTargets) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ids []string
+	for _, target := range cm.SearchTargets {
+		if target == nil || target.Type != types.SearchTargetTypeKnowledgeBase {
+			return nil
+		}
+		if len(target.KnowledgeIDs) > 0 || len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			return nil
+		}
+		docs, err := p.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, target.KnowledgeBaseID)
+		if err != nil {
+			return nil
+		}
+		for _, doc := range docs {
+			if doc == nil || doc.ID == "" || doc.EnableStatus != "enabled" || doc.ParseStatus != types.ParseStatusCompleted || seen[doc.ID] {
+				continue
+			}
+			seen[doc.ID] = true
+			ids = append(ids, doc.ID)
+		}
+		if len(ids) > maxEnumeratedDocuments {
+			return nil
+		}
+	}
+	pipelineInfo(ctx, "SearchParallel", "enumerated_documents", map[string]interface{}{"count": len(ids), "targets": len(cm.SearchTargets)})
+	return ids
 }
 
 // Apply the same exclusion to chunk and entity results before any later stage.

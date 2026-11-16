@@ -20,7 +20,11 @@ func guardPromptResults(ctx context.Context, cm *types.ChatManage) error {
 		authorized[id] = true
 	}
 	for _, r := range cm.MergeResult {
-		if r != nil && !isGovernanceWebResult(r) && (cm.KnowledgeIDs == nil || authorized[r.KnowledgeID]) {
+		// len==0 means the request carried no per-document restriction; an empty
+		// but non-nil slice must not be read as an empty allowlist, which would
+		// drop every retrieved passage. The bridge decision already narrowed the
+		// candidate set above.
+		if r != nil && !isGovernanceWebResult(r) && (len(cm.KnowledgeIDs) == 0 || authorized[r.KnowledgeID]) {
 			ids = append(ids, r.KnowledgeID)
 		}
 	}
