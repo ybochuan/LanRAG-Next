@@ -110,6 +110,24 @@ test('every workspace view has a top-level tab entry', () => {
   )
 })
 
+test('the message centre is a workspace view that aggregates every accessible KB', () => {
+  const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
+  const tabs = source.match(/const workspaceTabs=\[([\s\S]*?)\] as const/)?.[1] ?? ''
+  assert.ok(tabs.includes("key:'messages'"), 'the message centre must be a top-level workspace tab')
+  assert.ok(source.includes("view==='messages'"), 'the router must accept the messages view')
+  assert.ok(source.includes('loadMessages'), 'the view must load the merged inbox')
+  const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
+  assert.ok(template.includes('<MessageCenter'), 'the view must render the message centre component')
+})
+
+test('the message centre component renders unread state and acknowledgement', () => {
+  const component = readFileSync(new URL('./MessageCenter.vue', import.meta.url), 'utf8')
+  assert.ok(component.includes('标记已读'), 'an unread message must offer a read action')
+  assert.ok(component.includes('unread-dot'), 'unread messages must be visually distinguishable')
+  assert.ok(component.includes("$emit('acknowledge'"), 'the read action must go through the view')
+  assert.ok(component.includes('不代表已经完成复核'), 'reading a reminder must not imply the review is done')
+})
+
 test('the review panel shows the notification delivery state', () => {
   const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
   assert.ok(template.includes('reviewDeliveryLabel(alert.delivery_state)'), 'the panel must name the delivery state')

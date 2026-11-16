@@ -43,6 +43,11 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	if r.Action == "business_lineage_graph" {
 		return s.lineageGraph(ctx, r, body.ID)
 	}
+	// Reading the message centre reuses the per-KB reviews action, so only the
+	// acknowledgement needs its own write path here.
+	if r.Action == "business_notification_ack" {
+		return s.notificationAck(ctx, r, body.ID)
+	}
 	if body.Payload.TargetKnowledgeBaseID != "" &&
 		!s.scopes[lifecycle.PolicyScope{TenantID: r.TenantID, KnowledgeBaseID: body.Payload.TargetKnowledgeBaseID}] {
 		return nil, errScopeNotConfigured

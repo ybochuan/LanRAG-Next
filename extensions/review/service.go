@@ -38,8 +38,13 @@ type Alert struct {
 	Generation         int64      `json:"generation"`
 	DetectedAt         time.Time  `json:"detected_at"`
 	DeliveredAt        *time.Time `json:"delivered_at,omitempty"`
-	DeliveryState      string     `json:"delivery_state"`
-	Title              string     `json:"title,omitempty"`
+	// AcknowledgedAt records that a person read this message in the message
+	// centre. Delivery is a queue fact; acknowledgement is a human fact, and
+	// conflating them would report a machine delivery as a person's read.
+	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
+	DeliveryState  string     `json:"delivery_state"`
+	Unread         bool       `json:"unread"`
+	Title          string     `json:"title,omitempty"`
 }
 
 // Service shares the extension single writer and never owns the DB lifetime.

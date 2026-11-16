@@ -16,9 +16,10 @@
     <button v-for="item in workspaceTabs" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ item.label }}</button>
    </div>
    <template v-if="workspaceView">
-    <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" :can-write="data?.can_write" @changed="loadAll" @locked="viewLocked=$event" />
+    <MessageCenter v-if="workspaceView==='messages'" :items="messageItems" :busy="messageBusy" :error="messageError" :truncated="messagesTruncated" :unread="messageUnread" @reload="loadMessages" @open="openMessage" @acknowledge="acknowledgeMessage" />
+    <FamilyWorkspace v-else-if="workspaceView==='families'" :key="kb" :scope="kb" :can-write="data?.can_write" @changed="loadAll" @locked="viewLocked=$event" />
     <LineageView v-else-if="workspaceView==='lineage'" :key="kb+String(route.query.mode)+String(route.query.node||route.query.id)" :scope="kb" @open="openWorkspaceDocument" />
-    <BusinessView v-else :key="kb+workspaceView" :section="workspaceView" :scope="kb" :can-write="data?.can_write" @locked="viewLocked=$event" @open="openWorkspaceDocument" />
+    <BusinessView v-else-if="workspaceView==='associations'||workspaceView==='feedback-governance'||workspaceView==='revisions'" :key="kb+workspaceView" :section="workspaceView" :scope="kb" :can-write="data?.can_write" @locked="viewLocked=$event" @open="openWorkspaceDocument" />
    </template>
    <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
@@ -127,11 +128,13 @@ import { annotationsForSave, errorMessage, requestFence, reviewDeliveryClass, re
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
+const MessageCenter = defineAsyncComponent(() => import('./MessageCenter.vue'))
 const tabs=[{key:'documents',label:'全部文档'},{key:'reviews',label:'待复核'},{key:'rules',label:'库级规则'}] as const
 // Every workspace view the router accepts is reachable from the top tab bar.
 // The URL keeps its ?view= contract, so old links and bookmarks still land
 // on the same view; only the missing entry points are added.
 const workspaceTabs=[
+ {key:'messages',label:'消息中心'},
  {key:'families',label:'业务族'},
  {key:'associations',label:'关联关系'},
  {key:'feedback-governance',label:'反馈审核'},
@@ -145,7 +148,7 @@ const detailTabs=[
 const route=useRoute(), router=useRouter()
 const workspaceView=computed(()=>{
  const view=route.query.view
- return view==='families'||view==='lineage'||view==='associations'||view==='feedback-governance'||view==='revisions' ? view : ''
+ return view==='messages'||view==='families'||view==='lineage'||view==='associations'||view==='feedback-governance'||view==='revisions' ? view : ''
 })
 const auth=useAuthStore()
 const kbFence=requestFence()
@@ -173,6 +176,12 @@ function sortDocuments(key:DocumentSortKey){
 }
 const sortMark=(key:DocumentSortKey)=>sortKey.value===key?(sortDirection.value===1?' ↑':' ↓'):' ↕'
 const reviewItems=ref<api.ReviewAlert[]>([]),reviewError=ref(''),reviewBusy=ref(false),reviewsTruncated=ref(false),reviewsLoaded=ref(false)
+// Message centre state: one merged inbox across every knowledge base the user
+// can read. Each source list is the same per-KB reviews call the 待复核 tab uses,
+// so the message centre can never show an alert the per-KB inbox would hide.
+type MessageRow = {alertId:string;kb:string;kbName:string;documentId:string;title?:string;reviewDue:string;deliveryState:string;deliveredAt?:string;acknowledgedAt?:string;unread:boolean}
+const messageItems=ref<MessageRow[]>([]),messageBusy=ref(false),messageError=ref(''),messagesTruncated=ref(false)
+const messageUnread=computed(()=>messageItems.value.filter(item=>item.unread).length)
 const ruleForm=reactive<api.Rules>({effective_delay_days:0,valid_days:0,review_days:0}),ruleError=ref(''),ruleSuccess=ref(false),savingRules=ref(false)
 const selectedID=ref(''),selectedKB=ref(''),selectedTitle=ref(''),detail=ref<api.Detail>(),detailBusy=ref(false),detailError=ref(''),documentSuccess=ref(''),savingDocument=ref(false),documentConflict=ref(false),drawer=ref<HTMLElement>()
 const supplementBusy=ref(false), childLocked=ref(false), viewLocked=ref(false)
@@ -277,6 +286,50 @@ async function submitRules(){if(!data.value?.can_write||!validRules(ruleForm)||s
 watch([titleQuery,filter],([,state],[,previousState])=>{clearTimeout(searchTimer);listFence.invalidate();page.value=1;if(!kb.value)return;if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
 watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';selectedKB.value='';dateBaseline.value='';reviewItems.value=[];reviewsLoaded.value=false;reviewsTruncated.value=false;page.value=1;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
 watch(tab,value=>{if(value==='reviews'&&!reviewsLoaded.value)void loadReviews()})
+
+// loadMessages fans out over the accessible knowledge bases and merges the
+// per-KB review inboxes into one list. One failing KB must not blank the
+// whole centre, so a failed source is reported but the rest still render.
+async function loadMessages(){
+ if(!knowledgeBases.value.length)return
+ const token=reviewFence.begin()
+ messageBusy.value=true;messageError.value='';messagesTruncated.value=false
+ try{
+  const sources=await Promise.all(knowledgeBases.value.map(async item=>{
+   try{const result=await api.reviews(item.id);return {kb:item.id,name:item.name,alerts:result.alerts||[],truncated:result.truncated}}
+   catch(error){return {kb:item.id,name:item.name,alerts:[] as api.ReviewAlert[],truncated:false,failed:errorMessage(error)}}
+  }))
+  if(!reviewFence.current(token))return
+  const rows:MessageRow[]=[]
+  let truncated=false
+  const failures:string[]=[]
+  for(const source of sources){
+   if('failed' in source&&source.failed)failures.push(`${source.name}: ${source.failed}`)
+   if(source.truncated)truncated=true
+   for(const alert of source.alerts){
+    rows.push({alertId:alert.alert_id,kb:source.kb,kbName:source.name,documentId:alert.document_id,title:alert.title,reviewDue:alert.review_due,deliveryState:alert.delivery_state,deliveredAt:alert.delivered_at,acknowledgedAt:alert.acknowledged_at,unread:alert.unread!==false})
+   }
+  }
+  rows.sort((left,right)=>left.reviewDue===right.reviewDue?left.alertId.localeCompare(right.alertId):left.reviewDue.localeCompare(right.reviewDue))
+  messageItems.value=rows;messagesTruncated.value=truncated
+  if(failures.length)messageError.value=`部分知识库读取失败：${failures.join('；')}`
+ }catch(error){if(reviewFence.current(token))messageError.value=errorMessage(error)}
+ finally{if(reviewFence.current(token))messageBusy.value=false}
+}
+// acknowledgeMessage marks one reminder read. The row only flips to read when
+// the server confirms it, so a failed call cannot pretend the person saw it.
+async function acknowledgeMessage(item:MessageRow){
+ if(!item.unread)return
+ messageBusy.value=true;messageError.value=''
+ try{
+  await api.acknowledgeReview(item.kb,item.alertId)
+  const target=messageItems.value.find(row=>row.alertId===item.alertId)
+  if(target){target.unread=false;target.acknowledgedAt=new Date().toISOString()}
+ }catch(error){messageError.value=errorMessage(error)}
+ finally{messageBusy.value=false}
+}
+function openMessage(item:MessageRow){void openDocument(item.documentId,item.title,'life',item.kb)}
+watch(workspaceView,value=>{if(value==='messages'&&!messageItems.value.length)void loadMessages()})
 async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];kb.value=knowledgeBases.value.find(row=>row.id===route.query.kb)?.id||knowledgeBases.value[0]?.id||''}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
 watch(()=>auth.effectiveTenantId,()=>void loadKnowledgeBases())
 watch(()=>route.query.kb,value=>{if(typeof value==='string' && knowledgeBases.value.some(row=>row.id===value))kb.value=value})

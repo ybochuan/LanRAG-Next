@@ -10,7 +10,7 @@ export interface DocumentRow {document_id:string;title?:string;state:LifecycleSt
 export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean;degraded?:boolean;degraded_reason?:string}
 export interface LifecycleEvent {event_id:string;from_state:string;to_state:string;reason:string;occurred_at:string;source_event_id?:string}
 export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean;attachment_parent_document_id?:string};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null;can_write?:boolean}
-export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string;delivered_at?:string;title?:string}
+export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string;delivered_at?:string;acknowledged_at?:string;unread?:boolean;title?:string;knowledge_base_id?:string}
 export interface DependencyParent {knowledge_base_id:string;document_id:string;version_id:string;state:LifecycleState;effective_until?:string;review_due?:string}
 export interface SupplementView {revision:number;declaration_id:string;status:string;parents:string[];parent_knowledge_base_ids:string[];assessment:{configured:boolean;reason?:string;parents:DependencyParent[];review_due?:string}}
 export interface SupplementDetail {supplements:SupplementView;evaluation_status?:string}
@@ -26,5 +26,9 @@ export const documentDetail=(kb:string,id:string)=>unwrap<Detail>(get(`${base(kb
 export const saveAnnotations=(kb:string,id:string,expected_revision:number,annotations:Annotations)=>unwrap<Detail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}`,{expected_revision,annotations})).then(value=>{invalidateCache('document-picker-active');return value})
 export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules})).then(value=>{invalidateCache('document-picker-active');return value})
 export const reviews=(kb:string)=>unwrap<{alerts:ReviewAlert[];truncated:boolean}>(get(`${base(kb)}/reviews`))
+// acknowledgeReview marks one review reminder read in the message centre.
+// The server keeps the first read time, so a repeated click is harmless.
+export const acknowledgeReview=(kb:string,alertId:string)=>
+  unwrap<{alert_id:string;acknowledged:boolean}>(put(`${base(kb)}/business/notification_ack`,{operation_id:`ack-${alertId}`,expected_revision:0,business:{id:alertId,payload:{}}})).then(value=>{invalidateCache('document-picker-active');return value})
 export const supplements=(kb:string,id:string)=>unwrap<SupplementDetail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`))
 export const saveSupplements=(kb:string,id:string,body:{expected_revision:number;operation_id:string;parents:string[];parent_knowledge_base_ids?:string[]})=>unwrap<SupplementDetail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`,body)).then(value=>{invalidateCache('document-picker-active');return value})

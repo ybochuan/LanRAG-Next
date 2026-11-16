@@ -71,7 +71,8 @@ builtin_agents:
       system_prompt: ""
       temperature: 0.7
       max_completion_tokens: 0
-      max_iterations: 50
+      # 冻结架构要求 Agent 轮次上限 3–4；2026-11-16 用户决定取 4。
+      max_iterations: 4
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
       allowed_tools:

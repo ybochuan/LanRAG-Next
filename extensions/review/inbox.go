@@ -18,13 +18,45 @@ func (s *Service) List(ctx context.Context, scope outbox.Scope, limit int) (aler
 	return
 }
 
+// hasAcknowledgedColumn reports whether this database carries the schema-33
+// review read state. A failure to inspect the table is treated as absence so a
+// damaged schema degrades to the pre-33 shape rather than erroring here.
+func hasAcknowledgedColumn(ctx context.Context, tx *sql.Tx) bool {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(ext_review_alerts)")
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, pk int
+		var defaultValue sql.NullString
+		if rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk) != nil {
+			return false
+		}
+		if name == "acknowledged_at" {
+			return true
+		}
+	}
+	return false
+}
+
 // ListTx can be used with a read-only transaction; it never migrates or writes.
 // A caller must supply an explicit tenant/KB and a bounded result limit.
 func ListTx(ctx context.Context, tx *sql.Tx, scope outbox.Scope, limit int, now time.Time) ([]Alert, error) {
 	if scope.TenantID == 0 || scope.KnowledgeBaseID == "" || limit < 1 || limit > 1000 || now.IsZero() {
 		return nil, errors.New("explicit inbox scope, limit 1..1000 and clock required")
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT a.alert_id,a.document_id,a.review_due,a.annotation_revision,a.generation,a.detected_at,a.delivered_at,COALESCE(o.status,'missing') FROM ext_review_alerts a LEFT JOIN ext_projection_outbox o ON o.outbox_id='review:'||a.alert_id||':'||a.generation WHERE a.tenant_id=? AND a.knowledge_base_id=? AND a.status='open' ORDER BY a.detected_at,a.alert_id`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID)
+	// Read state arrived with schema 33. The operator CLI still opens older
+	// databases on purpose, so the column is selected only when the schema has
+	// it; an old alert simply reads as read-state-unknown instead of failing the
+	// whole listing.
+	ackColumn := "NULL"
+	if hasAcknowledgedColumn(ctx, tx) {
+		ackColumn = "a.acknowledged_at"
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT a.alert_id,a.document_id,a.review_due,a.annotation_revision,a.generation,a.detected_at,a.delivered_at,`+ackColumn+`,COALESCE(o.status,'missing') FROM ext_review_alerts a LEFT JOIN ext_projection_outbox o ON o.outbox_id='review:'||a.alert_id||':'||a.generation WHERE a.tenant_id=? AND a.knowledge_base_id=? AND a.status='open' ORDER BY a.detected_at,a.alert_id`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -33,8 +65,8 @@ func ListTx(ctx context.Context, tx *sql.Tx, scope outbox.Scope, limit int, now 
 	for rows.Next() {
 		a := Alert{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID}
 		var due, detected string
-		var delivered sql.NullString
-		if err = rows.Scan(&a.AlertID, &a.DocumentID, &due, &a.AnnotationRevision, &a.Generation, &detected, &delivered, &a.DeliveryState); err != nil {
+		var delivered, acknowledged sql.NullString
+		if err = rows.Scan(&a.AlertID, &a.DocumentID, &due, &a.AnnotationRevision, &a.Generation, &detected, &delivered, &acknowledged, &a.DeliveryState); err != nil {
 			return nil, err
 		}
 		a.ReviewDue, err = time.Parse(time.RFC3339Nano, due)
@@ -62,6 +94,14 @@ func ListTx(ctx context.Context, tx *sql.Tx, scope outbox.Scope, limit int, now 
 			}
 			a.DeliveredAt = &v
 		}
+		if acknowledged.Valid {
+			v, err := time.Parse(time.RFC3339Nano, acknowledged.String)
+			if err != nil {
+				return nil, err
+			}
+			a.AcknowledgedAt = &v
+		}
+		a.Unread = a.AcknowledgedAt == nil
 		alerts = append(alerts, a)
 		if len(alerts) == limit {
 			break
