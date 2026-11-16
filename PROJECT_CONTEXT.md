@@ -117,6 +117,7 @@
 - 原生GET/PUT `/api/v1/knowledge-bases/:id/lifecycle/business/:business_action`沿用JWT和KB权限，只传业务DTO；`extensions/management/business.go`执行业务。管理列表支持正文/风险/截止时间/完整修订内容、精确ID与20项分页，包括持久关联候选`relation_list`。
 - `frontend/src/views/business/`通过原生导航提供`/platform/associations`、`/platform/feedback-governance`、`/platform/revisions`；复用原生JWT，不向浏览器下发Host凭据。页面按当前KB读写权限展示动作；审批核对完整正文、冷静期和高风险二次确认。结果未知时保留原operation_id/内容供重试，结束核对前阻止切页。
 - 扩展 schema 11 新增业务表、回执和审计。schema 12 增加问答反馈绑定和已核验分块 ID。schema 13 保存指导调用、会话预算与模型步骤的指导指纹。review CLI 识别 5–13，14 及以上拒绝。
+- `extensions/cmd/agentic-eval/` 是只读评估客户端：按问题集创建会话、发起一次 `agent-chat` 流式请求，从服务端 SSE 的 `tool_call` 帧自报 `iteration` 计数 Agent 轮次，同时记录工具调用总数与工具序列。它不写治理状态、不改生产配置。轮次与工具调用数是两个量纲：一次轮次可含多个并行工具调用，评估冻结架构「轮次上限 3–4」只能用轮次口径。内置 `builtin-smart-reasoning` 的 `max_iterations` 为 50，与冻结要求的 3–4 尚未对齐，属待决策项。
 - 扩展 schema 32 保存快速通道抽样复核与主题恢复记录：Host ticker 在低/中风险反馈冷静期到期后自动激活，低风险按 feedback ID 确定性哈希抽取 20% 进入待复核，高风险仍需显式二次确认；同主题两次负反馈熔断后经二次确认记录恢复事件，只允许新指导进入 active，旧指导不自动复活。本机生产扩展库已应用至 schema 32，其他环境仍须按运维流程在维护窗口迁移，未迁移环境不提供这两项能力。
 - 反馈沿用低/中/高风险 24/48/72 小时冷静期和审批流程。聊天页 `AnswerFeedback.vue` 为已完成且带单库引用的快速问答提供入口。`feedback_capture` 用原生登录身份匹配已封存的本人答复，分块从扩展账本读取。Agent 文本重排前核验实际候选，`search_knowledge` 只为最终返回的已核验正文登记反馈分块。缺少分块 ID 或完整来源证明的运行会被拒绝。同一答复只收一条反馈。
 - `extensions/guidance/` 在 `before_generate` 按置信度选择当前授权库的 active 指导。快速问答的流式、非流式调用和 Agent 每轮调用将指导作为临时消息追加到请求末尾。接口身份由原生已认证的 run 派生，有可绑定的 model step 时记录指导指纹。默认快速问答等 unattributed 运行也可接受指导，其来源状态仍保持 unattributed。缺少已认证run时省略指导。HTTP 500ms、失败省略指导；原生来源校验继续独立执行。
