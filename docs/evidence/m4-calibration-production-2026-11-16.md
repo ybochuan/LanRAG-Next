@@ -65,7 +65,7 @@ threshold = 0.60
 - 本次运行的本地 embedding 环境未配置，校准器仅使用标题和结构信号；报告中不包含语义模型结果。
 - holdout 的 6 个 false negative 为 4 个 related_to 与 2 个 interprets；`none → related_to` 的原始误报被 0.60 阈值过滤。
 - 这些标签由生产元数据和现有血缘关系辅助构造，不是独立双人人工标注；不能把本报告表述为已完成外部业务标注验收。
-- 本次只验证 M4 家族关系校准；Agentic 15–20 多跳问题集未在本报告中执行。GraphRAG 的初步开启门禁判断见[`m4-graphrag-budget-gate-2026-11-16.md`](m4-graphrag-budget-gate-2026-11-16.md)：当前 `related_to` 召回率不低于 60%，GraphRAG 保持关闭，未产生索引预算。
+- 本次只验证 M4 家族关系校准；Agentic 15–20 多跳问题集未在本报告中执行。阻塞原因是凭据而不是实现（Baseline Limitation）：生产 `AGENTRAG_WEKNORA_API_KEY` 对 `/api/v1/models`、`/api/v1/agents`、`/api/v1/sessions` 返回 403；`start-all.sh` 的 token 动作只签发模型 supervisor token，取不到 Core JWT，本机无法据此构造多跳评估会话。解除条件是先取得 Core JWT（原生登录态）再执行 15–20 道多跳问题集；在此之前不得把本报告当作 Agentic 评估完成。GraphRAG 的初步开启门禁判断见[`m4-graphrag-budget-gate-2026-11-16.md`](m4-graphrag-budget-gate-2026-11-16.md)：当前 `related_to` 召回率不低于 60%，GraphRAG 保持关闭，未产生索引预算。
 - 生产库、生产服务与用户数据未被修改；清单和报告位于忽略目录 `tmp/`，保留作复现证据。
 
 ## 复现材料
