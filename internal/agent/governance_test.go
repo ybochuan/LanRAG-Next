@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/Tencent/WeKnora/internal/background"
 	"github.com/Tencent/WeKnora/internal/extensionbridge"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"testing"
@@ -54,5 +55,42 @@ func TestAgentSourceFieldsCoverPinnedDocumentMetadata(t *testing.T) {
 	e.pageContext = nil
 	if _, known = e.modelSourceInputs([]chat.Message{{Images: []string{"UNPROVEN_IMAGE"}}}); known {
 		t.Fatal("unknown vision input can seal")
+	}
+}
+
+// T4-05: every composition that can put bytes into the model which no native
+// source snapshot can prove must fail closed. The engine already refuses these
+// in modelSourceInputs; pin each one so a future change cannot silently seal a
+// run whose model input is partly remembered, pinned, rewritten or background.
+func TestAgentSourceInputsRefuseEveryBypassComposition(t *testing.T) {
+	base := func() *AgentEngine {
+		return &AgentEngine{selectedDocs: []*SelectedDocumentInfo{{KnowledgeID: "doc", KnowledgeBaseID: "kb", Title: "TITLE", FileName: "FILE", FileType: "pdf"}}}
+	}
+	for _, mode := range []string{"page", "question-origin", "pinned-mcp", "pinned-skill", "memory", "context-rewrite", "multi-content"} {
+		t.Run(mode, func(t *testing.T) {
+			e := base()
+			switch mode {
+			case "page":
+				e.pageContext = &PageContextInfo{Title: "UNPROVEN_PAGE"}
+			case "question-origin":
+				e.questionOrigin = &QuestionOriginInfo{}
+			case "pinned-mcp":
+				e.pinnedMCPServices = []*PinnedMCPServiceInfo{{}}
+			case "pinned-skill":
+				e.pinnedSkills = []*PinnedSkillInfo{{}}
+			case "memory":
+				e.memoryPrompt = "REMEMBERED_UNPROVEN"
+			case "context-rewrite":
+				e.contextRewrites = 1
+			case "multi-content":
+				if _, known := e.modelSourceInputs([]chat.Message{{Role: "user", MultiContent: []api.MessageContentPart{{Type: "image_url"}}}}); known {
+					t.Fatal("multi-content input can seal")
+				}
+				return
+			}
+			if inputs, known := e.modelSourceInputs([]chat.Message{{Role: "user", Content: "query"}}); known || inputs != nil {
+				t.Fatalf("%s bypass can seal: known=%v inputs=%+v", mode, known, inputs)
+			}
+		})
 	}
 }
