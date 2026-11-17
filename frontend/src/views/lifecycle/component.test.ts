@@ -163,3 +163,24 @@ test('permission-only views use the lightweight authority endpoint', () => {
   assert.ok(families.includes('authority(scope)'), 'family workspace must use the lightweight authority read')
   assert.ok(!families.includes('overview(scope,1'), 'family workspace must not call overview for authority')
 })
+
+test('cross-KB creation from the target side is blocked with a clear hint', () => {
+  const src = parse(readFileSync(new URL('../business/CreateForm.vue', import.meta.url), 'utf8'))
+  const template = src.descriptor.template?.content ?? ''
+  const script = src.descriptor.scriptSetup!.content
+  assert.ok(script.includes("targetSideCrossBlocked"), 'a guard must exist for the target-side entry')
+  assert.ok(script.includes("targetSideCrossBlocked.value)return"), 'submit must refuse the blocked entry')
+  assert.ok(template.includes('targetSideCrossBlocked ||'), 'the submit button must be disabled')
+  assert.ok(template.includes('跨库关系请前往源文档所在知识库发起'), 'the hint must name where to create cross-KB relations')
+  assert.ok(template.includes('此入口已禁用'), 'the hint must state the entry is disabled')
+})
+
+test('review list supports ascending and descending review_due order', () => {
+  const src = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8'))
+  const template = src.descriptor.template?.content ?? ''
+  const script = src.descriptor.scriptSetup!.content
+  assert.ok(script.includes("reviewSort=ref<'asc'|'desc'>('asc')"), 'a sort direction must be tracked')
+  assert.ok(script.includes('sortedReviewItems'), 'the list must be sorted before rendering')
+  assert.ok(template.includes('v-for="alert in sortedReviewItems"'), 'the review list must render the sorted rows')
+  assert.ok(template.includes('reviewSort=\'asc\'') && template.includes('reviewSort=\'desc\''), 'both directions must be selectable')
+})

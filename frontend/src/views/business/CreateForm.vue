@@ -13,7 +13,7 @@
       <p v-if="fixedDocument?.end==='source'" class="subtle">源文档 · {{ fixedDocument.title }}</p>
       <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
       <p v-if="fixedDocument?.end==='target'" class="subtle">关联文档 · {{ fixedDocument.title }}</p>
-      <p v-if="fixedDocument?.end==='target'&&kind==='relation'" class="subtle">当前从目标文档创建关系；跨库关系请从源文档所在知识库创建。</p>
+      <p v-if="fixedDocument?.end==='target'&&kind==='relation'" class="notice">当前从目标文档创建关系，仅支持同库关联。跨库关系请前往源文档所在知识库发起；此入口已禁用。</p>
       <template v-if="kind==='relation'&&fixedDocument?.end!=='target'">
         <label v-if="crossEligible" class="target-kb">目标知识库
           <select v-model="form.target_knowledge_base_id" :disabled="disabled">
@@ -63,7 +63,7 @@
         <div class="mini-pages"><button type="button" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">上一页</button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><button type="button" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">下一页</button></div>
         <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <button type="button" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">移除</button></small>
       </fieldset>
-      <button type="submit" class="primary" :disabled="disabled || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</button>
+      <button type="submit" class="primary" :disabled="disabled || targetSideCrossBlocked || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</button>
     </form>
   </section>
 </template>
@@ -82,6 +82,10 @@ const clauses=reactive({source_clause:undefined as api.ClauseAnchor|undefined,ta
 const clauseMode=computed(()=>props.kind==='relation'&&clauseRelation(form.edge_type))
 const crossEligible=computed(()=>['amends','interprets','related_to'].includes(form.edge_type))
 const crossKB=computed(()=>crossEligible.value&&(form.target_knowledge_base_id||props.kb)!==props.kb)
+// relation_declare has no source_knowledge_base_id: a cross-KB relation can only
+// be declared from the source document's KB. Block the target-side entry
+// instead of silently producing a wrong-scoped relation.
+const targetSideCrossBlocked=computed(()=>props.kind==='relation'&&props.fixedDocument?.end==='target')
 const revisionMode=ref<'single'|'split'>('single')
 const splitParts=ref([{key:0,title:'',text:''},{key:1,title:'',text:''}])
 let nextPartKey=2
@@ -97,7 +101,7 @@ function addSplitPart(){
   if(splitParts.value.length<8)splitParts.value.push({key:nextPartKey++,title:'',text:''})
 }
 function submit(){
-  if(props.disabled)return
+  if(props.disabled||targetSideCrossBlocked.value)return
   if(clauseMode.value){
     emit('submit','clause_create',{document_id:form.document_id,target_document_id:form.target_document_id,edge_type:form.edge_type,...clauses})
   }
