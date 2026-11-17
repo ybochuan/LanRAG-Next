@@ -3,7 +3,7 @@
   <h3 id="supplement-title">补充文档依赖</h3>
   <p>为本篇补充文档选择父文档，最多 8 篇；父文档可来自当前知识库或另一个已授权知识库。任一父文档失效、过期或版本变化，本篇将停止参与问答。复核到期只提醒，不改变状态。</p>
   <p v-if="loading" role="status">正在核验依赖…</p>
-  <p v-if="error" class="notice error" role="alert">{{ error }}</p>
+  <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
   <template v-if="value">
    <p class="subtle">关系版本 {{ value.revision }} · {{ value.assessment.configured?'已声明依赖':'未声明依赖' }}</p>
    <p v-if="dependencyReason(value.assessment.reason)" class="notice" role="status">{{ dependencyReason(value.assessment.reason) }}</p>
@@ -13,15 +13,15 @@
    <p v-if="value.assessment.review_due" class="subtle">父级最早复核：{{ date(value.assessment.review_due) }}。本篇原有日期保持不变。</p>
    <p v-if="mixedParents" class="notice" role="status">当前依赖分布在多个知识库；保存会按每篇父文档所属知识库分别提交。</p>
    <div v-if="canWrite" class="picker">
-    <label class="search-label">父文档所属知识库<select v-model="parentKB" :disabled="locked" @change="changeParentKB"><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-    <label class="search-label">筛选本页父文档<input v-model="query" type="search" placeholder="文档名称或 ID" :disabled="locked" /></label>
-    <p v-if="candidateError" class="notice error" role="alert">{{ candidateError }}</p>
+    <label class="search-label">父文档所属知识库<t-select v-model="parentKB" :options="parentKBOptions" :disabled="locked" class="kb-select" @change="changeParentKB" /></label>
+    <label class="search-label">筛选本页父文档<t-input v-model="query" placeholder="文档名称或 ID" :disabled="locked" clearable /></label>
+    <t-alert v-if="candidateError" theme="error" class="notice">{{ candidateError }}</t-alert>
     <p v-if="candidateBusy" role="status">正在加载该知识库的生效文档…</p>
     <ul v-else class="choices">
      <li v-for="candidate in filtered" :key="candidate.document_id"><label><input v-model="selected" type="checkbox" :value="selectionKey(parentKB,candidate.document_id)" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" /><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></label></li>
     </ul>
     <p v-if="!candidateBusy&&!filtered.length" class="subtle">本页没有可选文档。</p>
-    <div class="pages"><button type="button" :disabled="locked || candidateBusy || page<=1" @click="move(-1)">上一页</button><span>第 {{ page }} 页</span><button type="button" :disabled="locked || candidateBusy || page*20>=total" @click="move(1)">下一页</button></div>
+    <div class="pages"><t-button variant="outline" size="small" :disabled="locked || candidateBusy || page<=1" @click="move(-1)">上一页</t-button><span>第 {{ page }} 页</span><t-button variant="outline" size="small" :disabled="locked || candidateBusy || page*20>=total" @click="move(1)">下一页</t-button></div>
     <p class="subtle">已选 {{ selected.length }}/8；清空并保存即撤销关系，已有失效状态不会恢复。</p>
     <ul class="selected"><li v-for="item in selectedRefs" :key="`${item.kb}:${item.id}`"><span>{{ title(item.kb,item.id) }}</span><button type="button" :disabled="locked" :aria-label="`移除父文档 ${title(item.kb,item.id)}`" @click="removeSelected(item.kb,item.id)">移除</button></li></ul>
     <div class="actions"><button type="button" class="primary" :disabled="locked || conflict || loading" @click="save">{{ saving?'正在保存…':'保存依赖' }}</button><button type="button" :disabled="locked" @click="reload">重新载入</button></div>
@@ -40,6 +40,8 @@ import { documentTitle } from '@/api/business'
 import { httpStatus } from '../business/model'
 import { dependencyReason, errorMessage, requestFence, stateLabels, supplementCommand } from './model'
 const props=defineProps<{kb:string;documentId:string;canWrite:boolean;parentBusy:boolean;knowledgeBases:{id:string;name:string}[]}>()
+// TDesign select needs a data option list instead of inline <option> children.
+const parentKBOptions=computed(()=>props.knowledgeBases.map(item=>({label:item.name,value:item.id})))
 const emit=defineEmits<{saved:[];busy:[value:boolean]}>()
 const value=ref<api.SupplementView>(),selected=ref<string[]>([]),candidates=ref<api.DocumentRow[]>([])
 const loading=ref(false),saving=ref(false),error=ref(''),success=ref(''),conflict=ref(false)

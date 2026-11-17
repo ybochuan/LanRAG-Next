@@ -1,20 +1,18 @@
 <template>
   <div class="document-picker">
     <label v-if="searchable">按标题搜索{{ label }}
-      <input v-model="title" type="search" maxlength="160" :disabled="disabled" placeholder="输入文档标题关键词" />
+      <t-input v-model="title" :maxlength="160" :disabled="disabled" placeholder="输入文档标题关键词" clearable />
     </label>
-    <label>{{ label }}<select :value="modelValue" :disabled="disabled || loading" required @change="choose">
-      <option value="">请选择生效文档</option>
-      <option v-if="modelValue && !items.some(v=>v.document_id===modelValue)" :value="modelValue">{{ displayTitle(selectedTitle || selectedName, modelValue) }}</option>
-      <option v-for="item in items" :key="item.document_id" :value="item.document_id">{{ displayTitle(item.title, item.document_id) }}</option>
-    </select></label>
-    <p v-if="error" role="alert" class="notice error">{{ error }} <button type="button" @click="load">重试</button></p>
+    <label>{{ label }}
+      <t-select :value="modelValue" :disabled="disabled || loading" :options="options" placeholder="请选择生效文档" @change="chooseValue" />
+    </label>
+    <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
     <p v-else-if="searchable && !loading && !items.length" class="subtle">没有匹配的生效文档。</p>
-    <div class="mini-pages"><button type="button" :disabled="disabled || loading || page<=1" @click="move(-1)">上一页</button><span>{{ loading?'正在载入…':`文档第 ${page} 页` }}</span><button type="button" :disabled="disabled || loading || page*20>=total" @click="move(1)">下一页</button></div>
+    <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled || loading || page<=1" @click="move(-1)">上一页</t-button><span>{{ loading?'正在载入…':`文档第 ${page} 页` }}</span><t-button variant="outline" size="small" :disabled="disabled || loading || page*20>=total" @click="move(1)">下一页</t-button></div>
   </div>
 </template>
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { overview, type DocumentRow } from '@/api/lifecycle'
 import { cached, cacheKey } from '@/api/requestCache'
 import { requestFence } from '../lifecycle/model'
@@ -34,7 +32,14 @@ async function load(){
   try{const data=await cached(cacheKey('document-picker-active',cacheTenant(),kb,currentPage,keyword),()=>overview(kb,currentPage,'active',keyword),5_000);if(!fence.current(token))return;items.value=data.documents.filter(v=>v.document_id!==props.exclude);total.value=data.total}
   catch{if(fence.current(token)){items.value=[];error.value='无法载入生效文档。'}}finally{if(fence.current(token))loading.value=false}
 }
-function choose(event:Event){const id=(event.target as HTMLSelectElement).value;selectedName.value=items.value.find(v=>v.document_id===id)?.title||id;emit('update:modelValue',id)}
+// TDesign select hands back the value directly, and its options must be data:
+// the current selection is kept visible even when it is outside this page.
+const options=computed(()=>{
+  const rows=items.value.map(item=>({label:displayTitle(item.title,item.document_id),value:item.document_id}))
+  if(props.modelValue&&!rows.some(row=>row.value===props.modelValue))rows.unshift({label:displayTitle(props.selectedTitle||selectedName.value,props.modelValue),value:props.modelValue})
+  return [{label:'请选择生效文档',value:''},...rows]
+})
+function chooseValue(id:string){selectedName.value=items.value.find(v=>v.document_id===id)?.title||id;emit('update:modelValue',id)}
 function move(delta:number){page.value+=delta;void load()}
 watch(()=>title.value.trim(),()=>{
   clearTimeout(searchTimer)

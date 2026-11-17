@@ -2,10 +2,10 @@
  <main class="lifecycle-page" aria-labelledby="lifecycle-title">
   <header class="page-heading">
    <div><span class="eyebrow">知识治理 / 文档</span><h1 id="lifecycle-title">文档工作台</h1><p>集中管理生命周期、版本和文档关系。</p></div>
-   <button v-if="!workspaceView" class="secondary" :disabled="busy || !kb" @click="loadAll">刷新</button>
+   <t-button v-if="!workspaceView" variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
   </header>
-  <section class="scope-bar"><label for="lifecycle-kb">知识库</label><select id="lifecycle-kb" v-model="kb" :disabled="loadingKB || detailLocked || viewLocked"><option value="">选择知识库</option><option v-for="item in knowledgeBases" :key="item.id" :value="item.id">{{ item.name }}</option></select><span v-if="data" class="access-badge">{{ data.can_write?'可管理':'只读' }}</span></section>
-  <div v-if="error" class="notice error" role="alert">{{ error }} <button class="text-button" @click="loadAll">重新载入</button></div>
+  <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
+  <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="loadAll">重新载入</t-button></t-alert>
   <p v-if="data?.degraded" class="notice" role="status">{{ degradedMessage }}</p>
   <div v-if="loadingKB" class="empty" role="status">正在加载知识库…</div>
   <div v-else-if="!knowledgeBases.length && !error" class="empty">还没有可访问的知识库。创建或加入知识库后即可管理文档。</div>
@@ -23,9 +23,9 @@
    <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
     <label for="lifecycle-title-search">文档标题</label>
-    <input id="lifecycle-title-search" v-model="titleQuery" type="search" maxlength="160" placeholder="搜索标题" />
+    <t-input id="lifecycle-title-search" v-model="titleQuery" :maxlength="160" placeholder="搜索标题" clearable class="filter-input" />
     <label for="lifecycle-state-filter">状态</label>
-    <select id="lifecycle-state-filter" v-model="filter"><option value="">全部状态</option><option v-for="state in states" :key="state" :value="state">{{ stateLabels[state] }}</option></select>
+    <t-select id="lifecycle-state-filter" v-model="filter" :options="stateOptions" class="filter-select" />
    </div>
    <div v-if="busy && tab==='documents'" class="loading" role="status">正在读取生命周期事实…</div>
    <template v-else-if="data || tab==='reviews'">
@@ -33,11 +33,11 @@
     <section v-if="tab==='documents'" class="document-panel" role="tabpanel" aria-labelledby="tab-documents">
      <div class="table-wrap">
       <table>
-       <thead><tr><th><button type="button" class="text-button sort-button" :aria-label="`按文档排序${sortMark('title')}`" @click="sortDocuments('title')">文档{{ sortMark('title') }}</button></th><th><button type="button" class="text-button sort-button" :aria-label="`按生命周期排序${sortMark('state')}`" @click="sortDocuments('state')">生命周期{{ sortMark('state') }}</button></th><th><button type="button" class="text-button sort-button" :aria-label="`按版本族排序${sortMark('family')}`" @click="sortDocuments('family')">版本族{{ sortMark('family') }}</button></th><th><button type="button" class="text-button sort-button" :aria-label="`按有效至排序${sortMark('effective_until')}`" @click="sortDocuments('effective_until')">有效至{{ sortMark('effective_until') }}</button></th></tr></thead>
+       <thead><tr><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按文档排序${sortMark('title')}`" @click="sortDocuments('title')">文档{{ sortMark('title') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按生命周期排序${sortMark('state')}`" @click="sortDocuments('state')">生命周期{{ sortMark('state') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按版本族排序${sortMark('family')}`" @click="sortDocuments('family')">版本族{{ sortMark('family') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按有效至排序${sortMark('effective_until')}`" @click="sortDocuments('effective_until')">有效至{{ sortMark('effective_until') }}</t-button></th></tr></thead>
        <tbody>
         <tr v-for="doc in sortedDocuments" :key="doc.document_id">
-         <td><button class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</button></td>
-         <td><span class="state-badge" :class="doc.state">{{ stateLabels[doc.state] || doc.state }}</span></td>
+         <td><t-button variant="text" class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</t-button></td>
+         <td><t-tag variant="light" size="small" :theme="stateTagTheme(doc.state)">{{ stateLabels[doc.state] || doc.state }}</t-tag></td>
          <td>{{ doc.business_family?.label || '未归族' }}</td><td>{{ date(doc.annotations.effective_until) }}</td>
         </tr>
         <tr v-if="!allDocuments.length"><td colspan="4" class="empty">当前没有匹配的文档。</td></tr>
@@ -47,8 +47,8 @@
      <p class="source-note">共 {{ allDocuments.length }} 项 · 列表可滚动查看全部</p>
     </section>
     </template>
-    <section v-if="tab==='reviews'" class="panel" role="tabpanel" aria-labelledby="tab-reviews"><div class="section-heading"><div><h2>待复核</h2><p>到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。</p></div></div><p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p><p v-if="reviewBusy" role="status">正在加载提醒…</p><div v-if="reviewItems.length && !reviewBusy" class="review-sort"><span>按复核到期</span><button type="button" :class="{selected:reviewSort==='asc'}" @click="reviewSort='asc'">正序</button><button type="button" :class="{selected:reviewSort==='desc'}" @click="reviewSort='desc'">倒序</button></div><div v-else-if="reviewItems.length" class="review-list"><button v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" @click="openDocument(alert.document_id, alert.title)"><span><strong>{{ alert.title || alert.document_id }}</strong><small>复核到期 {{ date(alert.review_due) }}</small><small v-if="alert.delivered_at">本地投递已接受 {{ date(alert.delivered_at) }}</small></span><span class="review-pill" :class="reviewDeliveryClass(alert.delivery_state)">{{ reviewDeliveryLabel(alert.delivery_state) }}</span></button></div><p v-else-if="!reviewError" class="empty">当前没有待复核提醒。</p><p v-if="reviewsTruncated" class="notice">最多展示 1000 条提醒；当前列表可能尚未包含全部待办。</p><p class="source-note">投递状态取自通知队列；「已投递」表示本地回调已接受该提醒，不代表人工已读。</p></section>
-    <template v-if="data"><section v-if="tab==='rules'" class="panel rules-panel" role="tabpanel" aria-labelledby="tab-rules"><span class="eyebrow">仅应用于后续初始化的文档</span><h2>知识库默认规则</h2><p>已存在文档的日期保持原值。0 表示不设置该项默认日期；未设置失效日期即永久有效。</p><p class="source-note">当前来源：{{ ruleSourceLabel(data.rules) }} · 本库版本 {{ data.rule_revision }}</p><form @submit.prevent="submitRules"><label>延迟生效天数<input v-model.number="ruleForm.effective_delay_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><label>有效天数<input v-model.number="ruleForm.valid_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><label>复核间隔天数<input v-model.number="ruleForm.review_days" type="number" min="0" max="36500" step="1" required :disabled="!data.can_write || savingRules" /></label><p v-if="ruleError" class="notice error" role="alert">{{ ruleError }}</p><p v-if="ruleSuccess" class="notice success" role="status">规则已保存，将用于后续初始化的文档。</p><button v-if="data.can_write" class="primary" :disabled="savingRules || !validRules(ruleForm)">{{ savingRules?'正在保存…':'保存规则' }}</button><p v-else class="source-note">当前账号仅有查看权限。</p></form></section></template>
+    <section v-if="tab==='reviews'" class="panel" role="tabpanel" aria-labelledby="tab-reviews"><div class="section-heading"><div><h2>待复核</h2><p>到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。</p></div></div><p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p><p v-if="reviewBusy" role="status">正在加载提醒…</p><div v-if="reviewItems.length && !reviewBusy" class="review-sort"><span>按复核到期</span><t-radio-group v-model="reviewSort" variant="default" size="small"><t-radio-button value="asc">正序</t-radio-button><t-radio-button value="desc">倒序</t-radio-button></t-radio-group></div><div v-else-if="reviewItems.length" class="review-list"><div v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" role="button" tabindex="0" @click="openDocument(alert.document_id, alert.title)" @keydown.enter="openDocument(alert.document_id, alert.title)"><span><strong>{{ alert.title || alert.document_id }}</strong><small>复核到期 {{ date(alert.review_due) }}</small><small v-if="alert.delivered_at">本地投递已接受 {{ date(alert.delivered_at) }}</small></span><t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state) }}</t-tag></div></div><p v-else-if="!reviewError" class="empty">当前没有待复核提醒。</p><p v-if="reviewsTruncated" class="notice">最多展示 1000 条提醒；当前列表可能尚未包含全部待办。</p><p class="source-note">投递状态取自通知队列；「已投递」表示本地回调已接受该提醒，不代表人工已读。</p></section>
+    <template v-if="data"><section v-if="tab==='rules'" class="panel rules-panel" role="tabpanel" aria-labelledby="tab-rules"><span class="eyebrow">仅应用于后续初始化的文档</span><h2>知识库默认规则</h2><p>已存在文档的日期保持原值。0 表示不设置该项默认日期；未设置失效日期即永久有效。</p><p class="source-note">当前来源：{{ ruleSourceLabel(data.rules) }} · 本库版本 {{ data.rule_revision }}</p><form @submit.prevent="submitRules"><label>延迟生效天数<t-input-number v-model="ruleForm.effective_delay_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>有效天数<t-input-number v-model="ruleForm.valid_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>复核间隔天数<t-input-number v-model="ruleForm.review_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><p v-if="ruleError" class="notice error" role="alert">{{ ruleError }}</p><p v-if="ruleSuccess" class="notice success" role="status">规则已保存，将用于后续初始化的文档。</p><t-button v-if="data.can_write" theme="primary" type="submit" :loading="savingRules" :disabled="!validRules(ruleForm)">{{ savingRules?'正在保存…':'保存规则' }}</t-button><p v-else class="source-note">当前账号仅有查看权限。</p></form></section></template>
    </template>
   </template>
   </template>
@@ -59,13 +59,13 @@
       <div v-if="detail" class="drawer-meta"><span class="state-badge" :class="detail.snapshot.current.state">{{ label(detail.snapshot.current.state) }}</span>
        <span>{{ detail.business_family?.label || '未归族' }}</span></div>
      </div>
-     <button class="close" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument">×</button>
+     <t-button variant="text" shape="square" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
     </header>
     <nav class="tabs detail-tabs" aria-label="文档详情标签">
      <button v-for="item in detailTabs" :key="item.key" type="button" :disabled="detailLocked" :aria-pressed="detailTab===item.key" :class="{selected:detailTab===item.key}" @click="detailTab=item.key">{{ item.label }}</button>
     </nav>
     <p v-if="detailBusy && !detail" role="status">正在加载文档…</p>
-    <p v-if="detailError" class="notice error" role="alert">{{ detailError }} <button class="text-button" :disabled="detailLocked" @click="reloadDocument">重新载入</button></p>
+    <p v-if="detailError" class="notice error" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">重新载入</t-button></p>
     <template v-if="detail">
      <template v-if="detailTab==='life'">
       <h3>有效期与复核</h3>
@@ -76,7 +76,7 @@
        <label>失效时间<input v-model="dateForm.effective_until" type="datetime-local" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
        <label>复核时间<input v-model="dateForm.review_due" type="datetime-local" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
        <p v-if="documentSuccess" class="notice success" role="status">{{ documentSuccess }}</p>
-       <button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" class="primary" :disabled="detailLocked || documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</button>
+       <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
       </form>
      </template>
      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
@@ -94,17 +94,17 @@
       </li></ol><p v-else class="source-note">暂无事件。</p>
       <p v-if="detail.events_truncated" class="source-note">仅展示最近 100 条事件。</p>
      <h3>关联与版本操作</h3>
-     <p v-if="activityError" role="alert">{{ activityError }} <button class="text-button" @click="loadActivity">重试</button></p>
+     <p v-if="activityError" role="alert">{{ activityError }} <t-button variant="text" size="small" @click="loadActivity">重试</t-button></p>
      <p v-else-if="activityBusy" role="status">正在读取治理记录…</p>
      <ol v-else-if="activity.length" class="timeline"><li v-for="event in activity" :key="event.operation_id">
       <strong>{{ governanceAction(event.action) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ statusLabels[event.status] || event.status }}</p>
      </li></ol>
      <p v-else class="source-note">暂无关联与版本操作。</p>
      <div v-if="activityPage>1 || activity.length===20" class="pagination">
-      <button class="secondary" :disabled="activityBusy || activityPage<=1" @click="activityPage--">上一页</button>
-      <button class="secondary" :disabled="activityBusy || activity.length<20" @click="activityPage++">下一页</button>
+      <t-button variant="outline" size="small" :disabled="activityBusy || activityPage<=1" @click="activityPage--">上一页</t-button>
+      <t-button variant="outline" size="small" :disabled="activityBusy || activity.length<20" @click="activityPage++">下一页</t-button>
      </div>
-      <button type="button" class="secondary" @click="closeDocument(); showWorkspace('feedback-governance')">查看反馈审核</button>
+      <t-button variant="outline" @click="closeDocument(); showWorkspace('feedback-governance')">查看反馈审核</t-button>
      </template>
      <BusinessView v-else-if="detailTab==='revisions'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="revisions" @locked="childLocked=$event" />
     </template>
@@ -124,6 +124,10 @@ import * as api from '@/api/lifecycle'
 import SupplementEditor from './SupplementEditor.vue'
 import { useAuthStore } from '@/stores/auth'
 import { annotationsForSave, errorMessage, requestFence, reviewDeliveryClass, reviewDeliveryLabel, ruleSourceLabel, stateLabels, states, toLocalInput, validRules } from './model'
+// TDesign select options; the workbench renders WeKnora-native selects, so the
+// option arrays live here instead of hand-written <option> children.
+const kbOptions=computed(()=>knowledgeBases.value.map(item=>({label:item.name,value:item.id})))
+const stateOptions=computed(()=>[{label:'全部状态',value:''},...states.map(state=>({label:stateLabels[state],value:state}))])
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
@@ -206,6 +210,9 @@ const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone
 
 const date=(value?:string|null)=>value?new Date(value).toLocaleString():'未设置'
 const label=(state:string)=>stateLabels[state as api.LifecycleState]||state||'初始'
+// Map lifecycle state onto a TDesign tag theme so the workbench badge uses the
+// native component palette instead of bespoke colours.
+const stateTagTheme=(state:string)=>({active:'success',scheduled:'primary',pending:'warning',stale:'warning',failed:'danger',archived:'default',superseded:'default'} as Record<string,string>)[state]||'default'
 const degradedMessage=computed(()=>{
  if(!data.value?.degraded)return ''
  const reasons=(data.value.degraded_reason||'').split(',').filter(Boolean)
@@ -312,17 +319,18 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
 </script>
 
 <style scoped>
-.drawer-meta { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
-.detail-tabs { flex-wrap:wrap; margin-top:14px; }
+.drawer-meta { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+.detail-tabs { flex-wrap:wrap; margin-top:16px; }
 .document-drawer :deep(.business-page form) { display:block; }
 .document-drawer :deep(.business-page form label) { margin-block:8px; }
-.document-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0; }
-.document-filters input,.document-filters select { padding:8px 10px; border:1px solid var(--td-component-stroke); border-radius:6px; background:var(--td-bg-color-container); color:var(--td-text-color-primary); }
-.document-filters input { width:min(240px,100%); }
+.document-filters { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:16px 0; }
+.document-filters .filter-input { width:min(240px,100%); }
+.document-filters .filter-select { width:160px; }
+.document-filters > label { font-size:var(--td-font-size-body-medium); color:var(--td-text-color-primary); }
 .lifecycle-page {
   height:100%;
   overflow:auto;
-  padding:36px 40px 60px;
+  padding:24px 32px 40px;
   background:var(--td-bg-color-page);
   color:var(--td-text-color-primary);
 }
@@ -333,7 +341,7 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
   gap:16px;
 }
 .page-heading {
-  margin-bottom:26px;
+  margin-bottom:24px;
 }
 .eyebrow {
   color:var(--td-brand-color);
@@ -342,115 +350,101 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
   font-weight:600;
 }
 h1 {
-  font-size:var(--app-text-4xl);
-  line-height:1.3;
+  font-size:var(--td-font-size-title-large);
+  line-height:1.4;
   margin:8px 0;
+  color:var(--td-text-color-primary);
 }
 h2 {
-  font-size:var(--app-text-xl);
+  font-size:var(--td-font-size-title-medium);
   margin:8px 0;
+  color:var(--td-text-color-primary);
 }
 h3 {
-  font-size:var(--app-text-lg);
+  font-size:var(--td-font-size-title-small);
   margin:28px 0 12px;
+  color:var(--td-text-color-primary);
 }
 p {
-  font-size:var(--app-text-sm);
+  font-size:var(--td-font-size-body-medium);
   color:var(--td-text-color-secondary);
-  line-height:1.7;
+  line-height:1.6;
   margin:6px 0;
 }
 .scope-bar {
   justify-content:flex-start;
-  padding:16px 20px;
+  gap:12px;
+  min-height:56px;
+  padding:12px 24px;
   background:var(--td-bg-color-container);
   border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-xl);
+  border-radius:var(--td-radius-medium);
 }
 .scope-bar label {
-  font-size:var(--app-text-sm);
+  font-size:var(--td-font-size-body-medium);
   font-weight:600;
+  color:var(--td-text-color-primary);
 }
-.scope-bar select {
+.scope-bar .scope-select {
   width:min(420px,60%);
 }
-select,input {
-  font:inherit;
-  color:inherit;
-  background:var(--td-bg-color-container);
-  border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-sm);
-  padding:9px 11px;
-  min-width:0;
+/* Interactive controls are TDesign components; only layout/typography is set
+   here. Bare element selectors such as `button{border:0}` are forbidden: vue
+   scoped styles reach a child component root and would strip TDesign borders. */
+/* Document titles read as primary text, like the native list, and only turn
+   brand-coloured on hover. */
+.document-link {
+  color:var(--td-text-color-primary);
+  font-size:var(--td-font-size-body-medium);
+  font-weight:600;
+  width:100%;
+  padding:0;
+  height:auto;
+  text-align:left;
+  justify-content:flex-start;
+  /* TDesign buttons do not wrap by default; document names must not be cut. */
+  white-space:normal;
 }
-button {
-  font:inherit;
-  cursor:pointer;
-  border:0;
-}
-button:focus-visible,select:focus-visible,input:focus-visible {
-  outline:2px solid var(--td-brand-color);
-  outline-offset:3px;
-}
-button:disabled {
-  cursor:default;
-  opacity:.5;
-}
-.secondary,.primary {
-  font-size:var(--app-text-sm);
-  border-radius:var(--app-radius-sm);
-  padding:9px 15px;
-}
-.secondary {
-  background:var(--td-bg-color-container);
-  border:1px solid var(--td-component-stroke);
-  color:inherit;
-}
-.primary {
-  background:var(--td-brand-color);
-  color:var(--td-text-color-anti);
-}
-.text-button,.document-link {
-  background:transparent;
-  color:var(--td-brand-color);
-  padding:2px 0;
+.document-link :deep(.t-button__text) {
+  display:block;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
   text-align:left;
 }
-.document-link {
-  /* WeKnora native document names are primary text, not brand-coloured links. */
-  color:var(--td-text-color-primary);
-  font-size:var(--app-text-sm);
-  font-weight:600;
-  max-width:340px;
-  overflow-wrap:anywhere;
-}
-.document-link:hover,.document-link:focus-visible {
+.document-link:hover {
   color:var(--td-brand-color);
 }
 .sort-button {
   font-weight:600;
   white-space:nowrap;
 }
-.access-badge {
+.scope-bar .t-tag {
   margin-left:auto;
-  background:var(--td-bg-color-secondarycontainer);
-  padding:5px 9px;
-  border-radius:var(--app-radius-xs);
-  font-size:var(--app-text-xs);
-  color:var(--td-text-color-secondary);
 }
 .tabs {
   display:flex;
   gap:24px;
   border-bottom:1px solid var(--td-component-stroke);
-  margin:22px 0;
+  margin:24px 0;
 }
 .tabs button {
   padding:12px 1px;
   background:transparent;
   color:var(--td-text-color-secondary);
-  font-size:var(--app-text-md);
+  font-size:var(--td-font-size-body-medium);
   border-bottom:2px solid transparent;
+  border-top:0;
+  border-left:0;
+  border-right:0;
+  cursor:pointer;
+}
+/* TDesign draws focus as a 2px ring in the brand focus colour, not an outline. */
+.tabs button:focus-visible {
+  outline:none;
+  box-shadow:0 0 0 2px var(--td-brand-color-focus);
+  border-radius:var(--td-radius-default);
 }
 .tabs button.selected {
   color:var(--td-brand-color);
@@ -462,7 +456,7 @@ button:disabled {
 }
 .section-heading h2 span {
   color:var(--td-text-color-placeholder);
-  font-size:var(--app-text-sm);
+  font-size:var(--td-font-size-body-small);
   font-weight:400;
   margin-left:8px;
 }
@@ -471,13 +465,13 @@ button:disabled {
   overflow:auto;
   max-height:60vh;
   border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-lg);
+  border-radius:var(--td-radius-medium);
   background:var(--td-bg-color-container);
 }
 table {
   border-collapse:collapse;
   width:100%;
-  font-size:var(--app-text-xs);
+  font-size:var(--td-font-size-body-medium);
   white-space:nowrap;
   text-align:left;
 }
@@ -485,18 +479,24 @@ th {
   font-weight:500;
   background:var(--td-bg-color-secondarycontainer);
   color:var(--td-text-color-secondary);
-  padding:13px 16px;
+  font-size:var(--td-font-size-body-medium);
+  padding:12px 16px;
   position:sticky;
   top:0;
   z-index:1;
 }
 td {
-  padding:16px;
+  padding:12px 16px;
   border-top:1px solid var(--td-component-stroke);
+  color:var(--td-text-color-primary);
+}
+tbody tr:hover {
+  background:var(--td-bg-color-container-hover);
 }
 td:first-child {
   white-space:normal;
   min-width:220px;
+  width:100%;
 }
 .doc-id {
   display:block;
@@ -535,27 +535,28 @@ td:first-child {
   margin-right:auto;
 }
 .panel {
-  padding:26px;
+  padding:24px;
   background:var(--td-bg-color-container);
   border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-xl);
+  border-radius:var(--td-radius-medium);
 }
 .rules-panel {
   max-width:760px;
 }
 .rules-panel form {
   max-width:400px;
-  margin-top:25px;
+  margin-top:24px;
 }
 form label {
   display:flex;
   flex-direction:column;
-  gap:9px;
-  font-size:var(--app-text-sm);
-  margin:18px 0;
+  gap:8px;
+  font-size:var(--td-font-size-body-medium);
+  margin:16px 0;
+  color:var(--td-text-color-primary);
 }
 .source-note {
-  font-size:var(--app-text-xs);
+  font-size:var(--td-font-size-body-small);
   color:var(--td-text-color-placeholder);
 }
 .notice {
@@ -575,7 +576,7 @@ form label {
   color:var(--td-brand-color);
 }
 .empty,.loading {
-  padding:45px;
+  padding:40px;
   text-align:center;
   font-size:var(--app-text-sm);
   color:var(--td-text-color-secondary);
@@ -588,12 +589,12 @@ form label {
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:17px 0;
+  padding:16px 0;
   border-bottom:1px solid var(--td-component-stroke);
   background:transparent;
   color:inherit;
   text-align:left;
-  gap:18px;
+  gap:16px;
 }
 .review-item strong {
   font-size:var(--app-text-sm);
@@ -602,7 +603,7 @@ form label {
 .review-item small {
   display:block;
   color:var(--td-text-color-secondary);
-  margin-top:7px;
+  margin-top:8px;
 }
 .review-pill {
   color:var(--td-warning-color);
@@ -631,7 +632,7 @@ form label {
   height:100%;
   overflow:auto;
   background:var(--td-bg-color-container);
-  padding:30px;
+  padding:32px;
   box-shadow:-8px 0 30px #11182718;
   outline:0;
 }
@@ -705,7 +706,7 @@ form label {
     padding:12px;
   }
   .tabs {
-    gap:18px;
+    gap:16px;
   }
   .document-drawer {
     padding:20px;

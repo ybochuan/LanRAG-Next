@@ -82,3 +82,32 @@
 3. 用户接受M2拒绝无完整来源的历史回答/压缩/恢复、Wiki/图谱混合内容。原生页面快照、旧答案来源记忆背景、任意SQL/会话检索、通用操作及不透明外部MCP结果按此拒绝或省略；存储不删除。恢复能力须先补齐来源链并验证撤销。
 4. 不宣称普通REST管理、已签发资源权限、显式复制到工作区/文件/记忆的副本、用户附件或生成过程中的持续撤销已受控。测试须区分当前来源门禁与内容级删除。
 5. 回归运行 `python3 extensions/scripts/governance_e2e.py`（8090需空闲，或按运维文档使用隔离网络空间）；检查active正向、真实stale迁移、同会话/已知ID负向、断Host答案生成零次。模型夹具必须捕获所有请求与重排输入，正文/描述/旧答案标记独立，不能只检查最终答案。
+
+## 8. 前端 UI 规范：以 WeKnora 原生 TDesign 体系为唯一标准（2026-11-17 用户授权）
+
+适用范围：`frontend/` 下全部自建页面（含文档工作台 `views/lifecycle/`、业务视图 `views/business/`、版本族 `views/families/`、关系图 `views/lineage/`）。
+
+### 8.1 事实基准（从原生代码实测，不得凭印象改）
+
+- 原生 UI 组件库是 `tdesign-vue-next`（`frontend/package.json`），并在 `main.ts` 通过 `app.use(TDesign)` 全局注册；页面可直接写 `<t-button>` / `<t-select>` / `<t-input>` / `<t-table>`，无需逐个 import。
+- 原生页面实测组件密度：`views/knowledge/KnowledgeBaseList.vue` 有 97 个 `<t-*>`、8 个原生控件；`views/knowledge/KnowledgeBase.vue` 有 42 个 `<t-*>`。自建工作台整改前为 0 个 `<t-*>`、约 200 个原生控件。
+- 字体：`--app-font-family` 经 theme.css 映射为 `--td-font-family`；`App.vue` 全局 `font-family: var(--app-font-family)`。
+- 背景：`App.vue` 全局 `background: var(--td-bg-color-page)`；卡片/面板用 `--td-bg-color-container`，次级容器（表头、分组）用 `--td-bg-color-secondarycontainer`。
+
+### 8.2 强制规则
+
+1. **禁止裸控件**。不得在业务页面直接写 `<select>`、`<input>`、`<button>`、`<textarea>` 作为交互控件；一律改用 TDesign：下拉 `<t-select :options="…">`、文本 `<t-input>`、按钮 `<t-button>`、多行 `<t-textarea>`、开关 `<t-switch>`、弹层 `<t-dialog>`/`<t-drawer>`、标签 `<t-tag>`、加载 `<t-loading>`。
+2. **禁止自造按钮样式**。不得新增 `.primary` / `.secondary` / `.text-button` 这类仿制按钮类；用 `<t-button theme="primary">`、`<t-button variant="outline">`、`<t-button variant="text">`。
+3. **字号只用 TDesign 阶梯**：正文 `--td-font-size-body-medium`(14px)、次要 `--td-font-size-body-small`(12px)、区块标题 `--td-font-size-title-medium`(16px)、页面标题 `--td-font-size-title-large`(20px)。禁止再用 `--app-text-sm` 把正文压到 12px。
+4. **圆角只用 TDesign 阶梯**：控件 `--td-radius-default`(3px)、卡片/面板 `--td-radius-medium`(6px)、抽屉/弹窗 `--td-radius-large`(9px)。禁止 `--app-radius-xl`(12px) 这类超规格圆角。
+5. **颜色只用语义 token**：品牌 `--td-brand-color`；文字 `--td-text-color-primary` / `-secondary` / `-placeholder`；描边 `--td-component-stroke`；背景 `--td-bg-color-page` / `-container` / `-secondarycontainer`。禁止硬编码 hex。
+6. **表格**：优先 `<t-table>`；若因排序/可访问性保留语义 `<table>`，必须复刻 TDesign 表格视觉——表头 `--td-bg-color-secondarycontainer` + `--td-text-color-secondary`、行分隔 `--td-component-stroke`、行悬停 `--td-bg-color-container-hover`、单元格内边距与字号对齐 TDesign。
+7. **控件尺寸统一**：默认 `size="medium"`（32px 高）；表格内操作按钮 `size="small"`。禁止用 padding 手工拼高度。
+8. **页面骨架**：根容器 `background: var(--td-bg-color-page)`；内容卡片 `background: var(--td-bg-color-container)` + `border: 1px solid var(--td-component-stroke)` + `border-radius: var(--td-radius-medium)`；页面左右留白 24–40px。
+
+### 8.3 验收门禁
+
+- 每个自建页面必须通过：`npm run type-check`、`npm test`、**`npm run build`**。
+- **模板编译错误（如 `v-else-if` 失去前置 `v-if`）只有 `npm run build` 会报，`vue-tsc` 查不出来**；因此前端改动必须跑 build，不得只跑 type-check。
+- 构建产物必须部署到 `WEKNORA_WEB_DIR`（生产为 `/mnt/d/LanRAG-Next/web`，gitignored），并在浏览器硬刷新后核对；只提交源码不等于上线。
+- 新增页面验收时抽查：页面内 `<select>`/`<input>`/`<button>` 出现次数应为 0（由 `<t-*>` 替代）；CSS 中不应出现新增硬编码颜色。

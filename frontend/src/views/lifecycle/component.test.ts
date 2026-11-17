@@ -124,7 +124,8 @@ test('the workbench no longer hosts a message centre; the native bell owns remin
 test('the review panel shows the notification delivery state', () => {
   const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
   assert.ok(template.includes('reviewDeliveryLabel(alert.delivery_state)'), 'the panel must name the delivery state')
-  assert.ok(template.includes('reviewDeliveryClass(alert.delivery_state)'), 'the panel must tone the delivery badge')
+  assert.ok(template.includes('<t-tag'), 'the delivery badge must be a TDesign tag')
+  assert.ok(template.includes(":theme=\"alert.delivery_state==='delivered'?'success':'default'\""), 'the delivery tag must be toned by delivery state')
   assert.ok(template.includes('alert.delivered_at'), 'the panel must show when the local callback accepted the reminder')
   assert.ok(!template.includes('待复核 →'), 'the fixed pill must not hide the real delivery state')
   assert.ok(template.includes('不代表人工已读'), 'the panel must not present a delivered reminder as human-read')
@@ -175,17 +176,22 @@ test('review list supports ascending and descending review_due order', () => {
   assert.ok(script.includes("reviewSort=ref<'asc'|'desc'>('asc')"), 'a sort direction must be tracked')
   assert.ok(script.includes('sortedReviewItems'), 'the list must be sorted before rendering')
   assert.ok(template.includes('v-for="alert in sortedReviewItems"'), 'the review list must render the sorted rows')
-  assert.ok(template.includes('reviewSort=\'asc\'') && template.includes('reviewSort=\'desc\''), 'both directions must be selectable')
+  assert.ok(template.includes('<t-radio-group v-model="reviewSort"'), 'the sort switch must be a TDesign radio group')
+  assert.ok(template.includes('value="asc"') && template.includes('value="desc"'), 'both directions must be selectable')
 })
 
 test('document list uses WeKnora text colour and shows all documents in a scroll area', () => {
   const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
   const script = parse(file).descriptor.scriptSetup!.content
   const template = parse(file).descriptor.template?.content ?? ''
-  assert.ok(file.includes('.document-link:hover,.document-link:focus-visible {'), 'document names should only turn brand-coloured on hover')
+  assert.ok(file.includes('.document-link:hover {'), 'document names should only turn brand-coloured on hover')
+  assert.ok(file.includes('.document-link :deep(.t-button__text) {'), 'the TDesign button text must wrap instead of being clipped')
+  assert.ok(file.includes('white-space:normal;'), 'document names must wrap onto multiple lines')
   assert.ok(file.includes('color:var(--td-text-color-primary);'), 'document names default to WeKnora primary text colour')
   assert.ok(script.includes('allDocuments.value=rows'), 'all document pages must be accumulated')
   assert.ok(template.includes('v-for="doc in sortedDocuments"'), 'table renders the full sorted document set')
+  assert.ok(template.includes('<t-select id="lifecycle-state-filter"'), 'the state filter must be a TDesign select')
+  assert.ok(template.includes('<t-input id="lifecycle-title-search"'), 'the title search must be a TDesign input')
   assert.ok(!template.includes('第 {{ page }} 页'), 'pagination footer must be removed')
   assert.ok(file.includes('max-height:60vh;'), 'the list must be a bounded scroll area')
 })

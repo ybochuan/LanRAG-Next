@@ -1,25 +1,21 @@
 <template>
   <div class="clause-picker">
     <label>{{ label }}
-      <select :value="modelValue?.chunk_id || ''" :disabled="disabled || !documentId || loading || hashing" required @change="choose">
-        <option value="">{{ documentId ? '请选择条款分块' : '请先选择文档' }}</option>
-        <option v-if="modelValue && !rows.some(row => row.id === modelValue?.chunk_id)" :value="modelValue.chunk_id">已选分块 {{ selectedIndex }}</option>
-        <option v-for="row in rows" :key="row.id" :value="row.id">分块 {{ row.chunk_index + 1 }} · {{ row.content.replace(/\s+/g, ' ').slice(0, 64) }}</option>
-      </select>
+      <t-select :value="modelValue?.chunk_id || ''" :disabled="disabled || !documentId || loading || hashing" :options="options" :placeholder="documentId ? '请选择条款分块' : '请先选择文档'" @change="choose" />
     </label>
     <pre v-if="selectedText" class="content-preview">{{ selectedText }}</pre>
-    <p v-if="error" role="alert" class="notice error">{{ error }} <button type="button" @click="load">重试</button></p>
+    <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
     <p v-else-if="documentId && !loading && !rows.length" class="subtle">当前页没有可选正文分块。</p>
     <div v-if="documentId" class="mini-pages">
-      <button type="button" :disabled="disabled || loading || page <= 1" @click="move(-1)">上一页</button>
+      <t-button variant="outline" size="small" :disabled="disabled || loading || page <= 1" @click="move(-1)">上一页</t-button>
       <span>{{ loading ? '正在载入…' : `分块第 ${page} 页` }}</span>
-      <button type="button" :disabled="disabled || loading || !hasNext" @click="move(1)">下一页</button>
+      <t-button variant="outline" size="small" :disabled="disabled || loading || !hasNext" @click="move(1)">下一页</t-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { clauseAnchor, clauseChunks, type ClauseAnchor, type ClauseChunk } from '@/api/business'
 import { requestFence } from '../lifecycle/model'
 
@@ -57,8 +53,15 @@ function move(delta: number) {
   void load()
 }
 
-async function choose(event: Event) {
-  const id = (event.target as HTMLSelectElement).value
+const options = computed(() => {
+  const items: { label: string; value: string }[] = rows.value.map(row => ({ label: `分块 ${row.chunk_index + 1} · ${row.content.replace(/\s+/g, ' ').slice(0, 64)}`, value: row.id }))
+  if (props.modelValue && !items.some(item => item.value === props.modelValue?.chunk_id)) {
+    items.unshift({ label: `已选分块 ${selectedIndex.value}`, value: props.modelValue.chunk_id })
+  }
+  return [{ label: props.documentId ? '请选择条款分块' : '请先选择文档', value: '' }, ...items]
+})
+
+async function choose(id: string) {
   if (id === props.modelValue?.chunk_id) return
   const token = selectionFence.begin()
   emit('update:modelValue', undefined)
