@@ -14,14 +14,14 @@
    <p v-if="mixedParents" class="notice" role="status">当前依赖分布在多个知识库；保存会按每篇父文档所属知识库分别提交。</p>
    <div v-if="canWrite" class="picker">
     <label class="search-label">父文档所属知识库<t-select v-model="parentKB" :options="parentKBOptions" :disabled="locked" class="kb-select" @change="changeParentKB" /></label>
-    <label class="search-label">筛选本页父文档<t-input v-model="query" placeholder="文档名称或 ID" :disabled="locked" clearable /></label>
+    <label class="search-label">搜索全部父文档<t-input v-model="query" placeholder="文档名称或 ID" :disabled="locked" clearable /></label>
     <t-alert v-if="candidateError" theme="error" class="notice">{{ candidateError }}</t-alert>
     <p v-if="candidateBusy" role="status">正在加载该知识库的生效文档…</p>
     <ul v-else class="choices">
      <li v-for="candidate in filtered" :key="candidate.document_id"><label><input v-model="selected" type="checkbox" :value="selectionKey(parentKB,candidate.document_id)" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" /><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></label></li>
     </ul>
-    <p v-if="!candidateBusy&&!filtered.length" class="subtle">本页没有可选文档。</p>
-    <div class="pages"><t-button variant="outline" size="small" :disabled="locked || candidateBusy || page<=1" @click="move(-1)">上一页</t-button><span>第 {{ page }} 页</span><t-button variant="outline" size="small" :disabled="locked || candidateBusy || page*20>=total" @click="move(1)">下一页</t-button></div>
+    <p v-if="!candidateBusy&&!filtered.length" class="subtle">没有可选文档。</p>
+    <p v-if="!candidateBusy" class="subtle">共 {{ filtered.length }} 篇可选父文档<template v-if="query.trim()">（已按关键词筛选）</template>。</p>
     <p class="subtle">已选 {{ selected.length }}/8；清空并保存即撤销关系，已有失效状态不会恢复。</p>
     <ul class="selected"><li v-for="item in selectedRefs" :key="`${item.kb}:${item.id}`"><span>{{ title(item.kb,item.id) }}</span><button type="button" :disabled="locked" :aria-label="`移除父文档 ${title(item.kb,item.id)}`" @click="removeSelected(item.kb,item.id)">移除</button></li></ul>
     <div class="actions"><button type="button" class="primary" :disabled="locked || conflict || loading" @click="save">{{ saving?'正在保存…':'保存依赖' }}</button><button type="button" :disabled="locked" @click="reload">重新载入</button></div>
@@ -63,7 +63,19 @@ function removeSelected(kb:string,id:string){selected.value=selected.value.filte
 async function loadCandidates(){
  const token=candidateFence.begin(),kb=parentKB.value
  candidateBusy.value=true;candidateError.value=''
- try{const result=await api.overview(kb,page.value,'active');if(candidateFence.current(token)){candidates.value=result.documents;total.value=result.total;for(const row of result.documents)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)}}catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
+ try{
+  // Load the whole active set once: the parent picker is a global search over
+  // the KB, not a page of twenty, so a keyword never misses an off-page parent.
+  const rows:api.DocumentRow[]=[]
+  for(let p=1;p<=20;p++){
+   const result=await api.overview(kb,p,'active','',100)
+   if(!candidateFence.current(token))return
+   rows.push(...result.documents)
+   if(!result.documents.length||rows.length>=result.total)break
+  }
+  candidates.value=rows;total.value=rows.length
+  for(const row of rows)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)
+}catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
 }
 async function loadSelectedTitles(view:api.SupplementView){
  const kbs=view.parent_knowledge_base_ids||[]
@@ -73,8 +85,7 @@ async function loadSelectedTitles(view:api.SupplementView){
   try{const name=await documentTitle(kb,id);if(name)titles.set(`${kb}:${id}`,name)}catch{}
  }))
 }
-function changeParentKB(){page.value=1;query.value='';candidates.value=[];void loadCandidates()}
-function move(delta:number){page.value+=delta;void loadCandidates()}
+function changeParentKB(){query.value='';candidates.value=[];void loadCandidates()}
 async function reload(){
  const token=fence.begin();loading.value=true;error.value='';success.value='';conflict.value=false;value.value=undefined
  try{const result=await api.supplements(props.kb,props.documentId);if(fence.current(token)){value.value=result.supplements;setSelected(result.supplements);void loadSelectedTitles(result.supplements);const kbs=[...new Set((result.supplements.parent_knowledge_base_ids||[]).filter(Boolean))];if(!kbs.includes(parentKB.value))parentKB.value=kbs[0]||props.kb}}catch(e){if(fence.current(token))error.value=errorMessage(e)}finally{if(fence.current(token))loading.value=false}
