@@ -470,13 +470,14 @@ p {
   margin-left:auto;
 }
 .tabs {
+  /* TDesign tabs: items butt together with 16px side padding. */
   display:flex;
-  gap:24px;
+  gap:0;
   border-bottom:1px solid var(--td-component-stroke);
   margin:24px 0;
 }
 .tabs button {
-  padding:12px 1px;
+  padding:12px 16px;
   background:transparent;
   color:var(--td-text-color-secondary);
   font-size:var(--td-font-size-body-medium);
@@ -491,6 +492,9 @@ p {
   outline:none;
   box-shadow:0 0 0 2px var(--td-brand-color-focus);
   border-radius:var(--td-radius-default);
+}
+.tabs button:first-child {
+  padding-left:0;
 }
 .tabs button.selected {
   color:var(--td-brand-color);

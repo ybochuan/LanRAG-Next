@@ -277,17 +277,20 @@
 .business-page .sub-tabs{
   margin:16px 0 20px;
   min-height:0;
-  gap:24px;
+  gap:0;
   border-bottom:1px solid var(--td-component-stroke)
 }
 .business-page .sub-tabs button{
-  padding:10px 2px;
+  padding:10px 16px;
   border:0;
   border-bottom:2px solid transparent;
   border-radius:0;
   background:transparent;
   color:var(--td-text-color-secondary);
   font-size:var(--td-font-size-body-medium)
+}
+.business-page .sub-tabs button:first-child{
+  padding-left:0
 }
 .business-page .sub-tabs .selected{
   color:var(--td-brand-color);
