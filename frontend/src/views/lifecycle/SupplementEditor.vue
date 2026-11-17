@@ -18,17 +18,17 @@
     <t-alert v-if="candidateError" theme="error" class="notice">{{ candidateError }}</t-alert>
     <p v-if="candidateBusy" role="status">正在加载该知识库的生效文档…</p>
     <ul v-else class="choices">
-     <li v-for="candidate in filtered" :key="candidate.document_id"><label><input v-model="selected" type="checkbox" :value="selectionKey(parentKB,candidate.document_id)" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" /><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></label></li>
+     <li v-for="candidate in filtered" :key="candidate.document_id"><label><t-checkbox :checked="selected.includes(selectionKey(parentKB,candidate.document_id))" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" @change="toggleCandidate(selectionKey(parentKB,candidate.document_id))"><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></t-checkbox></label></li>
     </ul>
     <p v-if="!candidateBusy&&!filtered.length" class="subtle">没有可选文档。</p>
     <p v-if="!candidateBusy" class="subtle">共 {{ filtered.length }} 篇可选父文档<template v-if="query.trim()">（已按关键词筛选）</template>。</p>
     <p class="subtle">已选 {{ selected.length }}/8；清空并保存即撤销关系，已有失效状态不会恢复。</p>
-    <ul class="selected"><li v-for="item in selectedRefs" :key="`${item.kb}:${item.id}`"><span>{{ title(item.kb,item.id) }}</span><button type="button" :disabled="locked" :aria-label="`移除父文档 ${title(item.kb,item.id)}`" @click="removeSelected(item.kb,item.id)">移除</button></li></ul>
-    <div class="actions"><button type="button" class="primary" :disabled="locked || conflict || loading" @click="save">{{ saving?'正在保存…':'保存依赖' }}</button><button type="button" :disabled="locked" @click="reload">重新载入</button></div>
+    <ul class="selected"><li v-for="item in selectedRefs" :key="`${item.kb}:${item.id}`"><span>{{ title(item.kb,item.id) }}</span><t-button variant="text" size="small" :disabled="locked" :aria-label="`移除父文档 ${title(item.kb,item.id)}`" @click="removeSelected(item.kb,item.id)">移除</t-button></li></ul>
+    <div class="actions"><t-button theme="primary" :loading="saving" :disabled="locked || conflict" @click="save">{{ saving?'正在保存…':'保存依赖' }}</t-button><t-button variant="outline" :disabled="locked" @click="reload">重新载入</t-button></div>
    </div>
    <p v-else class="subtle">当前账号仅有查看权限。</p>
   </template>
-  <button v-if="!value&&!loading" type="button" :disabled="locked" @click="reload">重新载入</button>
+  <t-button v-if="!value&&!loading" variant="outline" :disabled="locked" @click="reload">重新载入</t-button>
   <p v-if="success" class="notice success" role="status">{{ success }}</p>
  </section>
 </template>
@@ -60,6 +60,8 @@ function setSelected(view:api.SupplementView){
  selected.value=view.parents.map((id,index)=>selectionKey(kbs[index]||props.kb,id))
 }
 function removeSelected(kb:string,id:string){selected.value=selected.value.filter(value=>value!==selectionKey(kb,id))}
+// TDesign checkbox is boolean; the selection stays an id array (max 8).
+function toggleCandidate(key:string){const at=selected.value.indexOf(key);if(at>=0)selected.value.splice(at,1);else if(selected.value.length<8)selected.value.push(key)}
 async function loadCandidates(){
  const token=candidateFence.begin(),kb=parentKB.value
  candidateBusy.value=true;candidateError.value=''

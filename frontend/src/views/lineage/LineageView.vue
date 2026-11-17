@@ -26,7 +26,7 @@
       <p v-if="layoutGraph(data).hasCycle" class="notice" role="status">存在循环关系，图中已保留原始方向。</p>
       <div class="graph-toolbar">
         <span>{{ data.nodes.length }} 个节点 · {{ data.edges.length }} 条关系</span>
-        <div class="zoom-actions"><button :disabled="!data.nodes.length" aria-label="缩小图谱" @click="canvas?.zoom(-0.15)">−</button><button :disabled="!data.nodes.length" aria-label="放大图谱" @click="canvas?.zoom(0.15)">＋</button><button :disabled="!data.nodes.length" @click="canvas?.fit()">适应画布</button></div>
+        <div class="zoom-actions"><t-button variant="outline" size="small" :disabled="!data.nodes.length" aria-label="缩小图谱" @click="canvas?.zoom(-0.15)">−</t-button><t-button variant="outline" size="small" :disabled="!data.nodes.length" aria-label="放大图谱" @click="canvas?.zoom(0.15)">＋</t-button><t-button variant="outline" size="small" :disabled="!data.nodes.length" @click="canvas?.fit()">适应画布</t-button></div>
       </div>
       <div v-if="!data.nodes.length" class="empty"><template v-if="mode === 'renditions'">当前没有已核验的转换件。</template><template v-else>尚无已登记的{{ mode === 'provenance' ? '内容来源' : '版本' }}节点。文档在来源核验或修订发布后会出现在这里。</template></div>
       <div v-else class="graph-workspace">
