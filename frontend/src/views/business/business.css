@@ -3,7 +3,8 @@
   height:100%;
   overflow:auto;
   padding:24px 32px 40px;
-  background:var(--td-bg-color-page);
+  /* The platform shell supplies the page background; do not paint a second one. */
+  background:transparent;
   color:var(--td-text-color-primary);
   font-size:var(--td-font-size-body-medium)
 }

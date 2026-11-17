@@ -336,7 +336,8 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
   height:100%;
   overflow:auto;
   padding:24px 32px 40px;
-  background:var(--td-bg-color-page);
+  /* Follow the platform shell (white); only cards/surfaces carry a fill. */
+  background:transparent;
   color:var(--td-text-color-primary);
 }
 .page-heading,.scope-bar,.section-heading,.pagination,.document-drawer header {

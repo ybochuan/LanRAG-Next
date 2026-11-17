@@ -141,7 +141,7 @@ onBeforeUnmount(() => { graphFence.invalidate(); catalogFence.invalidate() })
 .embedded-lineage { height:auto; overflow:visible; padding:0; background:transparent; }
 .embedded-lineage .graph-workspace { grid-template-columns:minmax(145px, .35fr) minmax(0,1fr); }
 .embedded-lineage :deep(.lineage-canvas) { height:420px; }
-.lineage-page { height: 100%; overflow: auto; padding: 32px; color: var(--td-text-color-primary); background: var(--td-bg-color-page); box-sizing: border-box; }
+.lineage-page { height: 100%; overflow: auto; padding: 32px; color: var(--td-text-color-primary); background: transparent; box-sizing: border-box; }
 .lineage-heading, .scope-bar, .detail-title, .graph-toolbar, .detail-actions, .zoom-actions { display: flex; align-items: center; gap: 12px; }
 .lineage-heading, .detail-title, .graph-toolbar { justify-content: space-between; }
 .eyebrow, .scope-note, .subtle, .lineage-heading p, .view-description { color: var(--td-text-color-secondary); font-size: var(--app-text-md); }
