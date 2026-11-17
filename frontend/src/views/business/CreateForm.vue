@@ -5,10 +5,7 @@
     <p v-if="kind==='guidance'" class="subtle">种子指导立即进入指导清单；已触发主题复核的内容会进入隔离区。</p>
     <form @submit.prevent="submit">
       <label v-if="kind==='revision'">发布方式
-        <select v-model="revisionMode" :disabled="disabled">
-          <option value="single">单件修订</option>
-          <option value="split">拆分为多份新制度</option>
-        </select>
+        <t-select v-model="revisionMode" :options="revisionModeOptions" :disabled="disabled" />
       </label>
       <p v-if="fixedDocument?.end==='source'" class="subtle">源文档 · {{ fixedDocument.title }}</p>
       <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
@@ -16,19 +13,16 @@
       <p v-if="fixedDocument?.end==='target'&&kind==='relation'" class="notice">当前从目标文档创建关系，仅支持同库关联。跨库关系请前往源文档所在知识库发起；此入口已禁用。</p>
       <template v-if="kind==='relation'&&fixedDocument?.end!=='target'">
         <label v-if="crossEligible" class="target-kb">目标知识库
-          <select v-model="form.target_knowledge_base_id" :disabled="disabled">
-            <option value="">当前知识库</option>
-            <option v-for="item in knowledgeBases.filter(v=>v.id!==kb)" :key="item.id" :value="item.id">{{ item.name }}</option>
-          </select>
+          <t-select v-model="form.target_knowledge_base_id" :options="targetKBOptions" :disabled="disabled" />
         </label>
         <p v-if="crossEligible&&crossKB" class="subtle">跨库规范性关联仅支持修订、解释和相关；相关候选需要显式确认。</p>
         <DocumentPicker v-model="form.target_document_id" :kb="crossEligible?(form.target_knowledge_base_id||kb):kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
-        <label v-if="form.edge_type==='related_to'&&crossEligible&&crossKB" class="check-label"><input v-model="form.second_confirmation" type="checkbox" :disabled="disabled" />我确认这是跨库语义关联</label>
+        <label v-if="form.edge_type==='related_to'&&crossEligible&&crossKB" class="check-label"><t-checkbox v-model="form.second_confirmation" :disabled="disabled">我确认这是跨库语义关联</t-checkbox></label>
       </template>
       <template v-if="kind==='relation'">
-        <label>关系类型<select v-model="form.edge_type" :disabled="disabled"><option v-for="item in relationChoices" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
+        <label>关系类型<t-select v-model="form.edge_type" :options="relationTypeOptions" :disabled="disabled" /></label>
         <p class="subtle">{{ relationChoices.find(item => item.key === form.edge_type)?.direction }}</p>
-        <div v-if="form.edge_type==='related_to'" class="score-fields"><label>语义相似度<input v-model.number="form.similarity" type="number" min="0" max="1" step="0.05" :disabled="disabled" required /></label><label>声明信号<input v-model.number="form.declaration" type="number" min="0" max="1" step="0.05" :disabled="disabled" required /></label><label>结构信号<input v-model.number="form.structure" type="number" min="0" max="1" step="0.05" :disabled="disabled" required /></label></div>
+        <div v-if="form.edge_type==='related_to'" class="score-fields"><label>语义相似度<t-input-number v-model="form.similarity" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>声明信号<t-input-number v-model="form.declaration" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>结构信号<t-input-number v-model="form.structure" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label></div>
         <template v-if="form.edge_type==='repeals'">
           <label>废止生效时间（本机时区）<input v-model="form.effective_at" type="datetime-local" :disabled="disabled" required /></label>
           <p class="subtle">批准后按指定时点执行。生效后旧制度归档并退出普通检索。</p>
@@ -36,24 +30,24 @@
         <template v-else-if="clauseMode">
           <ClausePicker v-model="clauses.source_clause" :kb="kb" :document-id="form.document_id" label="源条款" :disabled="disabled" />
           <ClausePicker v-model="clauses.target_clause" :kb="kb" :document-id="form.target_document_id" label="目标条款" :disabled="disabled" />
-          <label>适用范围与条件<textarea v-model="clauses.applies_when" rows="3" maxlength="4000" :disabled="disabled" required /></label>
+          <label>适用范围与条件<t-textarea v-model="clauses.applies_when" :maxlength="4000" :autosize="{minRows:3}" :disabled="disabled" /></label>
         </template>
         <p v-else class="subtle">相关候选需要确认；评分低于 0.70 不进入有效关联查询。补充依赖请在生命周期的文档详情中维护。</p>
       </template>
       <template v-if="kind==='feedback' || kind==='guidance'">
-        <label>主题<input v-model="form.topic" maxlength="128" :disabled="disabled" placeholder="例如：生效日期、适用范围" required /></label>
-        <label v-if="kind==='feedback'">风险级别<select v-model="form.risk" :disabled="disabled"><option value="low">低风险 · 批准后等待 24 小时</option><option value="medium">中风险 · 人工批准后等待 48 小时</option><option value="high">高风险 · 人工批准后等待 72 小时并二次确认</option></select></label>
-        <label v-if="kind==='feedback'" class="check-label"><input v-model="form.negative" type="checkbox" :disabled="disabled" />这是一次负面反馈</label>
+        <label>主题<t-input v-model="form.topic" :maxlength="128" :disabled="disabled" placeholder="例如：生效日期、适用范围" /></label>
+        <label v-if="kind==='feedback'">风险级别<t-select v-model="form.risk" :options="riskOptions" :disabled="disabled" /></label>
+        <label v-if="kind==='feedback'" class="check-label"><t-checkbox v-model="form.negative" :disabled="disabled">这是一次负面反馈</t-checkbox></label>
       </template>
       <div v-if="kind==='revision'&&revisionMode==='split'" class="split-parts">
         <p class="subtle">提交 2–8 份完整 Markdown。整批审批后锁定内容，可逐份发布。首份正式发布时，旧制度退出普通检索。</p>
         <fieldset v-for="(part,index) in splitParts" :key="part.key" :disabled="disabled" class="split-part">
           <legend>分件 {{ index + 1 }}</legend>
-          <label>新制度标题<input v-model="part.title" maxlength="120" required /></label>
-          <label>完整正文<textarea v-model="part.text" rows="6" required /></label>
-          <button v-if="splitParts.length>2" type="button" class="text-button" @click="splitParts.splice(index,1)">移除此分件</button>
+          <label>新制度标题<t-input v-model="part.title" :maxlength="120" /></label>
+          <label>完整正文<t-textarea v-model="part.text" :autosize="{minRows:6}" /></label>
+          <t-button v-if="splitParts.length>2" variant="text" size="small" @click="splitParts.splice(index,1)">移除此分件</t-button>
         </fieldset>
-        <button type="button" :disabled="disabled||splitParts.length>=8" @click="addSplitPart">添加分件</button>
+        <t-button variant="outline" :disabled="disabled||splitParts.length>=8" @click="addSplitPart">添加分件</t-button>
       </div>
       <label v-else-if="kind!=='relation'">{{ kind==='revision'?'完整修订正文':'内容' }}<textarea v-model="form.text" :rows="kind==='revision'?12:5" :disabled="disabled" required :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
       <fieldset v-if="kind==='revision'" :disabled="disabled"><legend>选用 1–3 条生效指导</legend>
@@ -87,6 +81,11 @@ const crossKB=computed(()=>crossEligible.value&&(form.target_knowledge_base_id||
 // instead of silently producing a wrong-scoped relation.
 const targetSideCrossBlocked=computed(()=>props.kind==='relation'&&props.fixedDocument?.end==='target')
 const revisionMode=ref<'single'|'split'>('single')
+// TDesign selects take data options; these mirror the previous <option> lists.
+const revisionModeOptions=[{label:'单件修订',value:'single'},{label:'拆分为多份新制度',value:'split'}]
+const targetKBOptions=computed(()=>[{label:'当前知识库',value:''},...(props.knowledgeBases||[]).filter(item=>item.id!==props.kb).map(item=>({label:item.name,value:item.id}))])
+const relationTypeOptions=computed(()=>relationChoices.map(item=>({label:item.label,value:item.key})))
+const riskOptions=[{label:'低风险 · 批准后等待 24 小时',value:'low'},{label:'中风险 · 人工批准后等待 48 小时',value:'medium'},{label:'高风险 · 人工批准后等待 72 小时并二次确认',value:'high'}]
 const splitParts=ref([{key:0,title:'',text:''},{key:1,title:'',text:''}])
 let nextPartKey=2
 const selected=ref<string[]>([]),selectedLabels=ref(new Map<string,string>()),guidances=ref<api.BusinessRecord[]>([]),guidancePage=ref(1),guidanceLoading=ref(false),guidanceError=ref('')

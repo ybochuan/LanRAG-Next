@@ -1,16 +1,15 @@
 <template>
   <div class="clause-picker">
+    <label>按内容搜索{{ label }}
+      <t-input v-model="keyword" :maxlength="160" :disabled="disabled || !documentId" placeholder="输入条款关键词，搜索全部正文分块" clearable />
+    </label>
     <label>{{ label }}
       <t-select :value="modelValue?.chunk_id || ''" :disabled="disabled || !documentId || loading || hashing" :options="options" :placeholder="documentId ? '请选择条款分块' : '请先选择文档'" @change="choose" />
     </label>
     <pre v-if="selectedText" class="content-preview">{{ selectedText }}</pre>
     <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
-    <p v-else-if="documentId && !loading && !rows.length" class="subtle">当前页没有可选正文分块。</p>
-    <div v-if="documentId" class="mini-pages">
-      <t-button variant="outline" size="small" :disabled="disabled || loading || page <= 1" @click="move(-1)">上一页</t-button>
-      <span>{{ loading ? '正在载入…' : `分块第 ${page} 页` }}</span>
-      <t-button variant="outline" size="small" :disabled="disabled || loading || !hasNext" @click="move(1)">下一页</t-button>
-    </div>
+    <p v-else-if="documentId && !loading && !rows.length" class="subtle">该文档没有可选正文分块。</p>
+    <p v-else-if="documentId && !loading" class="subtle">共 {{ rows.length }} 个分块<template v-if="keyword.trim()">，匹配 {{ filteredRows.length }} 个</template>。</p>
   </div>
 </template>
 
@@ -21,15 +20,24 @@ import { requestFence } from '../lifecycle/model'
 
 const props = defineProps<{ kb: string; documentId: string; label: string; modelValue?: ClauseAnchor; disabled?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value?: ClauseAnchor] }>()
+
+// Same rule as the document picker: load the whole chunk set once and filter
+// globally, so a keyword does not silently search only the current page.
+const MAX_CHUNKS = 5000
+const MAX_PAGES = 200
+
 const rows = ref<ClauseChunk[]>([])
-const page = ref(1), hasNext = ref(false), loading = ref(false), hashing = ref(false)
-const error = ref(''), selectedText = ref(''), selectedIndex = ref(0)
+const keyword = ref('')
+const loading = ref(false)
+const hashing = ref(false)
+const error = ref('')
+const selectedText = ref('')
+const selectedIndex = ref(0)
 const listFence = requestFence(), selectionFence = requestFence()
 
 async function load() {
   const token = listFence.begin()
   rows.value = []
-  hasNext.value = false
   error.value = ''
   if (!props.documentId) {
     loading.value = false
@@ -37,10 +45,14 @@ async function load() {
   }
   loading.value = true
   try {
-    const result = await clauseChunks(props.kb, props.documentId, page.value)
-    if (!listFence.current(token)) return
-    rows.value = result.rows
-    hasNext.value = result.hasNext
+    const collected: ClauseChunk[] = []
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const result = await clauseChunks(props.kb, props.documentId, page)
+      if (!listFence.current(token)) return
+      collected.push(...result.rows)
+      if (!result.hasNext || !result.rows.length || collected.length >= MAX_CHUNKS) break
+    }
+    rows.value = collected
   } catch {
     if (listFence.current(token)) error.value = '无法载入文档分块。'
   } finally {
@@ -48,13 +60,17 @@ async function load() {
   }
 }
 
-function move(delta: number) {
-  page.value += delta
-  void load()
-}
+const filteredRows = computed(() => {
+  const q = keyword.value.trim().toLowerCase()
+  if (!q) return rows.value
+  return rows.value.filter(row => row.content.toLowerCase().includes(q))
+})
 
 const options = computed(() => {
-  const items: { label: string; value: string }[] = rows.value.map(row => ({ label: `分块 ${row.chunk_index + 1} · ${row.content.replace(/\s+/g, ' ').slice(0, 64)}`, value: row.id }))
+  const items: { label: string; value: string }[] = filteredRows.value.map(row => ({
+    label: `分块 ${row.chunk_index + 1} · ${row.content.replace(/\s+/g, ' ').slice(0, 64)}`,
+    value: row.id,
+  }))
   if (props.modelValue && !items.some(item => item.value === props.modelValue?.chunk_id)) {
     items.unshift({ label: `已选分块 ${selectedIndex.value}`, value: props.modelValue.chunk_id })
   }
@@ -88,9 +104,10 @@ watch(() => [props.kb, props.documentId], () => {
   hashing.value = false
   emit('update:modelValue', undefined)
   selectedText.value = ''
-  page.value = 1
+  keyword.value = ''
   void load()
 }, { immediate: true })
+
 onBeforeUnmount(() => {
   listFence.invalidate()
   selectionFence.invalidate()
