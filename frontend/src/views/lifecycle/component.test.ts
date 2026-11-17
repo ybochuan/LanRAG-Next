@@ -185,7 +185,8 @@ test('document list uses WeKnora text colour and shows all documents in a scroll
   const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
   const script = parse(file).descriptor.scriptSetup!.content
   const template = parse(file).descriptor.template?.content ?? ''
-  assert.ok(file.includes('.document-link:hover {'), 'document names should only turn brand-coloured on hover')
+  assert.ok(file.includes('.document-link:hover,'), 'document names should only turn brand-coloured on hover')
+  assert.ok(file.includes('background:transparent'), 'document names must not paint a hover plate')
   assert.ok(file.includes('.document-link :deep(.t-button__text) {'), 'the TDesign button text must wrap instead of being clipped')
   assert.ok(file.includes('white-space:normal;'), 'document names must wrap onto multiple lines')
   assert.ok(file.includes('color:var(--td-text-color-primary);'), 'document names default to WeKnora primary text colour')
