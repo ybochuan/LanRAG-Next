@@ -1,11 +1,14 @@
 <template>
   <div class="document-picker">
+    <label v-if="searchable">按标题搜索{{ label }}
+      <t-input v-model="keyword" :maxlength="160" :disabled="disabled" placeholder="输入文档标题关键词，搜索全部生效文档" clearable />
+    </label>
     <label>{{ label }}
       <t-select
         :value="modelValue"
         :disabled="disabled || loading"
         :options="options"
-        :filterable="searchable !== false"
+        :filterable="!searchable"
         :loading="loading"
         :placeholder="loading ? '正在载入…' : '请选择生效文档'"
         @change="chooseValue"
@@ -13,7 +16,7 @@
     </label>
     <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
     <p v-else-if="!loading && !items.length" class="subtle">当前知识库没有可选的生效文档。</p>
-    <p v-else-if="!loading" class="subtle">共 {{ items.length }} 篇可选生效文档<span v-if="truncated">（已达 {{ items.length }} 篇上限）</span>；输入标题可全局筛选。</p>
+    <p v-else-if="!loading" class="subtle">共 {{ items.length }} 篇可选生效文档<span v-if="truncated">（已达 {{ items.length }} 篇上限）</span><template v-if="keyword.trim()">，匹配 {{ filteredItems.length }} 篇</template>。</p>
   </div>
 </template>
 
@@ -37,6 +40,7 @@ const loading = ref(false)
 const error = ref('')
 const truncated = ref(false)
 const selectedName = ref('')
+const keyword = ref('')
 const fence = requestFence()
 
 function displayTitle(title: string | undefined, id: string) {
@@ -74,8 +78,16 @@ async function load() {
   }
 }
 
+// The keyword filters the whole loaded set, so it searches every active
+// document in the KB instead of just the visible page.
+const filteredItems = computed(() => {
+  const q = keyword.value.trim().toLowerCase()
+  if (!q) return items.value
+  return items.value.filter(item => `${item.title || ''} ${item.document_id}`.toLowerCase().includes(q))
+})
+
 const options = computed(() => {
-  const rows = items.value.map(item => ({ label: displayTitle(item.title, item.document_id), value: item.document_id }))
+  const rows = filteredItems.value.map(item => ({ label: displayTitle(item.title, item.document_id), value: item.document_id }))
   if (props.modelValue && !rows.some(row => row.value === props.modelValue)) {
     rows.unshift({ label: displayTitle(props.selectedTitle || selectedName.value, props.modelValue), value: props.modelValue })
   }
@@ -91,6 +103,7 @@ watch(() => [props.kb, props.exclude], () => {
   fence.invalidate()
   items.value = []
   selectedName.value = ''
+  keyword.value = ''
   truncated.value = false
   if (props.modelValue === props.exclude) emit('update:modelValue', '')
   if (props.kb) void load()
