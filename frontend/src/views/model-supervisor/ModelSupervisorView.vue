@@ -134,32 +134,18 @@
         </p>
         <p v-if="catalogData?.note" class="notice">{{ catalogData.note }}</p>
         <form class="add-form" @submit.prevent="doAdd">
-          <label>标识<t-input v-model="form.id" placeholder="embedding" /></label>
-          <label>模型文件
-            <t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" />
-          </label>
-          <label>任务
-            <t-select v-model="form.task_type" :options="taskTypeOptions" />
-          </label>
-          <label>端口<t-input-number v-model="form.port" :min="1" :max="65535" /></label>
-          <label class="check">
-            <t-checkbox v-model="form.use_gpu">使用 GPU</t-checkbox>
-          </label>
-          <label>
-            GPU 层数
-            <input
-              v-model.number="form.gpu_layers"
-              type="number"
-              min="0"
-              max="1024"
-              :disabled="!form.use_gpu"
-              placeholder="留空=全部"
-            />
-          </label>
+          <div class="form-grid">
+            <label class="field">标识<t-input v-model="form.id" placeholder="embedding" /></label>
+            <label class="field">模型文件<t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" /></label>
+            <label class="field">任务<t-select v-model="form.task_type" :options="taskTypeOptions" /></label>
+            <label class="field">端口<t-input-number v-model="form.port" :min="1" :max="65535" /></label>
+            <div class="field field-inline"><t-checkbox v-model="form.use_gpu">使用 GPU</t-checkbox></div>
+            <label class="field">GPU 层数<t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" /></label>
+          </div>
           <p class="hint">
             层数对应 llama-server 的 <code>-ngl</code>：留空表示把整模型卸载到显卡（99）；显卡装不下时填一个较小值做部分卸载；0 等于纯 CPU。
           </p>
-          <t-button theme="primary" type="submit" :loading="busy" :disabled="!catalogData?.models.length">启动</t-button>
+          <div class="form-actions"><t-button theme="primary" type="submit" :loading="busy" :disabled="!catalogData?.models.length">启动</t-button></div>
         </form>
         <t-alert v-if="formError" theme="error" class="notice">{{ formError }}</t-alert>
       </section>
@@ -526,19 +512,19 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .title-block { display: flex; flex-direction: column; gap: 4px; }
 .page-subtitle { margin: 0; color: var(--td-text-color-placeholder); font-size: var(--app-text-base); font-weight: 400; line-height: 20px; }
 .heading-actions { display: flex; gap: 8px; }
-.notice { padding: 12px 14px; border-radius: var(--app-radius-md); background: #f5f7fa; font-size: var(--app-text-md); }
-.notice.error { background: #fdecee; color: #b3261e; }
-.token-error { margin: 0 0 6px; color: #b3261e; }
+.notice { padding: 12px 16px; border-radius: var(--td-radius-medium); background: var(--td-bg-color-secondarycontainer); font-size: var(--td-font-size-body-medium); }
+.notice.error { background: var(--td-error-color-1); color: var(--td-error-color); }
+.token-error { margin: 0 0 6px; color: var(--td-error-color); }
 .token-form { display: flex; gap: 8px; align-items: flex-end; margin: 10px 0; }
 .token-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--app-text-sm); }
 .token-form input { min-width: 320px; padding: 6px 8px; border: 1px solid #dcdfe6; border-radius: var(--app-radius-sm); }
-.hint { font-size: var(--app-text-sm); color: var(--td-text-color-placeholder); margin: 6px 0 0; }
-.resource-bar { border: 1px solid #e7e9ee; border-radius: var(--app-radius-lg); padding: 14px 16px; margin-bottom: 18px; }
+.hint { font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); margin: 6px 0 0; }
+.resource-bar { border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); padding: 16px; margin-bottom: 16px; }
 .resource-head { display: flex; gap: 12px; align-items: baseline; font-size: var(--app-text-md); }
 .resource-label { color: var(--td-text-color-placeholder); }
 .resource-note { color: var(--td-text-color-placeholder); font-size: var(--app-text-sm); }
-.meter { height: 6px; border-radius: var(--app-radius-pill); background: #eef0f4; margin: 10px 0 6px; overflow: hidden; }
-.meter span { display: block; height: 100%; background: #4b7bec; }
+.meter { height: 6px; border-radius: var(--td-radius-round); background: var(--td-bg-color-secondarycontainer); margin: 12px 0 6px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--td-brand-color); }
 .gpu-list { margin: 4px 0 0; padding-left: 16px; font-size: var(--app-text-sm); color: var(--td-text-color-secondary); }
 .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 .card { border: 1px solid #e7e9ee; border-radius: var(--app-radius-lg); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -575,14 +561,12 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .add-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .add-head h2 { margin: 0; }
 .warn { color: #b3261e; }
-.add-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-top: 10px; }
-.add-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--app-text-sm); }
-.add-form input, .add-form select { padding: 6px 8px; border: 1px solid #dcdfe6; border-radius: var(--app-radius-sm); min-width: 140px; }
-.add-form label.check { flex-direction: row; align-items: center; gap: 6px; }
-.add-form label.check input { min-width: 0; }
-.add-form .hint { flex-basis: 100%; margin: 0; }
-button.primary { background: #4b7bec; color: #fff; border: none; border-radius: var(--app-radius-sm); padding: 6px 14px; cursor: pointer; font-size: var(--app-text-md); }
-button.secondary { background: #fff; border: 1px solid #dcdfe6; border-radius: var(--app-radius-sm); padding: 6px 14px; cursor: pointer; font-size: var(--app-text-md); }
-button.text-button { background: none; border: none; color: #4b7bec; cursor: pointer; font-size: var(--app-text-sm); padding: 0; }
+.add-form { margin-top: 16px; }
+/* Fields share one grid; controls are TDesign components, so no bare input rules. */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; align-items: end; }
+.field { display: flex; flex-direction: column; gap: 8px; font-size: var(--td-font-size-body-medium); color: var(--td-text-color-primary); }
+.field-inline { justify-content: flex-end; min-height: 32px; }
+.add-form .hint { margin: 12px 0 0; }
+.form-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
 </style>
