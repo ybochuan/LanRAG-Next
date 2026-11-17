@@ -7,10 +7,10 @@
         <p>启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。</p>
       </div>
       <div class="heading-actions">
-        <button v-if="hasToken" class="secondary" type="button" @click="toggleTokenForm">
+        <t-button v-if="hasToken" variant="outline" @click="toggleTokenForm">
           {{ showTokenForm ? '取消' : '令牌' }}
-        </button>
-        <button class="secondary" :disabled="busy || !hasToken" @click="reload">刷新</button>
+        </t-button>
+        <t-button variant="outline" :loading="busy" :disabled="!hasToken" @click="reload">刷新</t-button>
       </div>
     </header>
 
@@ -19,9 +19,9 @@
       <p v-else>模型管理器需要访问令牌。它的令牌和 Core 的登录态是两套，不会自动带上。</p>
       <form class="token-form" @submit.prevent="saveToken">
         <label>访问令牌
-          <input v-model="tokenDraft" type="password" autocomplete="off" placeholder="MODEL_SUPERVISOR_TOKEN" />
+          <t-input v-model="tokenDraft" type="password" autocomplete="off" placeholder="MODEL_SUPERVISOR_TOKEN" />
         </label>
-        <button class="primary" type="submit">保存</button>
+        <t-button theme="primary" type="submit">保存</t-button>
       </form>
       <p class="hint">令牌只保存在本机浏览器里；服务地址 {{ api.baseUrl() }}。</p>
     </div>
@@ -80,34 +80,34 @@
 
           <div class="endpoint">
             <code>{{ item.endpoint.url }}</code>
-            <button class="text-button" type="button" @click="copy(item.endpoint.url, item.id)">
+            <t-button variant="text" size="small" @click="copy(item.endpoint.url, item.id)">
               {{ copied === item.id ? '已复制' : '复制' }}
-            </button>
+            </t-button>
           </div>
 
           <footer class="card-actions">
-            <button
+            <t-button
               v-if="item.status === 'stopped' || item.status === 'failed'"
-              class="primary"
-              :disabled="acting === item.id"
+              theme="primary"
+              :loading="acting === item.id"
               @click="doStart(item)"
             >
               {{ acting === item.id ? '正在启动…' : '启动' }}
-            </button>
-            <button
+            </t-button>
+            <t-button
               v-else
-              class="secondary"
-              :disabled="acting === item.id"
+              variant="outline"
+              :loading="acting === item.id"
               @click="doStop(item)"
             >
               {{ acting === item.id ? '正在停止…' : '停止' }}
-            </button>
-            <button class="secondary" type="button" @click="toggleLogs(item.id)">
+            </t-button>
+            <t-button variant="outline" size="small" @click="toggleLogs(item.id)">
               {{ openLogs === item.id ? '收起日志' : '日志' }}
-            </button>
-            <button class="text-button" type="button" :disabled="probing[item.id]" @click="probeOne(item.id)">
+            </t-button>
+            <t-button variant="text" size="small" :disabled="probing[item.id]" @click="probeOne(item.id)">
               重新探测
-            </button>
+            </t-button>
           </footer>
 
           <section v-if="openLogs === item.id" class="log-panel" aria-label="运行日志">
@@ -127,7 +127,7 @@
       <section class="add-panel">
         <div class="add-head">
           <h2>新增模型实例</h2>
-          <button class="text-button" type="button" :disabled="busy" @click="loadCatalog">重新扫描模型目录</button>
+          <t-button variant="text" size="small" :disabled="busy" @click="loadCatalog">重新扫描模型目录</t-button>
         </div>
         <p class="hint">
           从 <code>{{ catalogData?.model_dir || 'data/models' }}</code> 选择 .gguf，运行时固定用
@@ -135,26 +135,16 @@
         </p>
         <p v-if="catalogData?.note" class="notice">{{ catalogData.note }}</p>
         <form class="add-form" @submit.prevent="doAdd">
-          <label>标识<input v-model="form.id" required pattern="[a-z0-9][a-z0-9-]*" placeholder="embedding" /></label>
+          <label>标识<t-input v-model="form.id" placeholder="embedding" /></label>
           <label>模型文件
-            <select v-model="form.model" required>
-              <option value="" disabled>选择 .gguf</option>
-              <option v-for="file in catalogData?.models ?? []" :key="file.name" :value="file.name">
-                {{ file.name }}（{{ formatSize(file.size_bytes) }}）
-              </option>
-            </select>
+            <t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" />
           </label>
           <label>任务
-            <select v-model="form.task_type">
-              <option value="embedding">向量化</option>
-              <option value="rerank">重排</option>
-              <option value="chat">生成（对话）</option>
-            </select>
+            <t-select v-model="form.task_type" :options="taskTypeOptions" />
           </label>
-          <label>端口<input v-model.number="form.port" type="number" min="1" max="65535" required /></label>
+          <label>端口<t-input-number v-model="form.port" :min="1" :max="65535" /></label>
           <label class="check">
-            <input v-model="form.use_gpu" type="checkbox" />
-            使用 GPU
+            <t-checkbox v-model="form.use_gpu">使用 GPU</t-checkbox>
           </label>
           <label>
             GPU 层数
@@ -170,9 +160,9 @@
           <p class="hint">
             层数对应 llama-server 的 <code>-ngl</code>：留空表示把整模型卸载到显卡（99）；显卡装不下时填一个较小值做部分卸载；0 等于纯 CPU。
           </p>
-          <button class="primary" type="submit" :disabled="busy || !catalogData?.models.length">启动</button>
+          <t-button theme="primary" type="submit" :loading="busy" :disabled="!catalogData?.models.length">启动</t-button>
         </form>
-        <p v-if="formError" class="notice error" role="alert">{{ formError }}</p>
+        <t-alert v-if="formError" theme="error" class="notice">{{ formError }}</t-alert>
       </section>
     </template>
   </main>
@@ -238,6 +228,9 @@ const form = reactive({
 })
 
 const catalogData = ref<api.Catalog>()
+// TDesign select options built from the local catalog and the fixed task list.
+const modelOptions=computed(()=>((catalogData.value?.models??[]).map(file=>({label:`${file.name}（${formatSize(file.size_bytes)}）`,value:file.name}))))
+const taskTypeOptions=[{label:'向量化',value:'embedding'},{label:'重排',value:'rerank'},{label:'生成（对话）',value:'chat'}]
 
 async function loadCatalog() {
   try {

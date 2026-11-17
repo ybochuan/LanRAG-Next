@@ -2,43 +2,36 @@
   <section class="business-page family-workspace" :class="{ 'embedded-family': scope }">
     <header class="page-heading">
       <div><h2>{{ initialView==='suggestions' ? '关联建议' : '版本族' }}</h2><p v-if="!documentId">按业务主题管理版本、关系和治理记录。</p></div>
-      <button type="button" :disabled="busy || locked" @click="refresh">刷新</button>
+      <t-button variant="outline" :loading="busy" :disabled="locked" @click="refresh">刷新</t-button>
     </header>
     <section class="scope-bar" aria-label="工作范围">
-      <label v-if="!scope">知识库<select v-model="kb" aria-label="知识库" :disabled="catalogBusy || locked">
-        <option value="">请选择知识库</option>
-        <option v-for="item in bases" :key="item.id" :value="item.id">{{ item.name }}</option>
-      </select></label>
-      <label v-if="kb">版本族<select v-model="familyId" :disabled="busy || listBusy || locked">
-        <option value="">请选择文档族</option>
-        <option v-if="familyId && !families.some(row => row.business_family_id === familyId)" :value="familyId">{{ family?.label || familyId }}</option>
-        <option v-for="row in families" :key="row.business_family_id" :value="row.business_family_id">{{ row.label }} · {{ shortID(row.business_family_id) }}</option>
-      </select></label>
+      <label v-if="!scope">知识库<t-select v-model="kb" :options="kbOptions" :disabled="catalogBusy || locked" class="kb-select" /></label>
+      <label v-if="kb">版本族<t-select v-model="familyId" :options="familyOptions" :disabled="busy || listBusy || locked" class="family-select" /></label>
       <div v-if="familyPage > 1 || families.length === 20" class="mini-pages">
-        <button type="button" :disabled="busy || listBusy || locked || familyPage <= 1" @click="moveFamilies(-1)">上页文档族</button>
-        <button type="button" :disabled="busy || listBusy || locked || families.length < 20" @click="moveFamilies(1)">下页文档族</button>
+        <t-button variant="outline" size="small" :disabled="busy || listBusy || locked || familyPage <= 1" @click="moveFamilies(-1)">上页文档族</t-button>
+        <t-button variant="outline" size="small" :disabled="busy || listBusy || locked || families.length < 20" @click="moveFamilies(1)">下页文档族</t-button>
       </div>
-      <span v-if="kb" class="access-badge">{{ canWrite ? '可管理' : '只读' }}</span>
+      <t-tag v-if="kb" :theme="canWrite?'primary':'default'" variant="light">{{ canWrite ? '可管理' : '只读' }}</t-tag>
     </section>
-    <p v-if="error" class="notice error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="notice success" role="status">{{ notice }}</p>
+    <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
+    <t-alert v-if="notice" theme="success" class="notice">{{ notice }}</t-alert>
     <section v-if="pending && !saving" class="notice pending" aria-label="待核对操作">
       <p>结果待核对。重试将沿用同一操作编号和提交内容。</p>
-      <button type="button" :disabled="!canWrite" @click="perform">重试原请求</button>
-      <button type="button" @click="pending=undefined; refresh()">结束重试并刷新</button>
+      <t-button theme="primary" :disabled="!canWrite" @click="perform">重试原请求</t-button>
+      <t-button variant="outline" @click="pending=undefined; refresh()">结束重试并刷新</t-button>
     </section>
     <p v-if="catalogBusy" role="status">正在读取知识库…</p>
     <p v-else-if="!scope && !bases.length" class="empty">还没有可访问的知识库。</p>
     <template v-if="kb">
       <form v-if="canWrite && initialView!=='suggestions'" class="panel family-create" @submit.prevent="createFamily">
-        <label>新版本族名称<input v-model.trim="newLabel" maxlength="120" placeholder="例如：员工手册" required :disabled="locked" /></label>
-        <button type="submit" class="primary" :disabled="locked || !newLabel">创建版本族</button>
+        <label>新版本族名称<t-input v-model="newLabel" :maxlength="120" placeholder="例如：员工手册" :disabled="locked" /></label>
+        <t-button theme="primary" type="submit" :disabled="locked || !newLabel">创建版本族</t-button>
       </form>
       <p v-if="documentId && !familyId && !listBusy" class="subtle">选择版本族后，可查看成员或把当前文档加入此族。</p>
       <section v-if="family" class="panel family-header">
         <div class="section-heading"><h2>{{ family.label }}</h2><span class="subtle">族修订 {{ family.revision }}</span></div>
         <p v-if="family.published_document_id">
-          当前发布件 · <button type="button" class="text-button" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</button>
+          当前发布件 · <t-button variant="text" class="doc-link" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</t-button>
           <RouterLink v-if="family.published_version_node_id" :to="{path:'/platform/lineage',query:{kb,mode:'version-ancestry',id:family.published_version_node_id}}">版本历史</RouterLink>
         </p>
         <p v-else>尚未确认发布头。</p>
@@ -49,7 +42,7 @@
         <p class="subtle">启用后按业务族成员和确认关系重算旧图与标签；关闭后沿用旧规则。</p>
         <p v-if="projection.pending" role="status">待处理投影任务 {{ projection.pending }} 条。</p>
         <p v-if="projection.failed" class="notice error" role="alert">失败投影任务 {{ projection.failed }} 条，请检查 Outbox。</p>
-        <button v-if="canWrite" type="button" class="primary" :disabled="locked || saving" @click="toggleProjection">{{ projection.enabled?'关闭投影':'启用投影' }}</button>
+        <t-button v-if="canWrite" :theme="projection.enabled?'default':'primary'" :disabled="locked || saving" @click="toggleProjection">{{ projection.enabled?'关闭投影':'启用投影' }}</t-button>
         <p v-else class="source-note">当前账号仅有查看权限。</p>
       </section>
       <nav v-if="visibleTabs.length > 1" class="sub-tabs" aria-label="文档族视图">
@@ -65,11 +58,11 @@
               <p v-if="tab==='unassigned'" class="subtle">已建立观察记录且尚未归族的文档。新入库的生效文档也可通过右侧搜索加入。</p>
               <ul v-if="members.length" class="family-items">
                 <li v-for="row in members" :key="row.document_id">
-                  <button type="button" class="text-button" :disabled="locked" @click="openDocument(row.document_id)">{{ title(row.document_id) }}</button>
-                  <span v-if="row.state" class="state-badge" :class="row.state">{{ lifecycleLabel(row.state) }}</span>
+                  <t-button variant="text" class="doc-link" :disabled="locked" @click="openDocument(row.document_id)">{{ title(row.document_id) }}</t-button>
+                  <t-tag v-if="row.state" variant="light" size="small" :theme="lifecycleTagTheme(row.state)">{{ lifecycleLabel(row.state) }}</t-tag>
                   <small v-if="row.removed_at">移出于 {{ date(row.removed_at) }} · {{ row.reason === 'member_removed' ? '成员移出' : row.reason }}</small>
-                  <button v-if="canWrite && family && tab==='unassigned'" type="button" :disabled="locked" @click="addMember(row.document_id)">加入本族</button>
-                  <button v-if="canWrite && family && tab==='members' && row.document_id!==family.published_document_id" type="button" :disabled="locked" @click="askRemoval(row.document_id)">移出</button>
+                  <t-button v-if="canWrite && family && tab==='unassigned'" variant="outline" size="small" :disabled="locked" @click="addMember(row.document_id)">加入本族</t-button>
+                  <t-button v-if="canWrite && family && tab==='members' && row.document_id!==family.published_document_id" variant="text" size="small" :disabled="locked" @click="askRemoval(row.document_id)">移出</t-button>
                 </li>
               </ul>
               <p v-else class="empty">{{ tab==='members' && !familyId ? '请选择或创建文档族。' : '这一页没有文档。' }}</p>
@@ -77,19 +70,16 @@
                 <h3>恢复发布头</h3>
                 <p>当前发布件已不可用。恢复会以显式确认的成员替换发布头，并保留历史记录。</p>
                 <label>新的发布头
-                  <select v-model="recoverDocument" required :disabled="locked || saving">
-                    <option value="">选择当前族内可用成员</option>
-                    <option v-for="row in members.filter(row=>row.document_id!==family?.published_document_id && row.availability!=='missing' && row.availability!=='deleted')" :key="row.document_id" :value="row.document_id">{{ title(row.document_id) }}</option>
-                  </select>
+                  <t-select v-model="recoverDocument" :options="recoverOptions" :disabled="locked || saving" />
                 </label>
-                <label>恢复原因<input v-model.trim="recoverReason" maxlength="512" required :disabled="locked || saving" placeholder="说明原发布件不可用的依据" /></label>
-                <button type="submit" class="primary" :disabled="locked || saving || !recoverDocument || !recoverReason">确认恢复发布头</button>
+                <label>恢复原因<t-input v-model="recoverReason" :maxlength="512" :disabled="locked || saving" placeholder="说明原发布件不可用的依据" /></label>
+                <t-button theme="primary" type="submit" :disabled="locked || saving || !recoverDocument || !recoverReason">确认恢复发布头</t-button>
               </form>
               <form v-if="removing && canWrite" class="family-remove" @submit.prevent="removeMember">
                 <p>移出「{{ title(removing) }}」后保留文档和治理记录。</p>
-                <label>移出原因<input v-model.trim="removalReason" maxlength="160" required :disabled="locked" /></label>
-                <button type="submit" :disabled="locked || !removalReason">确认移出</button>
-                <button type="button" :disabled="locked" @click="removing=''">取消</button>
+                <label>移出原因<t-input v-model="removalReason" :maxlength="160" :disabled="locked" /></label>
+                <t-button theme="primary" type="submit" :disabled="locked || !removalReason">确认移出</t-button>
+                <t-button variant="outline" :disabled="locked" @click="removing=''">取消</t-button>
               </form>
             </template>
             <template v-else-if="tab==='relations' || tab==='history'">
@@ -99,8 +89,8 @@
                   <span class="state-badge">{{ row.scope==='internal' ? '族内' : '族外' }}</span>
                   <span class="subtle">{{ relationStatus(row) }}</span>
                   <p>{{ title(row.document_id, row.knowledge_base_id || kb) }} → {{ title(row.target_document_id, row.target_knowledge_base_id || kb) }}</p>
-                  <button v-for="action in relationActions(row)" :key="action" type="button" :disabled="locked"
-                    @click="changeRelation(row,action)">{{ actionLabels[action] }}</button>
+                  <t-button v-for="action in relationActions(row)" :key="action" variant="outline" size="small" :disabled="locked"
+                    @click="changeRelation(row,action)">{{ actionLabels[action] }}</t-button>
                 </li>
               </ul>
               <p v-else class="empty">这一页没有关系。</p>
@@ -112,10 +102,10 @@
                   <p>{{ replacementStatus(row.status) }} · 制度生效 {{ date(row.effective_at) }}</p>
                   <small v-if="row.applied_at">系统登记 {{ date(row.applied_at) }}</small>
                   <p v-if="row.status==='pending_review' && approvalBlock(row)" class="subtle">{{ approvalBlock(row) }}</p>
-                  <button v-if="canWrite && row.status==='pending_review' && !approvalBlock(row)" type="button" class="primary" :disabled="locked"
-                    @click="approve(row)">批准替代</button>
-                  <button v-if="canWrite && ['pending_review','scheduled','needs_review'].includes(row.status)" type="button"
-                    :disabled="locked" @click="cancel(row)">撤回计划</button>
+                  <t-button v-if="canWrite && row.status==='pending_review' && !approvalBlock(row)" theme="primary" size="small" :disabled="locked"
+                    @click="approve(row)">批准替代</t-button>
+                  <t-button v-if="canWrite && ['pending_review','scheduled','needs_review'].includes(row.status)" variant="outline" size="small"
+                    :disabled="locked" @click="cancel(row)">撤回计划</t-button>
                 </li>
               </ol>
               <p v-else class="empty">还没有同族替代计划。</p>
@@ -133,19 +123,19 @@
             <p v-else class="empty">这一页没有治理记录。</p>
           </template>
           <footer class="pagination">
-            <button type="button" :disabled="busy || locked || page<=1" @click="page--">上一页</button>
+            <t-button variant="outline" size="small" :disabled="busy || locked || page<=1" @click="page--">上一页</t-button>
             <span>第 {{ page }} 页</span>
-            <button type="button" :disabled="busy || locked || !hasNext" @click="page++">下一页</button>
+            <t-button variant="outline" size="small" :disabled="busy || locked || !hasNext" @click="page++">下一页</t-button>
           </footer>
         </section>
         <FamilyDocumentPanel v-if="documentId" :key="kb+':'+documentId" :kb="kb" :document-id="documentId" :title="title(documentId)"
           :can-write="canWrite" :disabled="saving || !!pending" :knowledge-bases="bases" @close="documentId=''" @saved="loadView" @busy="documentBusy=$event" />
         <section v-else-if="canWrite && family && (tab==='members' || tab==='unassigned')" class="panel">
           <h2>加入成员</h2>
-          <button v-if="documentId && familyId!==currentFamily" type="button" :disabled="locked" @click="addMember(documentId)">将当前文档加入此族</button>
+          <t-button v-if="documentId && familyId!==currentFamily" variant="outline" :disabled="locked" @click="addMember(documentId)">将当前文档加入此族</t-button>
           <form @submit.prevent="addMember(addId)">
             <DocumentPicker :key="kb" v-model="addId" :kb="kb" label="选择主件" searchable :disabled="locked" />
-            <button type="submit" class="primary" :disabled="locked || !addId">加入本族</button>
+            <t-button theme="primary" type="submit" :disabled="locked || !addId">加入本族</t-button>
           </form>
         </section>
         <section v-else-if="canWrite && family && tab==='replacements'" class="panel">
@@ -155,11 +145,11 @@
             <DocumentPicker v-model="oldDocument" :kb="kb" label="被替代的旧件" :disabled="locked || !!family.published_document_id" searchable />
             <DocumentPicker v-model="newDocument" :kb="kb" label="新件" :exclude="oldDocument" :disabled="locked" searchable />
             <label>生效时间<input v-model="effectiveAt" type="datetime-local" required :disabled="locked" /></label>
-            <button type="submit" class="primary" :disabled="locked || !newDocument || !oldDocument || !effectiveAt">提交审核</button>
+            <t-button theme="primary" type="submit" :disabled="locked || !newDocument || !oldDocument || !effectiveAt">提交审核</t-button>
           </form>
           <h2>补录历史版本链</h2>
           <p>从已执行的发布件开始，按生效日期核对已到期的连续草案。</p>
-          <button type="button" :disabled="locked || historyBusy" @click="loadHistory">{{ historyBusy ? '正在核对…' : '预览历史链' }}</button>
+          <t-button variant="outline" :loading="historyBusy" :disabled="locked" @click="loadHistory">{{ historyBusy ? '正在核对…' : '预览历史链' }}</t-button>
           <p v-if="historyError" role="alert">{{ historyError }}</p>
           <template v-if="history">
             <p v-if="history.blocked_reason" role="status">{{ historyBlocks[history.blocked_reason] || '历史链需要重新核验。' }}</p>
@@ -171,24 +161,21 @@
                 </li>
               </ol>
               <p>确认后的发布件 · <strong>{{ title(history.final_document_id) }}</strong></p>
-              <button type="button" class="primary" :disabled="locked || historyBusy" @click="confirmHistory">确认整链补录</button>
+              <t-button theme="primary" :loading="historyBusy" :disabled="locked" @click="confirmHistory">确认整链补录</t-button>
             </template>
           </template>
         </section>
         <section v-else-if="canWrite && family && tab==='relations'" class="panel">
           <h2>新增关联</h2>
           <label>本族成员
-            <select v-model="relationMember" :disabled="locked">
-              <option value="">请选择本族成员</option>
-              <option v-for="row in relationMembers" :key="row.document_id" :value="row.document_id">{{ title(row.document_id) }}</option>
-            </select>
+            <t-select v-model="relationMember" :options="relationMemberOptions" :disabled="locked" />
           </label>
           <div class="mini-pages">
-            <button type="button" :disabled="locked || memberPage<=1" @click="memberPage--">上页成员</button>
-            <button type="button" :disabled="locked || !moreMembers" @click="memberPage++">下页成员</button>
+            <t-button variant="outline" size="small" :disabled="locked || memberPage<=1" @click="memberPage--">上页成员</t-button>
+            <t-button variant="outline" size="small" :disabled="locked || !moreMembers" @click="memberPage++">下页成员</t-button>
           </div>
           <label v-if="relationMember">成员在关系中的位置
-            <select v-model="relationEnd" :disabled="locked"><option value="source">作为源文档</option><option value="target">作为目标文档</option></select>
+            <t-select v-model="relationEnd" :options="relationEndOptions" :disabled="locked" />
           </label>
           <CreateForm v-if="relationMember" :key="relationMember+relationEnd" :kb="kb" kind="relation" :disabled="locked"
             :knowledge-bases="bases" :fixed-document="{id:relationMember,title:title(relationMember),end:relationEnd}" @submit="submitRelation" />
@@ -236,6 +223,19 @@ const familyActions: Partial<Record<string,string>> = {
 const route = useRoute(), auth = useAuthStore()
 const bases = ref<{id:string;name:string}[]>([]), kb = ref(''), familyId = ref('')
 const families = ref<api.BusinessFamily[]>([]), family = ref<api.BusinessFamily>()
+// TDesign selects take data options; the current selection stays visible even
+// when it is not on the loaded page of families.
+const kbOptions=computed(()=>[{label:'请选择知识库',value:''},...bases.value.map(item=>({label:item.name,value:item.id}))])
+const lifecycleTagTheme=(state:string)=>({active:'success',scheduled:'primary',pending:'warning',stale:'warning',failed:'danger'} as Record<string,string>)[state]||'default'
+// Members eligible to become the new published head.
+const recoverOptions=computed(()=>[{label:'选择当前族内可用成员',value:''},...members.value.filter(row=>row.document_id!==family.value?.published_document_id&&row.availability!=='missing'&&row.availability!=='deleted').map(row=>({label:title(row.document_id),value:row.document_id}))])
+const relationMemberOptions=computed(()=>[{label:'请选择本族成员',value:''},...relationMembers.value.map(row=>({label:title(row.document_id),value:row.document_id}))])
+const relationEndOptions=[{label:'作为源文档',value:'source'},{label:'作为目标文档',value:'target'}]
+const familyOptions=computed(()=>{
+  const rows=families.value.map(row=>({label:`${row.label} · ${shortID(row.business_family_id)}`,value:row.business_family_id}))
+  if(familyId.value&&!rows.some(row=>row.value===familyId.value))rows.unshift({label:family.value?.label||familyId.value,value:familyId.value})
+  return [{label:'请选择文档族',value:''},...rows]
+})
 const projection = ref<api.FamilyProjectionSetting>()
 const familyPage = ref(1), page = ref(1), tab = ref<api.FamilyTab>(props.initialView || 'members')
 const catalogBusy = ref(false), listBusy = ref(false), busy = ref(false), canWrite = ref(false)

@@ -2,10 +2,10 @@
   <section class="panel" aria-labelledby="family-document-title">
     <div class="section-heading">
       <h2 id="family-document-title">{{ title }}</h2>
-      <button type="button" :disabled="busy || supplementBusy" @click="requestClose">关闭详情</button>
+      <t-button variant="text" :disabled="busy || supplementBusy" @click="requestClose">关闭详情</t-button>
     </div>
-    <p v-if="error" class="notice error" role="alert">{{ error }} <button type="button" :disabled="busy" @click="load">重新载入</button></p>
-    <p v-if="notice" class="notice success" role="status">{{ notice }}</p>
+    <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" :disabled="busy" @click="load">重新载入</t-button></t-alert>
+    <t-alert v-if="notice" theme="success" class="notice">{{ notice }}</t-alert>
     <p v-if="busy && !detail" role="status">正在读取文档状态…</p>
     <template v-if="detail">
       <p>文档状态 · {{ stateLabels[detail.snapshot.current.state] || detail.snapshot.current.state }}</p>
@@ -15,7 +15,7 @@
         <label>失效时间<input v-model="fields.effective_until" type="datetime-local" :disabled="locked || inherited" /></label>
         <label>复核时间<input v-model="fields.review_due" type="datetime-local" :disabled="locked || inherited" /></label>
         <p class="subtle">时间按本机时区显示。过期立即失效，清空日期不会恢复已失效文档。</p>
-        <button v-if="canWrite && !inherited" type="submit" class="primary" :disabled="locked">保存日期</button>
+        <t-button v-if="canWrite && !inherited" theme="primary" type="submit" :disabled="locked">保存日期</t-button>
       </form>
       <SupplementEditor :kb="kb" :document-id="documentId" :can-write="canWrite" :parent-busy="busy || disabled"
         :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="$emit('saved')" />

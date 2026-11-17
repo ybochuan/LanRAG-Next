@@ -11,9 +11,9 @@
         <input type="file" accept=".pdf,.docx,.xlsx,.pptx" :disabled="disabled || uploading" @change="chooseFile" />
       </label>
       <p v-if="file" class="subtle">已选择 · {{ file.name }}</p>
-      <p v-if="error" class="notice error" role="alert">{{ error }}</p>
-      <p v-if="notice" class="notice success" role="status">{{ notice }}</p>
-      <button type="submit" class="primary" :disabled="disabled || uploading || !sourceId || !file">{{ uploading ? '正在上传并绑定…' : '上传并建立建议' }}</button>
+      <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
+      <t-alert v-if="notice" theme="success" class="notice">{{ notice }}</t-alert>
+      <t-button theme="primary" type="submit" :loading="uploading" :disabled="disabled || !sourceId || !file">{{ uploading ? '正在上传并绑定…' : '上传并建立建议' }}</t-button>
     </form>
   </section>
 </template>

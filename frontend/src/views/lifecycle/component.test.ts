@@ -145,7 +145,8 @@ test('the feedback governance page exposes pending sample review', () => {
   assert.ok(source.includes("feedback_sample_review"), 'the write action must be wired into the view')
   assert.ok(source.includes("sample_decision:sampleDecision.value"), 'the review decision must be sent in the payload')
   assert.ok(template.includes('sampleReviewPending(detail)'), 'only pending samples may show review controls')
-  assert.ok(template.includes('value="failed"'), 'a failed review option must exist')
+  assert.ok(template.includes('<t-select v-model="sampleDecision"'), 'the review decision must be a TDesign select')
+  assert.ok(source.includes("{label:'失败（隔离）',value:'failed'}"), 'a failed review option must exist')
   assert.ok(template.includes('失败则隔离该反馈及其指导'), 'failed review must explain that it quarantines guidance')
 })
 
