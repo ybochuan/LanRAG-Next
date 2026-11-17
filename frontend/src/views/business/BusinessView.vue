@@ -56,7 +56,7 @@
             </section>
             <div v-if="detail.citation_document_ids?.length">
               <h3>已核验的引用文档</h3>
-              <t-link v-for="id in detail.citation_document_ids" :key="id" theme="default" hover="color" underline="never" @click="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)">{{ docName(id,detail.knowledge_base_id||kb) }}</t-link>
+              <span v-for="id in detail.citation_document_ids" :key="id" class="doc-link" role="button" tabindex="0" @click="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)" @keydown.enter="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)">{{ docName(id,detail.knowledge_base_id||kb) }}</span>
             </div>
           </template>
           <h3 v-if="detail.text||detail.proposed_patch">{{ kind==='revision'?'完整修订正文':kind==='feedback'?'用户意见':'内容' }}</h3><pre v-if="detail.text||detail.proposed_patch" class="content-preview">{{ detail.text||detail.proposed_patch }}</pre>
