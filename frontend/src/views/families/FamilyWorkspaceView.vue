@@ -31,7 +31,7 @@
       <section v-if="family" class="panel family-header">
         <div class="section-heading"><h2>{{ family.label }}</h2><span class="subtle">族修订 {{ family.revision }}</span></div>
         <p v-if="family.published_document_id">
-          当前发布件 · <t-link theme="primary" underline="hover" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</t-link>
+          当前发布件 · <t-link theme="default" hover="color" underline="never" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</t-link>
           <RouterLink v-if="family.published_version_node_id" :to="{path:'/platform/lineage',query:{kb,mode:'version-ancestry',id:family.published_version_node_id}}">版本历史</RouterLink>
         </p>
         <p v-else>尚未确认发布头。</p>
@@ -58,7 +58,7 @@
               <p v-if="tab==='unassigned'" class="subtle">已建立观察记录且尚未归族的文档。新入库的生效文档也可通过右侧搜索加入。</p>
               <ul v-if="members.length" class="family-items">
                 <li v-for="row in members" :key="row.document_id">
-                  <t-link theme="primary" underline="hover" :disabled="locked" @click="openDocument(row.document_id)">{{ title(row.document_id) }}</t-link>
+                  <t-link theme="default" hover="color" underline="never" :disabled="locked" @click="openDocument(row.document_id)">{{ title(row.document_id) }}</t-link>
                   <t-tag v-if="row.state" variant="light" size="small" :theme="lifecycleTagTheme(row.state)">{{ lifecycleLabel(row.state) }}</t-tag>
                   <small v-if="row.removed_at">移出于 {{ date(row.removed_at) }} · {{ row.reason === 'member_removed' ? '成员移出' : row.reason }}</small>
                   <t-button v-if="canWrite && family && tab==='unassigned'" variant="outline" size="small" :disabled="locked" @click="addMember(row.document_id)">加入本族</t-button>
@@ -632,7 +632,8 @@ onBeforeUnmount(()=>{clearTimeout(scanPoll); catalogFence.invalidate(); listFenc
 .family-items { padding-inline-start:1.25rem; }
 .family-items li { padding:.6rem 0; border-bottom:1px solid var(--td-component-border); overflow-wrap:anywhere; }
 .family-items li > :is(button,span,small,.t-link) { margin-inline-end:.5rem; }
-.family-items .t-link { font-size:var(--td-font-size-body-medium); }
+.family-items .t-link { font-size:var(--td-font-size-body-medium); color:var(--td-text-color-primary); }
+.family-items .t-link:hover { color:var(--td-brand-color); }
 .family-remove, .family-recovery { margin-top:1rem; }
 .family-recovery h3 { margin-bottom:.35rem; }
 @media (max-width:680px) { .family-create { display:block; } }
