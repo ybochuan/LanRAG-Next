@@ -1,7 +1,7 @@
 <template>
  <main class="lifecycle-page" aria-labelledby="lifecycle-title">
   <header class="page-heading">
-   <div class="title-block"><span class="eyebrow">知识治理 / 文档</span><h1 id="lifecycle-title"><t-icon name="file" size="28px" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
+   <div class="title-block"><h1 id="lifecycle-title"><t-icon name="file" size="32px" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
    <t-button v-if="!workspaceView" variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
   </header>
   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
@@ -369,8 +369,8 @@ h1 {
 }
 .page-subtitle {
   color:var(--td-text-color-placeholder);
-  font-size:var(--td-font-size-body-medium);
-  margin:0;
+  font-size:var(--td-font-size-body-large);
+  margin:4px 0 0;
 }
 h2 {
   font-size:var(--td-font-size-title-medium);

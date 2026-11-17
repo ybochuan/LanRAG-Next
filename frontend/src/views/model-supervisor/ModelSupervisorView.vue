@@ -1,10 +1,9 @@
 <template>
   <main class="supervisor-page" aria-labelledby="supervisor-title">
     <header class="page-heading">
-      <div>
-        <span class="eyebrow">本地运行时 · 可选组件</span>
-        <h1 id="supervisor-title">模型进程管理</h1>
-        <p>启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。</p>
+      <div class="title-block">
+        <h1 id="supervisor-title"><t-icon name="server" size="32px" class="page-icon" />模型进程管理</h1>
+        <p class="page-subtitle">启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。</p>
       </div>
       <div class="heading-actions">
         <t-button v-if="hasToken" variant="outline" @click="toggleTokenForm">
@@ -521,9 +520,9 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 <style scoped>
 .supervisor-page { padding: 24px 32px 48px; max-width: 1100px; }
 .page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
-.page-heading h1 { margin: 4px 0 6px; font-size: var(--app-text-4xl); }
-.page-heading p { margin: 0; color: var(--td-text-color-secondary); font-size: var(--app-text-md); }
-.eyebrow { font-size: var(--app-text-sm); letter-spacing: .08em; color: var(--td-text-color-placeholder); text-transform: uppercase; }
+.page-heading h1 { margin: 0; font-size: var(--td-font-size-headline-medium); line-height: 1.3; display: flex; align-items: center; gap: 10px; }
+.page-icon { color: var(--td-text-color-primary); }
+.page-subtitle { margin: 4px 0 0; color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-large); }
 .heading-actions { display: flex; gap: 8px; }
 .notice { padding: 12px 14px; border-radius: var(--app-radius-md); background: #f5f7fa; font-size: var(--app-text-md); }
 .notice.error { background: #fdecee; color: #b3261e; }
