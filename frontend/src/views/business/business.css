@@ -2,29 +2,30 @@
   box-sizing:border-box;
   height:100%;
   overflow:auto;
-  padding:34px 40px 60px;
+  padding:24px 32px 40px;
   background:var(--td-bg-color-page);
   color:var(--td-text-color-primary);
-  font-size:var(--app-text-sm)
+  font-size:var(--td-font-size-body-medium)
 }
 
 .business-page *{
   box-sizing:border-box
 }
 .business-page h1{
-  font-size:var(--app-text-4xl);
+  font-size:var(--td-font-size-title-large);
   margin:8px 0
 }
 .business-page h2{
-  font-size:var(--app-text-xl);
-  margin:0 0 14px
+  font-size:var(--td-font-size-title-medium);
+  margin:20px 0 16px
 }
 .business-page h3{
-  font-size:var(--app-text-md);
-  margin:20px 0 10px
+  font-size:var(--td-font-size-title-small);
+  margin:20px 0 8px
 }
 .business-page p{
-  line-height:1.75;
+  font-size:var(--td-font-size-body-medium);
+  line-height:1.6;
   margin:8px 0;
   color:var(--td-text-color-secondary)
 }
@@ -34,6 +35,10 @@
   align-items:center;
   justify-content:space-between;
   gap:16px
+}
+/* Headings inside a section row rely on the row for spacing. */
+.business-page .section-heading h2,.business-page .section-heading h3{
+  margin:0
 }
 .business-page .eyebrow{
   font-size:var(--app-text-xs);
@@ -151,25 +156,35 @@
 .business-page .panel{
   background:var(--td-bg-color-container);
   border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-xl);
+  border-radius:var(--td-radius-medium);
   padding:24px
 }
 .business-page .subtle,.business-page small{
-  font-size:var(--app-text-xs);
+  font-size:var(--td-font-size-body-small);
   font-weight:normal;
   color:var(--td-text-color-placeholder);
-  line-height:1.7
+  line-height:1.6
 }
 .business-page .record-list{
   display:grid;
-  gap:10px
+  gap:12px
 }
 .business-page .record-card{
+  /* A semantic role=button container: it must draw the card itself now that it
+     is no longer a <button>. */
   text-align:left;
   width:100%;
   padding:16px;
   display:grid;
-  gap:8px
+  gap:8px;
+  border:1px solid var(--td-component-stroke);
+  border-radius:var(--td-radius-medium);
+  background:var(--td-bg-color-container);
+  cursor:pointer;
+  transition:border-color .15s,background .15s
+}
+.business-page .record-card:hover{
+  border-color:var(--td-brand-color)
 }
 .business-page .record-card.chosen{
   border-color:var(--td-brand-color);
@@ -414,8 +429,8 @@
   max-width:540px;
   width:calc(100% - 36px);
   border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-xl);
-  padding:28px;
+  border-radius:var(--td-radius-large);
+  padding:24px;
   background:var(--td-bg-color-container);
   color:inherit;
   box-shadow:0 20px 80px color-mix(in srgb,var(--td-text-color-primary) 20%,transparent)
