@@ -60,39 +60,38 @@
   font-weight:600
 }
 
-.business-page button,.business-page select,.business-page input,.business-page textarea{
+/* Controls on this page are TDesign components. Bare element selectors are
+   forbidden: they also match a TDesign component inner node (the real <input>
+   inside t-input), which double-borders it and clips the focus ring into two
+   green side lines. Only not-yet-converted raw controls keep a legacy style. */
+.business-page button:not(.t-button),.business-page select,.business-page input:not([type=checkbox]),.business-page textarea{
   font:inherit
 }
-.business-page button{
+.business-page button:not(.t-button){
   padding:8px 14px;
   border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-md);
+  border-radius:var(--td-radius-default);
   background:var(--td-bg-color-container);
   color:inherit;
   cursor:pointer
 }
-.business-page button:hover:not(:disabled){
+.business-page button:not(.t-button):hover:not(:disabled){
   border-color:var(--td-brand-color)
 }
-.business-page button:disabled{
+.business-page button:not(.t-button):disabled{
   opacity:.45;
   cursor:default
 }
-.business-page .primary{
+.business-page .primary:not(.t-button){
   background:var(--td-brand-color);
   border-color:var(--td-brand-color);
   color:var(--td-text-color-anti)
 }
-.business-page .text-button{
+.business-page .text-button:not(.t-button){
   border:0;
   background:none;
   color:var(--td-brand-color);
   padding:4px 6px
-}
-
-.business-page :is(button,input,select,textarea,a):focus-visible{
-  outline:2px solid var(--td-brand-color);
-  outline-offset:3px
 }
 .business-page label{
   display:flex;
@@ -100,10 +99,11 @@
   gap:8px;
   font-weight:500
 }
-.business-page select,.business-page input:not([type=checkbox]),.business-page textarea{
+/* Exclude TDesign inner nodes; the component draws its own box. */
+.business-page select,.business-page input:not([type=checkbox]):not(.t-input__inner),.business-page textarea:not(.t-textarea__inner){
   padding:10px;
   border:1px solid var(--td-component-stroke);
-  border-radius:var(--app-radius-sm);
+  border-radius:var(--td-radius-default);
   background:var(--td-bg-color-container);
   color:inherit;
   width:100%
