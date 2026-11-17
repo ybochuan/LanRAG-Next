@@ -102,11 +102,20 @@ onBeforeUnmount(()=>{fence.invalidate();candidateFence.invalidate();emit('busy',
 </script>
 
 <style scoped>
-.supplements{border-top:1px solid var(--td-component-stroke);margin-top:28px;padding-top:12px;font-size:var(--app-text-sm)}
+.supplements{border-top:1px solid var(--td-component-stroke);margin-top:28px;padding-top:12px;font-size:var(--td-font-size-body-medium)}
 h3{font-size:var(--app-text-lg);margin:16px 0 12px}p{color:var(--td-text-color-secondary);line-height:1.7}.subtle,small{font-size:var(--app-text-xs);color:var(--td-text-color-placeholder)}
 ul{padding:0;list-style:none}.evidence li{padding:9px 0;border-bottom:1px solid var(--td-component-stroke)}.evidence span,small{display:block;margin-top:4px;overflow-wrap:anywhere}
 .search-label{display:flex;flex-direction:column;gap:8px;margin:18px 0}.search-label input{font:inherit;padding:8px;border:1px solid var(--td-component-stroke);border-radius:var(--app-radius-sm);background:var(--td-bg-color-container);color:inherit}
-.choices{max-height:240px;overflow:auto;border:1px solid var(--td-component-stroke);border-radius:var(--app-radius-sm)}.choices label{display:flex;gap:10px;padding:10px;align-items:flex-start}.choices input{margin-top:4px}.choices span{overflow-wrap:anywhere}
-button{font:inherit;cursor:pointer;background:var(--td-bg-color-container);color:inherit;border:1px solid var(--td-component-stroke);border-radius:var(--app-radius-sm);padding:7px 10px}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid var(--td-brand-color);outline-offset:2px}
+.choices{max-height:240px;overflow:auto;border:1px solid var(--td-component-stroke);border-radius:var(--td-radius-medium)}
+/* Rows own the padding; the TDesign checkbox must keep its own inline layout,
+   so no `label` rule may target it directly. */
+.choices li{padding:8px 12px;border-bottom:1px solid var(--td-component-stroke)}
+.choices li:last-child{border-bottom:0}
+.choices .t-checkbox{display:flex;align-items:flex-start;gap:8px;width:100%}
+.choices .t-checkbox__label{overflow-wrap:anywhere;line-height:1.5}
+.choices small{display:block;margin-top:2px}
+button{font:inherit;cursor:pointer;background:var(--td-bg-color-container);color:inherit;border:1px solid var(--td-component-stroke);border-radius:var(--app-radius-sm);padding:7px 10px}button:not(.t-button):disabled{opacity:.5;cursor:default}
+/* TDesign owns focus on its own components. */
+button:not(.t-button):focus-visible{outline:2px solid var(--td-brand-color);outline-offset:2px}
 .pages,.actions,.selected li{display:flex;gap:12px;align-items:center;margin:10px 0}.pages span{flex:1;text-align:center}.selected li{justify-content:space-between;overflow-wrap:anywhere}.primary{background:var(--td-brand-color);color:var(--td-text-color-anti);border-color:var(--td-brand-color)}.notice{padding:10px;border-radius:var(--app-radius-sm);background:var(--td-warning-color-1);color:var(--td-warning-color)}.notice.error{background:var(--td-error-color-1);color:var(--td-error-color)}.notice.success{background:var(--td-success-color-1);color:var(--td-brand-color)}
 </style>

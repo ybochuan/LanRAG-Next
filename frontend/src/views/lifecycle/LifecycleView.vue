@@ -417,6 +417,12 @@ p {
   color:var(--td-brand-color);
 }
 .sort-button {
+  /* A button adds its own padding; strip it so the header text lines up with
+     the cell content below (tags and document names). */
+  padding:0;
+  height:auto;
+  min-height:0;
+  justify-content:flex-start;
   font-weight:600;
   white-space:nowrap;
 }
