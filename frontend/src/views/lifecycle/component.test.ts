@@ -196,3 +196,11 @@ test('document list uses WeKnora text colour and shows all documents in a scroll
   assert.ok(!template.includes('第 {{ page }} 页'), 'pagination footer must be removed')
   assert.ok(file.includes('max-height:60vh;'), 'the list must be a bounded scroll area')
 })
+
+test('the feedback sub-tabs write the writable ref, not the readonly kind computed', () => {
+  const file = readFileSync(new URL('../business/BusinessView.vue', import.meta.url), 'utf8')
+  const template = parse(file).descriptor.template?.content ?? ''
+  assert.ok(template.includes("@click=\"feedbackTab='guidance'\""), 'the guidance tab must switch feedbackTab')
+  assert.ok(template.includes("@click=\"feedbackTab='feedback'\""), 'the feedback tab must switch feedbackTab')
+  assert.ok(!template.includes("@click=\"kind="), 'kind is a readonly computed and must not be assigned')
+})
