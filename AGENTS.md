@@ -101,9 +101,11 @@
 3. **字号只用 TDesign 阶梯**：正文 `--td-font-size-body-medium`(14px)、次要 `--td-font-size-body-small`(12px)、区块标题 `--td-font-size-title-medium`(16px)、页面标题 `--td-font-size-title-large`(20px)。禁止再用 `--app-text-sm` 把正文压到 12px。
 4. **圆角只用 TDesign 阶梯**：控件 `--td-radius-default`(3px)、卡片/面板 `--td-radius-medium`(6px)、抽屉/弹窗 `--td-radius-large`(9px)。禁止 `--app-radius-xl`(12px) 这类超规格圆角。
 5. **颜色只用语义 token**：品牌 `--td-brand-color`；文字 `--td-text-color-primary` / `-secondary` / `-placeholder`；描边 `--td-component-stroke`；背景 `--td-bg-color-page` / `-container` / `-secondarycontainer`。禁止硬编码 hex。
-6. **表格**：优先 `<t-table>`；若因排序/可访问性保留语义 `<table>`，必须复刻 TDesign 表格视觉——表头 `--td-bg-color-secondarycontainer` + `--td-text-color-secondary`、行分隔 `--td-component-stroke`、行悬停 `--td-bg-color-container-hover`、单元格内边距与字号对齐 TDesign。
-7. **控件尺寸统一**：默认 `size="medium"`（32px 高）；表格内操作按钮 `size="small"`。禁止用 padding 手工拼高度。
-8. **页面骨架**：根容器 `background: var(--td-bg-color-page)`；内容卡片 `background: var(--td-bg-color-container)` + `border: 1px solid var(--td-component-stroke)` + `border-radius: var(--td-radius-medium)`；页面左右留白 24–40px。
+6. **悬浮态统一**：行内含文档名等文本触发元素时，行**不得**加 hover 底色——单行文字下面铺一块圆角色块会被读成输入框；只保留 `cursor:pointer`，选中态才允许填色。多列信息行（原生 `DocumentListView` 的 `.doc-list-row`）可用 `background: var(--td-bg-color-secondarycontainer)` + `border-radius: var(--td-radius-medium)` + 内边距。禁止用 `--td-bg-color-container-hover` 铺在无圆角、无内边距的行上。
+
+7. **表格**：优先 `<t-table>`；若因排序/可访问性保留语义 `<table>`，必须复刻 TDesign 表格视觉——表头 `--td-bg-color-secondarycontainer` + `--td-text-color-secondary`、行分隔 `--td-component-stroke`、行悬停同样遵循第 6 条（`secondarycontainer` + 圆角），单元格内边距与字号对齐 TDesign。
+8. **控件尺寸统一**：默认 `size="medium"`（32px 高）；表格内操作按钮 `size="small"`。禁止用 padding 手工拼高度。
+9. **页面骨架**：根容器不自行绘制页面底色（跟随平台外壳），内容卡片 `background: var(--td-bg-color-container)` + `border: 1px solid var(--td-component-stroke)` + `border-radius: var(--td-radius-medium)`；页面左右留白 24–40px。
 
 ### 8.3 验收门禁
 

@@ -186,29 +186,30 @@
   display:block
 }
 .business-page .record-card{
-  /* A list row, not a card inside a card: the panel already draws the frame. */
+  /* Native list row: rounded, inset padding, and a subtle hover fill so the
+     highlight reads as a row rather than a grey slab. */
   text-align:left;
   width:100%;
-  padding:12px 0;
+  padding:12px;
   display:grid;
   gap:6px;
   border:0;
   border-bottom:1px solid var(--td-component-stroke);
-  border-radius:0;
+  border-radius:var(--app-radius-md);
   background:transparent;
   cursor:pointer;
-  transition:background .15s
+  transition:background-color .2s ease
 }
 .business-page .record-card:last-child{
   border-bottom:0
 }
-.business-page .record-card:hover{
-  background:var(--td-bg-color-container-hover)
+/* Rows carry no hover fill: a single line of text under a tinted rounded plate
+   reads as an input box. Selection is the only filled state. */
+.business-page .record-card:hover:not(.chosen){
+  background:transparent
 }
 .business-page .record-card.chosen{
-  background:var(--td-brand-color-light);
-  border-radius:var(--td-radius-default);
-  padding-inline:8px
+  background:var(--td-brand-color-light)
 }
 .business-page .record-summary{
   overflow:hidden;
