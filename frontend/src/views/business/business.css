@@ -36,6 +36,10 @@
   justify-content:space-between;
   gap:16px
 }
+/* The first block in a panel already sits inside the panel padding. */
+.business-page .panel > h2:first-child,.business-page .panel > h3:first-child{
+  margin-top:0
+}
 /* Headings inside a section row rely on the row for spacing. */
 .business-page .section-heading h2,.business-page .section-heading h3{
   margin:0
@@ -178,29 +182,32 @@
   line-height:1.6
 }
 .business-page .record-list{
-  display:grid;
-  gap:12px
+  display:block
 }
 .business-page .record-card{
-  /* A semantic role=button container: it must draw the card itself now that it
-     is no longer a <button>. */
+  /* A list row, not a card inside a card: the panel already draws the frame. */
   text-align:left;
   width:100%;
-  padding:16px;
+  padding:12px 0;
   display:grid;
-  gap:8px;
-  border:1px solid var(--td-component-stroke);
-  border-radius:var(--td-radius-medium);
-  background:var(--td-bg-color-container);
+  gap:6px;
+  border:0;
+  border-bottom:1px solid var(--td-component-stroke);
+  border-radius:0;
+  background:transparent;
   cursor:pointer;
-  transition:border-color .15s,background .15s
+  transition:background .15s
+}
+.business-page .record-card:last-child{
+  border-bottom:0
 }
 .business-page .record-card:hover{
-  border-color:var(--td-brand-color)
+  background:var(--td-bg-color-container-hover)
 }
 .business-page .record-card.chosen{
-  border-color:var(--td-brand-color);
-  background:var(--td-brand-color-light)
+  background:var(--td-brand-color-light);
+  border-radius:var(--td-radius-default);
+  padding-inline:8px
 }
 .business-page .record-summary{
   overflow:hidden;
