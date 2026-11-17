@@ -1,7 +1,7 @@
 <template>
  <main class="lifecycle-page" aria-labelledby="lifecycle-title">
   <header class="page-heading">
-   <div><span class="eyebrow">知识治理 / 文档</span><h1 id="lifecycle-title">文档工作台</h1><p>集中管理生命周期、版本和文档关系。</p></div>
+   <div class="title-block"><span class="eyebrow">知识治理 / 文档</span><h1 id="lifecycle-title"><t-icon name="file" size="28px" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
    <t-button v-if="!workspaceView" variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
   </header>
   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
@@ -328,6 +328,11 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
 .document-filters .filter-select { width:160px; }
 .document-filters > label { font-size:var(--td-font-size-body-medium); color:var(--td-text-color-primary); }
 .lifecycle-page {
+  /* Fill the routed outlet so the page background reaches the viewport edges,
+     the way native pages do; without flex it shrinks to content and shows the
+     white shell behind it. */
+  flex:1;
+  min-height:0;
   height:100%;
   overflow:auto;
   padding:24px 32px 40px;
@@ -350,10 +355,21 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
   font-weight:600;
 }
 h1 {
-  font-size:var(--td-font-size-title-large);
-  line-height:1.4;
+  font-size:var(--td-font-size-headline-medium);
+  line-height:1.3;
   margin:8px 0;
   color:var(--td-text-color-primary);
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.page-icon {
+  color:var(--td-text-color-primary);
+}
+.page-subtitle {
+  color:var(--td-text-color-placeholder);
+  font-size:var(--td-font-size-body-medium);
+  margin:0;
 }
 h2 {
   font-size:var(--td-font-size-title-medium);

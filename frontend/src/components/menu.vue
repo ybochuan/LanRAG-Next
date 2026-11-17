@@ -95,7 +95,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon" :class="`menu_icon--${item.icon}`">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'automation' ? automationIcon : item.icon == 'model' ? modelIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'document' ? documentIcon : item.icon == 'automation' ? automationIcon : item.icon == 'model' ? modelIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -1164,6 +1164,7 @@ let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
 let artifactIcon = ref('artifact.svg');
+let documentIcon = ref('document.svg');
 let toolboxIcon = ref('toolbox.svg');
 let automationIcon = ref('automation.svg');
 let modelIcon = ref('model.svg');
@@ -1186,6 +1187,9 @@ const getIcon = (path: string) => {
 
     // 产物图标：只在产物页面显示绿色
     artifactIcon.value = artifactsActiveState ? 'artifact-green.svg' : 'artifact.svg';
+
+    // 文档工作台图标：只在文档工作台显示绿色（与产物分开，避免同时高亮）
+    documentIcon.value = route.name === 'documents' ? 'document-green.svg' : 'document.svg';
 
     toolboxIcon.value = route.name === 'toolbox' ? 'toolbox-green.svg' : 'toolbox.svg';
     automationIcon.value = route.name === 'automationList' ? 'automation-green.svg' : 'automation.svg';
