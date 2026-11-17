@@ -16,10 +16,16 @@ export const actionLabels: Record<BusinessAction, string> = {
   repeal_create: '提交废止审核', repeal_approve: '批准废止', repeal_cancel: '撤回废止计划',
   clause_create: '提交条款审核', clause_confirm: '确认条款关系', clause_resolve: '记录冲突裁决', clause_revoke: '撤销条款关系',
   feedback_create: '提交反馈', feedback_approve: '批准反馈', feedback_reject: '拒绝反馈', feedback_quarantine: '隔离反馈',
-  feedback_activate: '激活指导', feedback_withdraw: '撤回反馈', guidance_seed: '添加种子指导', guidance_quarantine_topic: '隔离主题',
+  feedback_activate: '激活指导', feedback_withdraw: '撤回反馈', feedback_sample_review: '抽检复核', guidance_seed: '添加种子指导', guidance_quarantine_topic: '隔离主题',
   revision_create: '创建修订提案', revision_create_binary: '创建二进制修订建议', revision_bind_binary: '绑定修订文件', revision_approve: '批准提案', revision_reject: '拒绝提案', revision_publish: '核对并发布',
   split_create: '创建拆分批次', split_approve: '批准整批拆分', split_reject: '拒绝整批拆分',
 }
+// A feedback that hit the 20% sample still has a pending review even after it
+// was auto-activated. Failed reviews quarantine the staged guidance.
+export function sampleReviewPending(row: BusinessRecord): boolean {
+  return row.sample_decision === 'pending' && row.status === 'active'
+}
+
 export const edgeLabels: Record<string, string> = {
   amends: '修订', interprets: '解释', related_to: '相关', supplements: '补充依赖', attachment_of: '附件归属',
   cites: '引用依据', implements: '实施细则', template_for: '独立模板', repeals: '制度废止',

@@ -144,3 +144,13 @@ test('the workspace tab label set matches the router view contract', () => {
     assert.ok(tabs.includes(`key:'${view}'`), `workspaceTabs must expose ${view}`)
   }
 })
+
+test('the feedback governance page exposes pending sample review', () => {
+  const source = parse(readFileSync(new URL('../business/BusinessView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
+  const template = parse(readFileSync(new URL('../business/BusinessView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
+  assert.ok(source.includes("feedback_sample_review"), 'the write action must be wired into the view')
+  assert.ok(source.includes("sample_decision:sampleDecision.value"), 'the review decision must be sent in the payload')
+  assert.ok(template.includes('sampleReviewPending(detail)'), 'only pending samples may show review controls')
+  assert.ok(template.includes('value="failed"'), 'a failed review option must exist')
+  assert.ok(template.includes('失败则隔离该反馈及其指导'), 'failed review must explain that it quarantines guidance')
+})

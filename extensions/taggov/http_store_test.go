@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -18,6 +19,10 @@ func TestHTTPStoreRefusesAmbiguousTagsAndSendsNativeIDArray(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			var writes atomic.Int32
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/tags/ids") {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
 				if r.Method == "PUT" {
 					writes.Add(1)
 					var body struct {
@@ -69,6 +74,55 @@ func TestHTTPStoreRefusesAmbiguousTagsAndSendsNativeIDArray(t *testing.T) {
 			}
 			if err := adapter.ReplaceTags(context.Background(), scope, nil); err != nil || writes.Load() != 1 {
 				t.Fatalf("replace=%v writes=%d", err, writes.Load())
+			}
+		})
+	}
+}
+
+// POST-M0-TAGS: the explicit tag read endpoint returns a real array, including
+// [] for an untagged document, so null is never ambiguous. A cross-scope or
+// malformed reply is refused instead of being read as an empty tag set.
+func TestHTTPStoreExplicitTagReadEndpoint(t *testing.T) {
+	for _, scenario := range []string{"one", "empty", "wrong_scope", "malformed"} {
+		t.Run(scenario, func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/knowledge/doc-a/tags/ids" {
+					t.Errorf("unexpected path: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				data := map[string]any{"knowledge_id": "doc-a", "tenant_id": 7, "knowledge_base_id": "kb-a",
+					"tags": []any{map[string]any{"id": "native-id", "name": "business:A", "tenant_id": 7, "knowledge_base_id": "kb-a"}}}
+				switch scenario {
+				case "empty":
+					data["tags"] = []any{}
+				case "wrong_scope":
+					data["knowledge_base_id"] = "other"
+				case "malformed":
+					data["tags"] = []any{map[string]any{"id": "../escape", "name": "business:X", "tenant_id": 7, "knowledge_base_id": "kb-a"}}
+				}
+				json.NewEncoder(w).Encode(map[string]any{"success": true, "data": data})
+			}))
+			defer s.Close()
+			client, err := weknora.NewClient(s.URL, "secret", 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapter := NewHTTPStore(client)
+			tags, err := adapter.ReadTags(context.Background(), Scope{7, "kb-a", "doc-a"})
+			switch scenario {
+			case "one":
+				if err != nil || len(tags) != 1 || tags[0].Name != "business:A" {
+					t.Fatalf("one: %v %v", tags, err)
+				}
+			case "empty":
+				if err != nil || tags == nil || len(tags) != 0 {
+					t.Fatalf("empty: %v %v", tags, err)
+				}
+			default:
+				if err == nil {
+					t.Fatalf("%s should be refused", scenario)
+				}
 			}
 		})
 	}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { actionsFor, buildIntent, businessError, canActivate, statusLabels } from './model'
+import { sampleReviewPending, actionsFor, buildIntent, businessError, canActivate, statusLabels } from './model'
 
 test('actions require write access and use the actual workflow state',()=>{
  const row={id:'r',revision:3,status:'candidate'}
@@ -73,4 +73,12 @@ test('errors describe conflict or unknown outcome without inventing rollback',()
  assert.match(businessError({$httpStatus:409}),/重新载入/)
  assert.match(businessError({response:{status:403}}),/权限/)
  assert.match(businessError({$httpStatus:503}),/原请求/)
+})
+
+test('sample review is pending only for an active feedback that was sampled', () => {
+  const pending = { id: 'f1', revision: 1, status: 'active', sample_decision: 'pending' } as any
+  assert.equal(sampleReviewPending(pending), true)
+  assert.equal(sampleReviewPending({ ...pending, status: 'approved' }), false)
+  assert.equal(sampleReviewPending({ ...pending, sample_decision: 'passed' }), false)
+  assert.equal(sampleReviewPending({ ...pending, sample_decision: null }), false)
 })

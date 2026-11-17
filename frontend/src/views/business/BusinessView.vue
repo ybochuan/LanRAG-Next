@@ -137,6 +137,17 @@
             <button v-if="detail.document_id" type="button" class="text-button" @click="inspectRelated(detail.document_id, detail.knowledge_base_id || kb)">查询源文档关联</button>
             <button v-if="detail.target_document_id" type="button" class="text-button" @click="inspectRelated(detail.target_document_id, detail.target_knowledge_base_id || kb)">查询目标文档关联</button>
           </div>
+          <section v-if="kind==='feedback'&&sampleReviewPending(detail)" class="sample-review" aria-label="抽检复核">
+            <h3>抽样复核 · 待处理</h3>
+            <p class="subtle">此反馈已通过 20% 确定性抽样选中。通过则保持已生效；失败则隔离该反馈及其指导。</p>
+            <label>复核结论 <select v-model="sampleDecision" :disabled="running||!!pending"><option value="passed">通过</option><option value="failed">失败（隔离）</option></select></label>
+            <label>复核说明 <input v-model="sampleNote" maxlength="2000" :disabled="running||!!pending" placeholder="可选，说明核对依据" /></label>
+            <div class="actions">
+              <button type="button" class="primary" :disabled="running||!!pending||!canWrite" @click="beginWrite('feedback_sample_review',actionPayload('feedback_sample_review'),detail)">提交复核</button>
+            </div>
+            <p v-if="!canWrite" class="subtle">当前账号仅有查看权限。</p>
+          </section>
+          <p v-else-if="kind==='feedback'&&detail.sample_decision" class="subtle">抽样复核 · {{ sampleLabels[detail.sample_decision] || detail.sample_decision }}</p>
           <p v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" class="notice">尚在冷静期，达到上面的时间后可激活指导。</p>
           <div class="actions"><button v-for="action in actionsFor(kind,detail,canWrite,now)" :key="action"
             :disabled="running||!!pending||(action==='clause_resolve'&&(!clauseDecision||!clauseDecisionNote.trim()))||(action==='feedback_approve'&&!!detail.feedback_context&&!validGuidance)"
@@ -173,7 +184,7 @@ import CreateForm from './CreateForm.vue'
 import BinaryRevisionPanel from './BinaryRevisionPanel.vue'
 import DocumentPicker from './DocumentPicker.vue'
 import { requestFence } from '../lifecycle/model'
-import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, shortID, statusLabels, type WriteIntent } from './model'
+import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, sampleReviewPending, shortID, statusLabels, type WriteIntent } from './model'
 
 const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
 const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string]}>()
@@ -184,6 +195,9 @@ const subtitle=computed(()=>props.section==='associations'?'维护修订、解�
 const feedbackTab=ref<'feedback'|'guidance'>('feedback')
 const feedbackStatus=ref('pending_review')
 const reviewedGuidance=ref('')
+const sampleDecision=ref<'passed'|'failed'>('passed')
+const sampleNote=ref('')
+const sampleLabels:Record<string,string>={pending:'待复核',passed:'已通过',failed:'已隔离'}
 const validGuidance=computed(()=>!!reviewedGuidance.value.trim() && new TextEncoder().encode(reviewedGuidance.value.trim()).length<=720)
 const ratingLabels={incorrect:'内容有误',suggestion:'改进建议',helpful:'有帮助'}
 const kind=computed<api.BusinessKind>(()=>props.section==='associations'?'relation':props.section==='revisions'?'revision':feedbackTab.value)
@@ -219,6 +233,7 @@ function readRecords(scope:string, recordKind:api.BusinessKind, number:number, i
 function actionPayload(action:api.BusinessAction):api.BusinessPayload{
   if(action==='clause_resolve') return {resolution:clauseDecision.value,text:clauseDecisionNote.value}
   if(action==='feedback_approve'&&detail.value?.feedback_context) return {text:reviewedGuidance.value.trim()}
+  if(action==='feedback_sample_review') return {sample_decision:sampleDecision.value,review_note:sampleNote.value.trim()}
   return {}
 }
 

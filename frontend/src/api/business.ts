@@ -13,7 +13,8 @@ export type BusinessAction = 'relation_declare' | 'relation_confirm' | 'relation
   | 'repeal_create' | 'repeal_approve' | 'repeal_cancel'
   | 'clause_create' | 'clause_confirm' | 'clause_resolve' | 'clause_revoke'
   | 'feedback_create' | 'feedback_approve' | 'feedback_reject' | 'feedback_quarantine'
-  | 'feedback_activate' | 'feedback_withdraw' | 'guidance_seed' | 'guidance_quarantine_topic'
+  | 'feedback_activate' | 'feedback_withdraw' | 'feedback_sample_review'
+  | 'guidance_seed' | 'guidance_quarantine_topic'
   | 'revision_create' | 'revision_create_binary' | 'revision_bind_binary' | 'revision_approve' | 'revision_reject' | 'revision_publish'
   | 'split_create' | 'split_approve' | 'split_reject'
 export interface SplitPartInput { title: string; text: string }
@@ -34,6 +35,7 @@ export interface BusinessPayload {
   document_id?: string; target_document_id?: string; target_knowledge_base_id?: string; edge_type?: string
   text?: string; topic?: string; risk?: string; negative?: boolean
   second_confirmation?: boolean; guidance_ids?: string[]
+  sample_decision?: 'passed' | 'failed'; review_note?: string
   similarity?: number; declaration?: number; structure?: number
   split_parts?: SplitPartInput[]
   effective_at?: string
@@ -43,6 +45,7 @@ export interface BusinessPayload {
 export interface BusinessRecord {
   id: string; revision: number; status: string; text?: string; topic?: string
   risk?: string; ready_at?: string | null; confidence?: number; source?: string
+  sample_decision?: string | null; sample_selected_at?: string | null; sample_reviewed_at?: string | null
   knowledge_base_id?: string; document_id?: string; target_document_id?: string; target_knowledge_base_id?: string; edge_type?: string
   source_document_id?: string; source_version_id?: string; target_version_id?: string
   effective_at?: string; applied_at?: string | null; effective_from?: string | null; effective_until?: string | null

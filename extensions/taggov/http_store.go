@@ -56,11 +56,31 @@ func decodeTags(tags []nativeTag, scope Scope) ([]Tag, error) {
 	return result, nil
 }
 
-// ReadTags rejects null/missing tags: the upstream API returns success even when
-// its tag lookup failed, making null indistinguishable from a truly untagged doc.
+// ReadTags prefers the explicit tag-ID read endpoint, which returns [] for an
+// untagged document and a non-2xx error when the lookup failed. This is the
+// POST-M0-TAGS resolution of C-10: null is no longer ambiguous. When the new
+// endpoint is unavailable (older Core), it falls back to the document detail
+// DTO and still refuses null rather than guessing an empty tag set.
 func (s *HTTPStore) ReadTags(ctx context.Context, scope Scope) ([]Tag, error) {
 	if !s.validScope(scope) {
 		return nil, errors.New("invalid native tag scope")
+	}
+	var explicit struct {
+		Data *struct {
+			KnowledgeID     string      `json:"knowledge_id"`
+			TenantID        uint64      `json:"tenant_id"`
+			KnowledgeBaseID string      `json:"knowledge_base_id"`
+			Tags            []nativeTag `json:"tags"`
+		} `json:"data"`
+	}
+	// A successful reply is authoritative: a scope mismatch or malformed tag
+	// must fail closed rather than fall back to the ambiguous document DTO.
+	if err := s.client.JSON(ctx, http.MethodGet, "/api/v1/knowledge/"+url.PathEscape(scope.DocumentID)+"/tags/ids", nil, nil, &explicit); err == nil {
+		doc := explicit.Data
+		if doc == nil || doc.KnowledgeID != scope.DocumentID || doc.TenantID != scope.TenantID || doc.KnowledgeBaseID != scope.KnowledgeBaseID || doc.Tags == nil {
+			return nil, errors.New("native explicit tag read scope mismatch")
+		}
+		return decodeTags(doc.Tags, scope)
 	}
 	var envelope struct {
 		Data *struct {

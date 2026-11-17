@@ -680,6 +680,35 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	})
 }
 
+// GetKnowledgeTagIDs returns the exact native tag IDs of one document as an
+// explicit array. An untagged document returns [] (never null): this is the
+// read API that lets the extension tell "no tags" from "tag lookup failed",
+// which the document-detail DTO cannot express because a failed lookup also
+// serializes as null. Authorization is the same viewer KB check as GetKnowledge.
+func (h *KnowledgeHandler) GetKnowledgeTagIDs(c *gin.Context) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id); err != nil {
+		c.Error(errors.NewNotFoundError("Knowledge not found"))
+		return
+	}
+	tags := make([]gin.H, 0, len(knowledge.Tags))
+	for _, tag := range knowledge.Tags {
+		if tag != nil && tag.ID != "" {
+			tags = append(tags, gin.H{"id": tag.ID, "name": tag.Name, "tenant_id": tag.TenantID, "knowledge_base_id": tag.KnowledgeBaseID})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"knowledge_id": knowledge.ID, "tenant_id": knowledge.TenantID, "knowledge_base_id": knowledge.KnowledgeBaseID, "tags": tags}})
+}
+
 // GetKnowledgeSpans godoc
 // @Summary      获取知识文档解析的 Span 树（含历史尝试）
 // @Description  返回该知识在解析流水线的 trace tree（root → stage → subspan）：每段状态、耗时、input/output、错误码、langfuse_trace_id。支持 ?attempt=N 查看历史尝试；不传则返回最新尝试。前端用于渲染时间线 + 多模态/embedding 子节点 + 一键跳转 Langfuse。
