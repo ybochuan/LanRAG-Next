@@ -643,6 +643,7 @@ onBeforeUnmount(()=>{clearTimeout(scanPoll); catalogFence.invalidate(); listFenc
   color:var(--td-brand-color);
   text-decoration:none;
   outline:none;
+  background:transparent;
 }
 .family-remove, .family-recovery { margin-top:1rem; }
 .family-recovery h3 { margin-bottom:.35rem; }

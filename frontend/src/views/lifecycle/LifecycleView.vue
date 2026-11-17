@@ -440,8 +440,12 @@ p {
   overflow-wrap:anywhere;
   text-align:left;
 }
-.document-link:hover {
+/* A document name is text, never a filled control: no hover plate. */
+.document-link:hover,
+.document-link:focus-visible,
+.document-link:active {
   color:var(--td-brand-color);
+  background:transparent;
 }
 .sort-button {
   /* A button adds its own padding; strip it so the header text lines up with
