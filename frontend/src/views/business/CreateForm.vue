@@ -24,7 +24,7 @@
         <p class="subtle">{{ relationChoices.find(item => item.key === form.edge_type)?.direction }}</p>
         <div v-if="form.edge_type==='related_to'" class="score-fields"><label>语义相似度<t-input-number v-model="form.similarity" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>声明信号<t-input-number v-model="form.declaration" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>结构信号<t-input-number v-model="form.structure" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label></div>
         <template v-if="form.edge_type==='repeals'">
-          <label>废止生效时间（本机时区）<input v-model="form.effective_at" type="datetime-local" :disabled="disabled" required /></label>
+          <label>废止生效时间（本机时区）<t-date-picker v-model="effectiveAtPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="disabled" clearable /></label>
           <p class="subtle">批准后按指定时点执行。生效后旧制度归档并退出普通检索。</p>
         </template>
         <template v-else-if="clauseMode">
@@ -81,6 +81,12 @@ const crossKB=computed(()=>crossEligible.value&&(form.target_knowledge_base_id||
 // instead of silently producing a wrong-scoped relation.
 const targetSideCrossBlocked=computed(()=>props.kind==='relation'&&props.fixedDocument?.end==='target')
 const revisionMode=ref<'single'|'split'>('single')
+// TDesign DatePicker uses a space-separated value; the form keeps the
+// datetime-local shape that Date.parse expects.
+const effectiveAtPicker=computed({
+  get:()=>form.effective_at?form.effective_at.replace('T',' '):'',
+  set:(value:string)=>{form.effective_at=value?value.replace(' ','T'):''},
+})
 // TDesign selects take data options; these mirror the previous <option> lists.
 const revisionModeOptions=[{label:'单件修订',value:'single'},{label:'拆分为多份新制度',value:'split'}]
 const targetKBOptions=computed(()=>[{label:'当前知识库',value:''},...(props.knowledgeBases||[]).filter(item=>item.id!==props.kb).map(item=>({label:item.name,value:item.id}))])

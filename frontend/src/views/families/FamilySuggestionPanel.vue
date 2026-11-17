@@ -31,7 +31,7 @@
         </p>
         <template v-if="canWrite">
           <label v-if="item.edge_type==='supersedes'">拟生效时间
-            <input v-model="effectiveDates[item.id]" type="datetime-local" :disabled="disabled" />
+            <t-date-picker :value="pickerValue(effectiveDates[item.id])" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="disabled" clearable @change="(value:string)=>effectiveDates[item.id]=fromPickerValue(value)" />
           </label>
           <div class="actions">
             <t-button theme="primary" :disabled="disabled || (item.edge_type==='supersedes' && !effectiveDates[item.id])"
@@ -77,6 +77,10 @@ const reasons: Record<string,string> = {
 const edgeLabel = (kind?:string) => kind==='supersedes' ? '建议替代' : edgeLabels[kind || ''] || '建议关联'
 const percent = (value:number) => `${Math.round(value*100)}%`
 const effectiveDates = reactive<Record<string,string>>({})
+// TDesign DatePicker speaks "YYYY-MM-DD HH:mm"; the payload conversion expects
+// the datetime-local shape.
+const pickerValue=(value?:string)=>value?value.replace('T',' '):''
+const fromPickerValue=(value:string)=>value?value.replace(' ','T'):''
 const selected = ref<string[]>([])
 // TDesign checkbox is boolean; the batch selection stays an id array.
 function toggleSelection(id:string){const at=selected.value.indexOf(id);if(at>=0)selected.value.splice(at,1);else selected.value.push(id)}

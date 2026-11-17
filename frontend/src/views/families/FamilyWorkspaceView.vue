@@ -144,7 +144,7 @@
           <form @submit.prevent="createReplacement">
             <DocumentPicker v-model="oldDocument" :kb="kb" label="被替代的旧件" :disabled="locked || !!family.published_document_id" searchable />
             <DocumentPicker v-model="newDocument" :kb="kb" label="新件" :exclude="oldDocument" :disabled="locked" searchable />
-            <label>生效时间<input v-model="effectiveAt" type="datetime-local" required :disabled="locked" /></label>
+            <label>生效时间<t-date-picker v-model="effectiveAtPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked" clearable /></label>
             <t-button theme="primary" type="submit" :disabled="locked || !newDocument || !oldDocument || !effectiveAt">提交审核</t-button>
           </form>
           <h2>补录历史版本链</h2>
@@ -249,6 +249,12 @@ const catalogBusy = ref(false), listBusy = ref(false), busy = ref(false), canWri
 const error = ref(''), notice = ref(''), newLabel = ref(''), addId = ref('')
 const documentId = ref(''), documentBusy = ref(false), removing = ref(''), removalReason = ref('')
 const oldDocument = ref(''), newDocument = ref(''), effectiveAt = ref('')
+// TDesign DatePicker uses a space-separated value; the ref keeps the shape that
+// Date.parse already consumes.
+const effectiveAtPicker=computed({
+  get:()=>effectiveAt.value?effectiveAt.value.replace('T',' '):'',
+  set:(value:string)=>{effectiveAt.value=value?value.replace(' ','T'):''},
+})
 const members = ref<api.FamilyMember[]>([]), relations = ref<api.FamilyRelation[]>([])
 const activity = ref<api.FamilyActivity[]>([]), plans = ref<api.FamilyReplacement[]>([]), hasNext = ref(false)
 const history = ref<api.FamilyReplacementHistory>(), historyBusy = ref(false), historyError = ref('')
