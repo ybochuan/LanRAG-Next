@@ -72,9 +72,9 @@
       <p class="source-note">时间按本机时区显示（{{ timezone }}），保存为 UTC。清空日期不会恢复已失效文档。</p>
       <form @submit.prevent="submitDocument">
        <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">此附件的生效/失效时间继承主件，请到主件编辑日期。</p>
-       <label>生效时间<input v-model="dateForm.effective_from" type="datetime-local" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
-       <label>失效时间<input v-model="dateForm.effective_until" type="datetime-local" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
-       <label>复核时间<input v-model="dateForm.review_due" type="datetime-local" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" /></label>
+       <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
+       <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
+       <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
        <p v-if="documentSuccess" class="notice success" role="status">{{ documentSuccess }}</p>
        <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
       </form>
@@ -205,6 +205,15 @@ const governanceAction=(action:string)=>governanceActions[action]||actionLabels[
 const dateForm=reactive({effective_from:'',effective_until:'',review_due:''})
 const dateBaseline=ref('')
 const dateKey=()=>JSON.stringify([dateForm.effective_from,dateForm.effective_until,dateForm.review_due])
+// TDesign DatePicker speaks "YYYY-MM-DD HH:mm"; the form keeps the
+// datetime-local shape that annotationsForSave compares against.
+const pickerModel=(key:'effective_from'|'effective_until'|'review_due')=>computed({
+  get:()=>dateForm[key]?dateForm[key].replace('T',' '):'',
+  set:(value:string)=>{dateForm[key]=value?value.replace(' ','T'):''},
+})
+const effectiveFromPicker=pickerModel('effective_from')
+const effectiveUntilPicker=pickerModel('effective_until')
+const reviewDuePicker=pickerModel('review_due')
 const dateDirty=computed(()=>dateBaseline.value!==dateKey())
 const listFence=requestFence(),detailFence=requestFence(),reviewFence=requestFence(),ruleFence=requestFence()
 const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone

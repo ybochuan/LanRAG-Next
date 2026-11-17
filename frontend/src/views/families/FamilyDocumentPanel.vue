@@ -11,9 +11,9 @@
       <p>文档状态 · {{ stateLabels[detail.snapshot.current.state] || detail.snapshot.current.state }}</p>
       <form @submit.prevent="save">
         <p v-if="inherited" class="subtle">此附件的生效/失效时间继承主件，请到主件编辑日期。</p>
-        <label>生效时间<input v-model="fields.effective_from" type="datetime-local" :disabled="locked || inherited" /></label>
-        <label>失效时间<input v-model="fields.effective_until" type="datetime-local" :disabled="locked || inherited" /></label>
-        <label>复核时间<input v-model="fields.review_due" type="datetime-local" :disabled="locked || inherited" /></label>
+        <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked || inherited" clearable /></label>
+        <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked || inherited" clearable /></label>
+        <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked || inherited" clearable /></label>
         <p class="subtle">时间按本机时区显示。过期立即失效，清空日期不会恢复已失效文档。</p>
         <t-button v-if="canWrite && !inherited" theme="primary" type="submit" :disabled="locked">保存日期</t-button>
       </form>
@@ -44,6 +44,15 @@ const emit = defineEmits<{ close: []; saved: []; busy: [value: boolean] }>()
 const fields = reactive({ effective_from: '', effective_until: '', review_due: '' })
 const dateBaseline = ref('')
 const dateKey = () => JSON.stringify([fields.effective_from, fields.effective_until, fields.review_due])
+// TDesign DatePicker uses a space-separated value; the form keeps the
+// datetime-local shape that annotationsForSave compares against.
+const pickerModel = (key: 'effective_from' | 'effective_until' | 'review_due') => computed({
+  get: () => (fields[key] ? fields[key].replace('T', ' ') : ''),
+  set: (value: string) => { fields[key] = value ? value.replace(' ', 'T') : '' },
+})
+const effectiveFromPicker = pickerModel('effective_from')
+const effectiveUntilPicker = pickerModel('effective_until')
+const reviewDuePicker = pickerModel('review_due')
 const dateDirty = computed(() => dateBaseline.value !== dateKey())
 const detail = ref<Detail>(), busy = ref(false), supplementBusy = ref(false)
 const error = ref(''), notice = ref(''), reloadRequired = ref(false)
