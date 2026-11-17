@@ -94,6 +94,8 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			report("host_stopped")
 		}
 	}()
+	// Set in worker mode; the notifier drains review alerts outside the outbox tx.
+	var alertNotifier *reviewNotifier
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var reconcile *ingest.Reconciler
@@ -151,7 +153,17 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		}
 		projector := taggov.NewProjector(db, lifecycle.NewStore(db), taggov.NewMapping(db, apiStore), writer)
 		reviewService = review.NewService(db, time.Now)
-		alertHandler := reviewService.Handler(func(_ context.Context, _ review.Alert) error { report(review.SignalCode); return nil })
+		// New alerts are the only signal worth surfacing in the native bell.
+		// Signal is non-blocking; delivery happens on a background worker outside
+		// the review outbox transaction, so a slow Core never stalls projection.
+		alertNotifier = newReviewNotifier(cfg.UpstreamURL, cfg.ManagementKey)
+		alertHandler := reviewService.Handler(func(ctx context.Context, a review.Alert) error {
+			if alertNotifier != nil {
+				alertNotifier.Signal(ctx, a)
+			}
+			report(review.SignalCode)
+			return nil
+		})
 		allowed := make([]outbox.Scope, 0, len(cfg.KnowledgeBaseIDs))
 		for _, kb := range cfg.KnowledgeBaseIDs {
 			scopes = append(scopes, ingest.Scope{TenantID: cfg.TenantID, KnowledgeBaseID: kb})
@@ -266,6 +278,9 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	launch := func(fn func(context.Context) error) {
 		tasks.Add(1)
 		go func() { defer tasks.Done(); backgroundResult <- fn(runCtx) }()
+	}
+	if alertNotifier != nil {
+		launch(func(ctx context.Context) error { alertNotifier.Run(ctx, report); return nil })
 	}
 	if reconcile != nil {
 		businessScopes := make([]provenance.Scope, 0, len(scopes))

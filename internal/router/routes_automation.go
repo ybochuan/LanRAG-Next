@@ -37,6 +37,10 @@ func RegisterAutomationRoutes(r *gin.RouterGroup, h *handler.AutomationHandler, 
 		runs.GET("/:id", h.GetAutomationRun)
 		runs.POST("/:id/cancel", h.CancelAutomationRun)
 	}
+	// PATCH: trusted extension Host posts review reminders with the shared
+	// management key. Deliberately outside the Viewer group: the caller is a
+	// machine principal, and the handler authenticates the key itself.
+	r.POST("/notifications/internal/review-alert", h.NotifyReviewAlert)
 	notifications := r.Group("/notifications", g.Viewer())
 	{
 		notifications.GET("", h.ListNotifications)

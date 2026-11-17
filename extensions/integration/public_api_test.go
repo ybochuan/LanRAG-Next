@@ -42,6 +42,9 @@ func TestPublicAPIReconcileRestartAndProjectionRetry(t *testing.T) {
 			response = map[string]any{"success": true, "total": 1, "page": 1, "page_size": 50, "data": []any{map[string]any{"id": "doc-a", "tenant_id": 7, "knowledge_base_id": "kb-a", "parse_status": "completed", "updated_at": "2026-10-30T00:00:00Z"}}}
 		case "GET /api/v1/knowledge-bases/kb-a/tags":
 			response = map[string]any{"success": true, "data": map[string]any{"total": 3, "page": 1, "page_size": 50, "data": catalog}}
+		case "GET /api/v1/knowledge/doc-a/tags/ids":
+			// POST-M0-TAGS explicit read: untagged document returns a real [].
+			fmt.Fprint(w, `{"success":true,"data":{"knowledge_id":"doc-a","tenant_id":7,"knowledge_base_id":"kb-a","tags":[]}}`)
 		case "GET /api/v1/knowledge/doc-a":
 			var tags any = []any{}
 			if mode == "null" {

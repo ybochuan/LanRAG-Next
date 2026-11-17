@@ -1,9 +1,14 @@
 package handler
 
 import (
+	"crypto/subtle"
+	"encoding/json"
 	stderrors "errors"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,19 +17,21 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // AutomationHandler serves the caller's automations and notifications.
 type AutomationHandler struct {
-	automations   *service.AutomationService
-	notifications *service.NotificationService
+	automations    *service.AutomationService
+	notifications  *service.NotificationService
+	knowledgeBases interfaces.KnowledgeBaseService
 }
 
 // NewAutomationHandler builds the handler.
 func NewAutomationHandler(
-	automations *service.AutomationService, notifications *service.NotificationService,
+	automations *service.AutomationService, notifications *service.NotificationService, knowledgeBases interfaces.KnowledgeBaseService,
 ) *AutomationHandler {
-	return &AutomationHandler{automations: automations, notifications: notifications}
+	return &AutomationHandler{automations: automations, notifications: notifications, knowledgeBases: knowledgeBases}
 }
 
 func (h *AutomationHandler) fail(c *gin.Context, err error) {
@@ -494,5 +501,53 @@ func (h *AutomationHandler) ClearReadNotifications(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// reviewAlertNotification is the narrow DTO the trusted Host uses to ask Core
+// to surface a review reminder in the native notification bell. The caller
+// cannot choose a user: the recipient is resolved from the KB owner.
+type reviewAlertNotification struct {
+	Title           string `json:"title"           binding:"required,max=250"`
+	Content         string `json:"content"         binding:"max=2000"`
+	Link            string `json:"link"            binding:"required,max=512"`
+	SourceID        string `json:"source_id"       binding:"required,max=64"`
+	KnowledgeBaseID string `json:"knowledge_base_id" binding:"required,max=64"`
+	TenantID        uint64 `json:"tenant_id"       binding:"required"`
+}
+
+func (h *AutomationHandler) NotifyReviewAlert(c *gin.Context) {
+	key := os.Getenv("AGENTRAG_MANAGEMENT_KEY")
+	if len(key) < 32 || subtle.ConstantTimeCompare([]byte(c.GetHeader("X-AgentRAG-Management-Key")), []byte(key)) != 1 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized"})
+		return
+	}
+	var req reviewAlertNotification
+	dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&req) != nil || dec.Decode(new(any)) != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
+		return
+	}
+	if !strings.HasPrefix(req.Link, "/platform/lifecycle") || req.SourceID == "" || req.KnowledgeBaseID == "" || req.TenantID == 0 || req.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
+		return
+	}
+	ctx := c.Request.Context()
+	kb, err := h.knowledgeBases.GetKnowledgeBaseByIDOnly(ctx, req.KnowledgeBaseID)
+	if err != nil || kb == nil || kb.TenantID != req.TenantID || kb.CreatorID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "knowledge_base_not_found"})
+		return
+	}
+	h.notifications.Notify(ctx, &types.Notification{
+		TenantID:   req.TenantID,
+		UserID:     kb.CreatorID,
+		Kind:       "lifecycle.review_due",
+		Title:      req.Title,
+		Body:       req.Content,
+		Link:       req.Link,
+		SourceType: "review_alert",
+		SourceID:   req.SourceID,
+	})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
