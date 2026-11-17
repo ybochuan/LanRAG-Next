@@ -16,7 +16,7 @@
     </label>
     <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
     <p v-else-if="!loading && !items.length" class="subtle">当前知识库没有可选的生效文档。</p>
-    <p v-else-if="!loading" class="subtle">共 {{ items.length }} 篇可选生效文档<span v-if="truncated">（已达 {{ items.length }} 篇上限）</span><template v-if="keyword.trim()">，匹配 {{ filteredItems.length }} 篇</template>。</p>
+    <p v-else-if="!loading" class="subtle"><template v-if="serverMode">共 {{ total }} 篇可选生效文档，当前显示 {{ items.length }} 篇；输入关键词由服务端检索。</template><template v-else>共 {{ items.length }} 篇可选生效文档<span v-if="truncated">（已达 {{ items.length }} 篇上限）</span><template v-if="keyword.trim()">，匹配 {{ filteredItems.length }} 篇</template>。</template></p>
   </div>
 </template>
 
@@ -41,6 +41,10 @@ const error = ref('')
 const truncated = ref(false)
 const selectedName = ref('')
 const keyword = ref('')
+const total = ref(0)
+const serverMode = ref(false)
+const SERVER_THRESHOLD = 300
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 const fence = requestFence()
 
 function displayTitle(title: string | undefined, id: string) {
@@ -54,15 +58,28 @@ async function load() {
   loading.value = true
   error.value = ''
   truncated.value = false
+  serverMode.value = false
   try {
-    const rows: DocumentRow[] = []
+    const first = await overview(kb, 1, 'active', '', PAGE_SIZE)
+    if (!fence.current(token)) return
+    total.value = first.total
+    if (first.total > SERVER_THRESHOLD) {
+      // A large KB: keep the initial list short and let the keyword query the
+      // server instead of rendering thousands of options.
+      serverMode.value = true
+      items.value = first.documents.filter(row => row.document_id !== props.exclude)
+      return
+    }
+    const rows: DocumentRow[] = first.documents.filter(row => row.document_id !== props.exclude)
+    let fetched = first.documents.length
     const maxPages = Math.ceil(MAX_DOCUMENTS / PAGE_SIZE)
-    for (let page = 1; page <= maxPages; page++) {
+    for (let page = 2; page <= maxPages && fetched < first.total; page++) {
       const data = await overview(kb, page, 'active', '', PAGE_SIZE)
       if (!fence.current(token)) return
+      fetched += data.documents.length
       rows.push(...data.documents.filter(row => row.document_id !== props.exclude))
-      if (!data.documents.length || rows.length >= data.total) break
-      if (rows.length >= MAX_DOCUMENTS) {
+      if (!data.documents.length) break
+      if (fetched >= MAX_DOCUMENTS) {
         truncated.value = true
         break
       }
@@ -78,6 +95,34 @@ async function load() {
   }
 }
 
+// Above the threshold the keyword is answered by the server; the loaded page
+// only previews the first 100 documents.
+async function searchServer() {
+  const token = fence.begin()
+  const kw = keyword.value.trim()
+  if (!kw) {
+    void load()
+    return
+  }
+  loading.value = true
+  error.value = ''
+  try {
+    const data = await overview(props.kb, 1, 'active', kw, 50)
+    if (!fence.current(token)) return
+    items.value = data.documents.filter(row => row.document_id !== props.exclude)
+    total.value = data.total
+    truncated.value = data.total > data.documents.length
+  } catch {
+    if (fence.current(token)) error.value = '无法搜索生效文档。'
+  } finally {
+    if (fence.current(token)) loading.value = false
+  }
+}
+watch(keyword, () => {
+  if (!serverMode.value) return
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { void searchServer() }, 350)
+})
 // The keyword filters the whole loaded set, so it searches every active
 // document in the KB instead of just the visible page.
 const filteredItems = computed(() => {
@@ -110,5 +155,5 @@ watch(() => [props.kb, props.exclude], () => {
   else loading.value = false
 }, { immediate: true })
 
-onBeforeUnmount(() => fence.invalidate())
+onBeforeUnmount(() => { clearTimeout(searchTimer); fence.invalidate() })
 </script>

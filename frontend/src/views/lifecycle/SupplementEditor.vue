@@ -46,6 +46,17 @@ const emit=defineEmits<{saved:[];busy:[value:boolean]}>()
 const value=ref<api.SupplementView>(),selected=ref<string[]>([]),candidates=ref<api.DocumentRow[]>([])
 const loading=ref(false),saving=ref(false),error=ref(''),success=ref(''),conflict=ref(false)
 const candidateBusy=ref(false),candidateError=ref(''),page=ref(1),total=ref(0),query=ref(''),parentKB=ref(props.kb)
+const serverMode=ref(false)
+let searchTimer:ReturnType<typeof setTimeout>|undefined
+async function searchCandidates(){
+ const token=candidateFence.begin(),kb=parentKB.value,kw=query.value.trim()
+ if(!kw){void loadCandidates();return}
+ candidateBusy.value=true;candidateError.value=''
+ try{const data=await api.overview(kb,1,'active',kw,50);if(!candidateFence.current(token))return;candidates.value=data.documents;total.value=data.total;for(const row of data.documents)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)}
+ catch(e){if(candidateFence.current(token))candidateError.value=errorMessage(e)}
+ finally{if(candidateFence.current(token))candidateBusy.value=false}
+}
+watch(query,()=>{if(!serverMode.value)return;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{void searchCandidates()},350)})
 const titles=reactive(new Map<string,string>())
 const fence=requestFence(),candidateFence=requestFence()
 const locked=computed(()=>saving.value||props.parentBusy)
@@ -66,17 +77,25 @@ async function loadCandidates(){
  const token=candidateFence.begin(),kb=parentKB.value
  candidateBusy.value=true;candidateError.value=''
  try{
-  // Load the whole active set once: the parent picker is a global search over
-  // the KB, not a page of twenty, so a keyword never misses an off-page parent.
-  const rows:api.DocumentRow[]=[]
-  for(let p=1;p<=20;p++){
-   const result=await api.overview(kb,p,'active','',100)
-   if(!candidateFence.current(token))return
-   rows.push(...result.documents)
-   if(!result.documents.length||rows.length>=result.total)break
+  // Small KB: load the whole active set so a keyword never misses an off-page
+  // parent. Large KB: show the first page and let the server answer keywords.
+  const first=await api.overview(kb,1,'active','',100)
+  if(!candidateFence.current(token))return
+  serverMode.value=first.total>300
+  if(serverMode.value){
+   candidates.value=first.documents;total.value=first.total
+  }else{
+   const rows:api.DocumentRow[]=[...first.documents];let fetched=first.documents.length
+   for(let p=2;p<=20&&fetched<first.total;p++){
+    const result=await api.overview(kb,p,'active','',100)
+    if(!candidateFence.current(token))return
+    fetched+=result.documents.length
+    rows.push(...result.documents)
+    if(!result.documents.length)break
+   }
+   candidates.value=rows;total.value=first.total
   }
-  candidates.value=rows;total.value=rows.length
-  for(const row of rows)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)
+  for(const row of candidates.value)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)
 }catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
 }
 async function loadSelectedTitles(view:api.SupplementView){
