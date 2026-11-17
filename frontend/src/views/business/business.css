@@ -134,7 +134,13 @@
 .business-page .scope-bar label{
   flex-direction:row;
   align-items:center;
-  min-width:340px
+  gap:8px;
+  min-width:340px;
+  white-space:nowrap
+}
+.business-page .scope-bar label > .t-select{
+  flex:1;
+  min-width:0
 }
 .business-page .scope-bar select{
   min-width:250px
@@ -158,6 +164,12 @@
   border:1px solid var(--td-component-stroke);
   border-radius:var(--td-radius-medium);
   padding:24px
+}
+/* Stacked panels need a gap; adjacent 1px borders otherwise read as empty rows. */
+.business-page .panel + .panel,
+.business-page .panel + .workspace-grid,
+.business-page .workspace-grid + .panel{
+  margin-top:16px
 }
 .business-page .subtle,.business-page small{
   font-size:var(--td-font-size-body-small);
@@ -247,10 +259,15 @@
   font-size:var(--app-text-xs);
   color:var(--td-text-color-placeholder)
 }
+/* An empty strip must not paint its bottom rule. */
+.business-page .sub-tabs:empty{
+  display:none
+}
 /* Sub-tabs are text tabs with a 2px underline, like the native workspace tabs;
    they must not inherit the legacy boxed-button look. */
 .business-page .sub-tabs{
   margin:16px 0 20px;
+  min-height:0;
   gap:24px;
   border-bottom:1px solid var(--td-component-stroke)
 }

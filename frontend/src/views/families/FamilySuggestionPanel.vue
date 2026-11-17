@@ -117,4 +117,27 @@ function confirm(item:FamilySuggestion){
 .evidence { font-size:var(--app-text-sm); color:var(--td-text-color-secondary); }
 details { margin-top:1rem; }
 summary { cursor:pointer; }
+
+/* Disclosure control: a TDesign-style chevron instead of the browser marker. */
+details > summary {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 0;
+  cursor:pointer;
+  font-weight:600;
+  color:var(--td-text-color-primary);
+  list-style:none;
+}
+details > summary::-webkit-details-marker { display:none; }
+details > summary::before {
+  content:"";
+  width:0;
+  height:0;
+  border-left:6px solid currentColor;
+  border-top:4px solid transparent;
+  border-bottom:4px solid transparent;
+  transition:transform .15s ease;
+}
+details[open] > summary::before { transform:rotate(90deg); }
 </style>

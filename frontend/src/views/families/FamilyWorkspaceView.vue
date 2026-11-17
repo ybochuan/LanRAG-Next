@@ -11,7 +11,7 @@
         <t-button variant="outline" size="small" :disabled="busy || listBusy || locked || familyPage <= 1" @click="moveFamilies(-1)">上页文档族</t-button>
         <t-button variant="outline" size="small" :disabled="busy || listBusy || locked || families.length < 20" @click="moveFamilies(1)">下页文档族</t-button>
       </div>
-      <t-tag v-if="kb" :theme="canWrite?'primary':'default'" variant="light">{{ canWrite ? '可管理' : '只读' }}</t-tag>
+      <t-tag v-if="kb" :theme="canWrite?'primary':'default'" variant="light" size="small">{{ canWrite ? '可管理' : '只读' }}</t-tag>
     </section>
     <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
     <t-alert v-if="notice" theme="success" class="notice">{{ notice }}</t-alert>
@@ -38,7 +38,7 @@
         <p v-if="family.published_document_id && family.published_head_availability==='missing'" class="notice error" role="alert">当前发布件在原生文档中不可用。请从当前成员中选择新的发布头并显式确认恢复。</p>
       </section>
       <section v-if="family && projection" class="panel family-projection" aria-labelledby="family-projection-title">
-        <div class="section-heading"><h3 id="family-projection-title">投影设置</h3><span class="access-badge">{{ projection.enabled?'已启用':'未启用' }}</span></div>
+        <div class="section-heading"><h3 id="family-projection-title">投影设置</h3><t-tag :theme="projection.enabled?'success':'default'" variant="light" size="small">{{ projection.enabled?'已启用':'未启用' }}</t-tag></div>
         <p class="subtle">启用后按业务族成员和确认关系重算旧图与标签；关闭后沿用旧规则。</p>
         <p v-if="projection.pending" role="status">待处理投影任务 {{ projection.pending }} 条。</p>
         <p v-if="projection.failed" class="notice error" role="alert">失败投影任务 {{ projection.failed }} 条，请检查 Outbox。</p>
