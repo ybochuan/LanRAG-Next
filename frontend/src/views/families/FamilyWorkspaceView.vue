@@ -232,7 +232,14 @@ const recoverOptions=computed(()=>[{label:'选择当前族内可用成员',value
 const relationMemberOptions=computed(()=>[{label:'请选择本族成员',value:''},...relationMembers.value.map(row=>({label:title(row.document_id),value:row.document_id}))])
 const relationEndOptions=[{label:'作为源文档',value:'source'},{label:'作为目标文档',value:'target'}]
 const familyOptions=computed(()=>{
-  const rows=families.value.map(row=>({label:`${row.label} · ${shortID(row.business_family_id)}`,value:row.business_family_id}))
+  // Show the family name only; the short id is appended just when two families
+  // share a name, so the list stays readable without losing disambiguation.
+  const seen=new Map<string,number>()
+  for(const row of families.value)seen.set(row.label,(seen.get(row.label)||0)+1)
+  const rows=families.value.map(row=>({
+    label:(seen.get(row.label)||0)>1?`${row.label} · ${shortID(row.business_family_id)}`:row.label,
+    value:row.business_family_id,
+  }))
   if(familyId.value&&!rows.some(row=>row.value===familyId.value))rows.unshift({label:family.value?.label||familyId.value,value:familyId.value})
   return [{label:'请选择文档族',value:''},...rows]
 })
