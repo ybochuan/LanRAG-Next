@@ -330,7 +330,31 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
 
 <style scoped>
 .drawer-meta { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
-.detail-tabs { flex-wrap:wrap; margin-top:16px; }
+.detail-tabs { flex-wrap:wrap; margin:16px 0 20px; }
+/* One heading scale for every section in the drawer, whatever component hosts
+   it; the document title in the header keeps its own size. */
+.document-drawer h2:not(#document-title),
+.document-drawer h3,
+.document-drawer :deep(h1),
+.document-drawer :deep(h2),
+.document-drawer :deep(h3) {
+  font-size:var(--td-font-size-title-medium);
+  font-weight:600;
+  line-height:24px;
+  margin:0 0 12px;
+  color:var(--td-text-color-primary);
+}
+.document-drawer h2 + p,
+.document-drawer h3 + p {
+  margin-top:0;
+}
+/* The supplement block lives inside the drawer, so it must not draw a second
+   rule under the tab bar. */
+.document-drawer :deep(.supplements) {
+  border-top:0;
+  margin-top:0;
+  padding-top:0;
+}
 .document-drawer :deep(.business-page form) { display:block; }
 .document-drawer :deep(.business-page form label) { margin-block:8px; }
 .document-filters { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:16px 0; }
