@@ -629,11 +629,16 @@ onBeforeUnmount(()=>{clearTimeout(scanPoll); catalogFence.invalidate(); listFenc
 .family-create label { flex:1; }
 .family-header { margin-bottom:1rem; }
 .family-header a { margin-inline-start:1rem; }
-.family-items { padding-inline-start:1.25rem; }
+.family-items { padding-inline-start:0; list-style:none; }
 .family-items li { padding:.6rem 0; border-bottom:1px solid var(--td-component-border); overflow-wrap:anywhere; }
 .family-items li > :is(button,span,small,.t-link) { margin-inline-end:.5rem; }
-.family-items .t-link { font-size:var(--td-font-size-body-medium); color:var(--td-text-color-primary); }
-.family-items .t-link:hover { color:var(--td-brand-color); }
+.family-items .t-link {
+  font-size:var(--td-font-size-body-medium);
+  color:var(--td-text-color-primary);
+  /* t-link renders an <a>; the UA underline must be switched off explicitly. */
+  text-decoration:none;
+}
+.family-items .t-link:hover { color:var(--td-brand-color); text-decoration:none; }
 .family-remove, .family-recovery { margin-top:1rem; }
 .family-recovery h3 { margin-bottom:.35rem; }
 @media (max-width:680px) { .family-create { display:block; } }
