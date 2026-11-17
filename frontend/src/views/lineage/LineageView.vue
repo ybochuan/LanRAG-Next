@@ -144,7 +144,7 @@ onBeforeUnmount(() => { graphFence.invalidate(); catalogFence.invalidate() })
 .lineage-page { height: 100%; overflow: auto; padding: 32px; color: var(--td-text-color-primary); background: transparent; box-sizing: border-box; }
 .lineage-heading, .scope-bar, .detail-title, .graph-toolbar, .detail-actions, .zoom-actions { display: flex; align-items: center; gap: 12px; }
 .lineage-heading, .detail-title, .graph-toolbar { justify-content: space-between; }
-.eyebrow, .scope-note, .subtle, .lineage-heading p, .view-description { color: var(--td-text-color-secondary); font-size: var(--app-text-md); }
+.eyebrow, .scope-note, .subtle, .lineage-heading p, .view-description { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); }
 h1 { margin: 6px 0; font-size: var(--td-font-size-title-large); } h2 { margin: 6px 0; font-size: var(--td-font-size-title-medium); }
 .readonly { color: var(--td-success-color); border: 1px solid var(--td-success-color-light); border-radius: var(--td-radius-round); padding: 6px 12px; font-size: var(--td-font-size-body-small); white-space: nowrap; }
 /* Only not-yet-converted raw controls are styled here; a bare `input` rule also
@@ -155,20 +155,20 @@ button:not(.t-button) { cursor: pointer; } button:not(.t-button):hover { border-
 .view-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--td-component-border); }
 .view-tabs button { padding: 12px 0; border: 0; border-radius: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--td-text-color-secondary); }
 .view-tabs button.selected { color: var(--td-brand-color); border-bottom-color: var(--td-brand-color); font-weight: 600; }
-.view-description { margin: 14px 0 22px; } .cross-toggle { display: inline-flex; align-items: center; gap: 8px; margin: -8px 0 14px; color: var(--td-text-color-secondary); font-size: var(--app-text-md); } .cross-toggle input { padding: 0; }
-.notice { padding: 12px 16px; background: #fff8e7; color: #805f1c; border-radius: var(--app-radius-sm); font-size: var(--app-text-md); }
+.view-description { margin: 14px 0 22px; } .cross-toggle { display: inline-flex; align-items: center; gap: 8px; margin: -8px 0 14px; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); } .cross-toggle input { padding: 0; }
+.notice { padding: 12px 16px; background: #fff8e7; color: #805f1c; border-radius: var(--td-radius-medium); font-size: var(--td-font-size-body-medium); }
 .return-all { margin-bottom: 14px; }
 .notice.error { background: #fcefee; color: #ad3b35; } .empty { padding: 80px 24px; text-align: center; color: var(--td-text-color-secondary); }
-.graph-toolbar { padding: 12px 16px; border: 1px solid var(--td-component-border); border-bottom: 0; border-radius: var(--app-radius-lg) var(--app-radius-lg) 0 0; background: var(--td-bg-color-container); font-size: var(--app-text-md); }
+.graph-toolbar { padding: 12px 16px; border: 1px solid var(--td-component-border); border-bottom: 0; border-radius: var(--td-radius-large) var(--td-radius-large) 0 0; background: var(--td-bg-color-container); font-size: var(--td-font-size-body-medium); }
 .zoom-actions { margin-left: auto; gap: 6px; } .zoom-actions button { padding: 5px 10px; }
-.graph-workspace { display: grid; grid-template-columns: 248px minmax(0, 1fr); border: 1px solid var(--td-component-border); border-radius: 0 0 var(--app-radius-lg) var(--app-radius-lg); overflow: hidden; }
+.graph-workspace { display: grid; grid-template-columns: 248px minmax(0, 1fr); border: 1px solid var(--td-component-border); border-radius: 0 0 var(--td-radius-large) var(--td-radius-large); overflow: hidden; }
 .node-list { padding: 16px 12px; max-height: 640px; overflow: auto; box-sizing: border-box; background: var(--td-bg-color-container); border-right: 1px solid var(--td-component-border); }
-.node-list label { display: block; font-size: var(--app-text-md); margin-bottom: 8px; } .node-list input { width: 100%; box-sizing: border-box; padding: 9px 8px; }
+.node-list label { display: block; font-size: var(--td-font-size-body-medium); margin-bottom: 8px; } .node-list input { width: 100%; box-sizing: border-box; padding: 9px 8px; }
 .node-list > button { display: block; text-align: left; width: 100%; margin-top: 8px; padding: 12px; border-color: transparent; background: var(--td-bg-color-page); }
 .node-list > button.active { border-color: var(--td-brand-color); } .node-list strong, .node-list span, .node-list small { display: block; overflow-wrap: anywhere; }
-.node-list strong { font-size: var(--app-text-md); line-height: 1.5; } .node-list span, .node-list small { font-size: var(--app-text-xs); margin-top: 5px; color: var(--td-text-color-secondary); }
-.canvas-panel { min-width: 0; overflow: hidden; } .node-detail { margin-top: 18px; border: 1px solid var(--td-component-border); border-radius: var(--app-radius-lg); padding: 20px; background: var(--td-bg-color-container); }
-dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin: 20px 0; } dt { font-size: var(--app-text-sm); color: var(--td-text-color-secondary); } dd { margin: 6px 0 0; font-size: var(--app-text-md); overflow-wrap: anywhere; }
-.detail-actions a { color: var(--td-brand-color); text-decoration: none; font-size: var(--app-text-md); }
+.node-list strong { font-size: var(--td-font-size-body-medium); line-height: 1.5; } .node-list span, .node-list small { font-size: var(--td-font-size-body-small); margin-top: 5px; color: var(--td-text-color-secondary); }
+.canvas-panel { min-width: 0; overflow: hidden; } .node-detail { margin-top: 18px; border: 1px solid var(--td-component-border); border-radius: var(--td-radius-large); padding: 20px; background: var(--td-bg-color-container); }
+dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin: 20px 0; } dt { font-size: var(--td-font-size-body-small); color: var(--td-text-color-secondary); } dd { margin: 6px 0 0; font-size: var(--td-font-size-body-medium); overflow-wrap: anywhere; }
+.detail-actions a { color: var(--td-brand-color); text-decoration: none; font-size: var(--td-font-size-body-medium); }
 @media (max-width: 800px) { .lineage-page { padding: 20px 12px; } .graph-workspace { grid-template-columns: 190px minmax(0, 1fr); } .node-list { max-height: 460px; } dl { grid-template-columns: 1fr; } .graph-toolbar { flex-wrap: wrap; } }
 </style>

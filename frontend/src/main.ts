@@ -6,6 +6,8 @@ import TDesign from "tdesign-vue-next";
 // 引入组件库的少量全局样式变量
 import "tdesign-vue-next/dist/tdesign.css";
 import "@/assets/theme/theme.css";
+// Shared business/workbench styles: one copy for every page that renders them.
+import "@/views/business/business.css";
 import "@/assets/theme/tdesign-overrides.less";
 import "@/assets/dropdown-menu.less";
 import "@/components/css/chat-hljs-dark.less";

@@ -49,15 +49,15 @@
         </fieldset>
         <t-button variant="outline" :disabled="disabled||splitParts.length>=8" @click="addSplitPart">添加分件</t-button>
       </div>
-      <label v-else-if="kind!=='relation'">{{ kind==='revision'?'完整修订正文':'内容' }}<textarea v-model="form.text" :rows="kind==='revision'?12:5" :disabled="disabled" required :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
+      <label v-else-if="kind!=='relation'">{{ kind==='revision'?'完整修订正文':'内容' }}<t-textarea v-model="form.text" :autosize="{minRows:kind==='revision'?12:5}" :disabled="disabled" :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
       <fieldset v-if="kind==='revision'" :disabled="disabled"><legend>选用 1–3 条生效指导</legend>
         <p v-if="guidanceError" role="alert" class="notice error">{{ guidanceError }}</p>
-        <label v-for="item in guidances.filter(v=>v.status==='active')" :key="item.id" class="guidance-choice"><input v-model="selected" type="checkbox" :value="item.id" :disabled="disabled || (!selected.includes(item.id)&&selected.length>=3)" /><span><strong>{{ item.topic }}</strong><small>{{ item.text }}</small></span></label>
+        <label v-for="item in guidances.filter(v=>v.status==='active')" :key="item.id" class="guidance-choice"><t-checkbox :checked="selected.includes(item.id)" :disabled="disabled || (!selected.includes(item.id)&&selected.length>=3)" @change="toggleGuidance(item.id)"><span><strong>{{ item.topic }}</strong><small>{{ item.text }}</small></span></t-checkbox></label>
         <p v-if="!guidanceLoading&&!guidances.some(v=>v.status==='active')" class="subtle">本页没有生效指导，可翻页或先去反馈治理添加。</p>
-        <div class="mini-pages"><button type="button" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">上一页</button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><button type="button" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">下一页</button></div>
-        <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <button type="button" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">移除</button></small>
+        <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">上一页</t-button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">下一页</t-button></div>
+        <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <t-button variant="text" size="small" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">移除</t-button></small>
       </fieldset>
-      <button type="submit" class="primary" :disabled="disabled || targetSideCrossBlocked || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</button>
+      <t-button theme="primary" type="submit" :disabled="disabled || targetSideCrossBlocked || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</t-button>
     </form>
   </section>
 </template>
@@ -81,6 +81,8 @@ const crossKB=computed(()=>crossEligible.value&&(form.target_knowledge_base_id||
 // instead of silently producing a wrong-scoped relation.
 const targetSideCrossBlocked=computed(()=>props.kind==='relation'&&props.fixedDocument?.end==='target')
 const revisionMode=ref<'single'|'split'>('single')
+// TDesign checkbox is boolean; the selection stays an id array capped at 3.
+function toggleGuidance(id:string){const at=selected.value.indexOf(id);if(at>=0)selected.value.splice(at,1);else if(selected.value.length<3)selected.value.push(id)}
 // TDesign DatePicker uses a space-separated value; the form keeps the
 // datetime-local shape that Date.parse expects.
 const effectiveAtPicker=computed({

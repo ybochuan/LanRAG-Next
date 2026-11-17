@@ -85,11 +85,11 @@
               <p v-if="part.target_document_id" class="subtle">目标文档 · {{ docName(part.target_document_id, part.target_knowledge_base_id || detail.knowledge_base_id || kb) }}</p>
               <pre class="content-preview">{{ part.proposed_patch }}</pre>
               <p v-if="part.publish_error" class="notice" role="status">{{ publicationError(part.publish_error) }}</p>
-              <button v-if="detail.status==='approved'&&actionsFor(kind,part,canWrite,now).includes('revision_publish')"
-                type="button" class="primary" :disabled="running||!!pending"
+              <t-button v-if="detail.status==='approved'&&actionsFor(kind,part,canWrite,now).includes('revision_publish')"
+                theme="primary" :disabled="running||!!pending"
                 @click="beginWrite('revision_publish',{}, {...part,record_kind:'split_part',split_id:detail.id,split_title:part.title})">
                 {{ part.status==='approved'?'发布此分件':'核对并继续发布' }}
-              </button>
+              </t-button>
             </article>
           </section>
           <template v-if="detail.edge_type==='repeals'">
@@ -375,7 +375,6 @@ onBeforeRouteUpdate(allowNavigation)
 onMounted(()=>{window.addEventListener('beforeunload',beforeUnload);void loadKBs()})
 onBeforeUnmount(()=>{generation++;catalogFence.invalidate();listFence.invalidate();detailFence.invalidate();kbFence.invalidate();queryFence.invalidate();clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload)})
 </script>
-<style src="./business.css"></style>
 <style scoped>
 .embedded-business { height:auto; overflow:visible; padding:0; background:transparent; }
 .embedded-business .page-heading { margin-bottom:12px; }

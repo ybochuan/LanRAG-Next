@@ -117,8 +117,8 @@ function confirm(item:FamilySuggestion){
 .suggestion-list { padding-inline-start:1.25rem; }
 .suggestion-list > li { padding:.75rem 0; border-bottom:1px solid var(--td-component-border); }
 .suggestion-list .state-badge { margin-inline-start:.6rem; }
-.selection { display:flex; align-items:center; gap:.5rem; font-size:var(--app-text-sm); }
-.evidence { font-size:var(--app-text-sm); color:var(--td-text-color-secondary); }
+.selection { display:flex; align-items:center; gap:.5rem; font-size:var(--td-font-size-body-small); }
+.evidence { font-size:var(--td-font-size-body-small); color:var(--td-text-color-secondary); }
 details { margin-top:1rem; }
 summary { cursor:pointer; }
 
