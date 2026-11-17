@@ -29,7 +29,7 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
     './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,page,filter,titleQuery};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery};`)(
     (id: string) => modules[id], () => ({}), () => 0, () => {}, {}, { activeElement: null, querySelector: () => null }, {},
   ))
   return { state, stop: () => scope.stop() }
@@ -82,11 +82,10 @@ test('late reviews response from previous KB cannot replace current reviews', as
   } finally { view.stop() }
 })
 
-test('route query seeds the list tab, page, state and title', () => {
-  const view = mountSetup({}, { tab: 'reviews', page: '3', state: 'active', title: '合同' })
+test('route query seeds the list tab, state and title', () => {
+  const view = mountSetup({}, { tab: 'reviews', state: 'active', title: '合同' })
   try {
     assert.equal(view.state.tab.value, 'reviews')
-    assert.equal(view.state.page.value, 3)
     assert.equal(view.state.filter.value, 'active')
     assert.equal(view.state.titleQuery.value, '合同')
   } finally { view.stop() }
@@ -183,4 +182,16 @@ test('review list supports ascending and descending review_due order', () => {
   assert.ok(script.includes('sortedReviewItems'), 'the list must be sorted before rendering')
   assert.ok(template.includes('v-for="alert in sortedReviewItems"'), 'the review list must render the sorted rows')
   assert.ok(template.includes('reviewSort=\'asc\'') && template.includes('reviewSort=\'desc\''), 'both directions must be selectable')
+})
+
+test('document list uses WeKnora text colour and shows all documents in a scroll area', () => {
+  const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
+  const script = parse(file).descriptor.scriptSetup!.content
+  const template = parse(file).descriptor.template?.content ?? ''
+  assert.ok(file.includes('.document-link:hover,.document-link:focus-visible {'), 'document names should only turn brand-coloured on hover')
+  assert.ok(file.includes('color:var(--td-text-color-primary);'), 'document names default to WeKnora primary text colour')
+  assert.ok(script.includes('allDocuments.value=rows'), 'all document pages must be accumulated')
+  assert.ok(template.includes('v-for="doc in sortedDocuments"'), 'table renders the full sorted document set')
+  assert.ok(!template.includes('第 {{ page }} 页'), 'pagination footer must be removed')
+  assert.ok(file.includes('max-height:60vh;'), 'the list must be a bounded scroll area')
 })

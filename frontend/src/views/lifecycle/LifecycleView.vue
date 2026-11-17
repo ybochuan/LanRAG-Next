@@ -41,11 +41,11 @@
          <td><span class="state-badge" :class="doc.state">{{ stateLabels[doc.state] || doc.state }}</span></td>
          <td>{{ doc.business_family?.label || '未归族' }}</td><td>{{ date(doc.annotations.effective_until) }}</td>
         </tr>
-        <tr v-if="!data.documents.length"><td colspan="4" class="empty">当前没有匹配的文档。</td></tr>
+        <tr v-if="!allDocuments.length"><td colspan="4" class="empty">当前没有匹配的文档。</td></tr>
        </tbody>
       </table>
      </div>
-     <footer class="pagination"><span>第 {{ page }} 页 · 共 {{ data.total }} 项</span><button class="secondary" :disabled="page<=1" @click="changePage(-1)">上一页</button><button class="secondary" :disabled="page*20>=data.total" @click="changePage(1)">下一页</button></footer>
+     <p class="source-note">共 {{ allDocuments.length }} 项 · 列表可滚动查看全部</p>
     </section>
     </template>
     <section v-if="tab==='reviews'" class="panel" role="tabpanel" aria-labelledby="tab-reviews"><div class="section-heading"><div><h2>待复核</h2><p>到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。</p></div></div><p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p><p v-if="reviewBusy" role="status">正在加载提醒…</p><div v-if="reviewItems.length && !reviewBusy" class="review-sort"><span>按复核到期</span><button type="button" :class="{selected:reviewSort==='asc'}" @click="reviewSort='asc'">正序</button><button type="button" :class="{selected:reviewSort==='desc'}" @click="reviewSort='desc'">倒序</button></div><div v-else-if="reviewItems.length" class="review-list"><button v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" @click="openDocument(alert.document_id, alert.title)"><span><strong>{{ alert.title || alert.document_id }}</strong><small>复核到期 {{ date(alert.review_due) }}</small><small v-if="alert.delivered_at">本地投递已接受 {{ date(alert.delivered_at) }}</small></span><span class="review-pill" :class="reviewDeliveryClass(alert.delivery_state)">{{ reviewDeliveryLabel(alert.delivery_state) }}</span></button></div><p v-else-if="!reviewError" class="empty">当前没有待复核提醒。</p><p v-if="reviewsTruncated" class="notice">最多展示 1000 条提醒；当前列表可能尚未包含全部待办。</p><p class="source-note">投递状态取自通知队列；「已投递」表示本地回调已接受该提醒，不代表人工已读。</p></section>
@@ -155,12 +155,13 @@ const kbFence=requestFence()
 const tabFromQuery=route.query.tab
 const tab=ref<(typeof tabs)[number]['key']>(tabFromQuery==='reviews'||tabFromQuery==='rules'?tabFromQuery:'documents')
 const kb=ref(''),knowledgeBases=ref<{id:string;name:string}[]>([]),loadingKB=ref(true)
-const pageFromQuery=Number.parseInt(typeof route.query.page==='string'?route.query.page:'',10)
-const page=ref(Number.isFinite(pageFromQuery)&&pageFromQuery>0?pageFromQuery:1)
 const filterFromQuery=typeof route.query.state==='string'?route.query.state:''
 const filter=ref<api.LifecycleState|''>(states.includes(filterFromQuery as api.LifecycleState)?filterFromQuery as api.LifecycleState:'')
 const titleQuery=ref(typeof route.query.title==='string'?route.query.title:'')
 const data=ref<api.Overview>(),busy=ref(false),error=ref('')
+// The workbench shows the whole document set in one scrollable table. Keep
+// counts/rules in data, and accumulate every page of documents here.
+const allDocuments=ref<api.DocumentRow[]>([])
 type DocumentSortKey='title'|'state'|'family'|'effective_until'
 const sortKey=ref<DocumentSortKey>('title'),sortDirection=ref<1|-1>(1)
 const documentSortValue=(row:api.DocumentRow,key:DocumentSortKey)=>{
@@ -169,7 +170,7 @@ const documentSortValue=(row:api.DocumentRow,key:DocumentSortKey)=>{
  if(key==='family')return row.business_family?.label||''
  return row.annotations.effective_until||''
 }
-const sortedDocuments=computed(()=>[...(data.value?.documents||[])].sort((left,right)=>documentSortValue(left,sortKey.value).localeCompare(documentSortValue(right,sortKey.value),'zh-CN')*sortDirection.value))
+const sortedDocuments=computed(()=>[...allDocuments.value].sort((left,right)=>documentSortValue(left,sortKey.value).localeCompare(documentSortValue(right,sortKey.value),'zh-CN')*sortDirection.value))
 function sortDocuments(key:DocumentSortKey){
  if(sortKey.value===key)sortDirection.value=sortDirection.value===1?-1:1
  else{sortKey.value=key;sortDirection.value=1}
@@ -240,7 +241,20 @@ async function loadOverview(){
  clearTimeout(searchTimer)
  const token=listFence.begin(),scope=kb.value;if(!scope)return
  busy.value=true;error.value=''
- try{const result=await api.overview(scope,page.value,filter.value,titleQuery.value.trim());if(!listFence.current(token))return;data.value=result;Object.assign(ruleForm,result.rules.rules)}catch(e){if(listFence.current(token)){data.value=undefined;error.value=errorMessage(e)}}finally{if(listFence.current(token))busy.value=false}
+ try{
+  const title=titleQuery.value.trim()
+  const first=await api.overview(scope,1,filter.value,title,100)
+  if(!listFence.current(token))return
+  const rows=[...(first.documents||[])]
+  const total=first.total||rows.length
+  for(let next=2;rows.length<total&&next<=1000;next++){
+    const more=await api.overview(scope,next,filter.value,title,100)
+    if(!listFence.current(token))return
+    if(!more.documents?.length)break
+    rows.push(...more.documents)
+  }
+  data.value=first;allDocuments.value=rows;Object.assign(ruleForm,first.rules.rules)
+}catch(e){if(listFence.current(token)){data.value=undefined;allDocuments.value=[];error.value=errorMessage(e)}}finally{if(listFence.current(token))busy.value=false}
 }
 async function loadReviews(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;reviewBusy.value=true;reviewError.value='';reviewItems.value=[];try{const result=await api.reviews(scope);if(reviewFence.current(token)){reviewItems.value=result.alerts||[];reviewsTruncated.value=result.truncated;reviewsLoaded.value=true}}catch(e){if(reviewFence.current(token))reviewError.value=errorMessage(e)}finally{if(reviewFence.current(token))reviewBusy.value=false}}
 function loadAll(){if(!kb.value){void loadKnowledgeBases();return}ruleError.value='';ruleSuccess.value=false;void loadOverview();if(tab.value==='reviews')void loadReviews()}
@@ -248,7 +262,6 @@ function listQuery(){
  const query:Record<string,string>={}
  if(kb.value)query.kb=kb.value
  if(tab.value!=='documents')query.tab=tab.value
- if(page.value>1)query.page=String(page.value)
  if(filter.value)query.state=filter.value
  const title=titleQuery.value.trim()
  if(title)query.title=title
@@ -266,7 +279,6 @@ function showWorkspace(value:(typeof workspaceTabs)[number]['key']){void router.
 function openWorkspaceDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'life',kbOverride)}
 function openGraphDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'graph',kbOverride)}
 function openRelatedDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'relations',kbOverride)}
-function changePage(delta:number){page.value+=delta;void loadOverview()}
 function applyDetail(value:api.Detail){detail.value=value;dateForm.effective_from=toLocalInput(value.snapshot.annotations.effective_from);dateForm.effective_until=toLocalInput(value.snapshot.annotations.effective_until);dateForm.review_due=toLocalInput(value.snapshot.annotations.review_due);dateBaseline.value=dateKey()}
 async function openDocument(id:string,title?:string,nextTab:(typeof detailTabs)[number]['key']='life',kbOverride=kb.value){
  const scope=kbOverride||kb.value
@@ -289,8 +301,8 @@ async function reloadDocument(){const token=detailFence.begin(),scope=selectedKB
 async function submitDocument(){if(!detail.value||!detailCanWrite.value||savingDocument.value||supplementBusy.value||documentConflict.value)return;const token=detailFence.begin(),scope=selectedKB.value,id=selectedID.value,original=detail.value.snapshot.annotations;savingDocument.value=true;detailError.value='';documentSuccess.value='';try{const result=await api.saveAnnotations(scope,id,original.revision,annotationsForSave(original,dateForm));if(!detailFence.current(token))return;applyDetail(result);documentSuccess.value=result.evaluation_status==='pending'?'日期已保存；状态待后台扫描确认，请稍后刷新。':'日期已保存，状态已重新核验。';void loadOverview();void loadReviews()}catch(e){if(detailFence.current(token)){detailError.value=errorMessage(e);documentConflict.value=httpStatus(e)===409}}finally{if(detailFence.current(token))savingDocument.value=false}}
 function supplementSaved(){supplementRevision.value++;void loadOverview();void loadReviews()}
 async function submitRules(){if(!data.value?.can_write||!validRules(ruleForm)||savingRules.value)return;const token=ruleFence.begin(),scope=kb.value,revision=data.value.rule_revision;savingRules.value=true;ruleError.value='';ruleSuccess.value=false;try{const result=await api.saveRules(scope,revision,{...ruleForm});if(ruleFence.current(token)&&data.value){data.value.rules=result.rules;data.value.rule_revision=result.rule_revision;ruleSuccess.value=true}}catch(e){if(ruleFence.current(token))ruleError.value=errorMessage(e)}finally{if(ruleFence.current(token))savingRules.value=false}}
-watch([titleQuery,filter],([,state],[,previousState])=>{clearTimeout(searchTimer);listFence.invalidate();page.value=1;if(!kb.value)return;if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
-watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';selectedKB.value='';dateBaseline.value='';reviewItems.value=[];reviewsLoaded.value=false;reviewsTruncated.value=false;page.value=1;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
+watch([titleQuery,filter],([,state],[,previousState])=>{clearTimeout(searchTimer);listFence.invalidate();if(!kb.value)return;if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
+watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';selectedKB.value='';dateBaseline.value='';reviewItems.value=[];reviewsLoaded.value=false;reviewsTruncated.value=false;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
 watch(tab,value=>{if(value==='reviews'&&!reviewsLoaded.value)void loadReviews()})
 
 // loadMessages fans out over the accessible knowledge bases and merges the
@@ -340,7 +352,7 @@ async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';know
 watch(()=>auth.effectiveTenantId,()=>void loadKnowledgeBases())
 watch(()=>route.query.kb,value=>{if(typeof value==='string' && knowledgeBases.value.some(row=>row.id===value))kb.value=value})
 watch(workspaceView,()=>{viewLocked.value=false})
-watch([kb,tab,page,filter,titleQuery],syncListQuery)
+watch([kb,tab,filter,titleQuery],syncListQuery)
 function allowNavigation(){return !detailLocked.value && !viewLocked.value}
 onBeforeRouteLeave(allowNavigation)
 onBeforeRouteUpdate(allowNavigation)
@@ -454,10 +466,15 @@ button:disabled {
   text-align:left;
 }
 .document-link {
+  /* WeKnora native document names are primary text, not brand-coloured links. */
+  color:var(--td-text-color-primary);
   font-size:var(--app-text-sm);
   font-weight:600;
   max-width:340px;
   overflow-wrap:anywhere;
+}
+.document-link:hover,.document-link:focus-visible {
+  color:var(--td-brand-color);
 }
 .sort-button {
   font-weight:600;
@@ -499,7 +516,9 @@ button:disabled {
   margin-left:8px;
 }
 .table-wrap {
+  /* Show the full document set in one scrollable list (no pagination). */
   overflow:auto;
+  max-height:60vh;
   border:1px solid var(--td-component-stroke);
   border-radius:var(--app-radius-lg);
   background:var(--td-bg-color-container);
@@ -516,6 +535,9 @@ th {
   background:var(--td-bg-color-secondarycontainer);
   color:var(--td-text-color-secondary);
   padding:13px 16px;
+  position:sticky;
+  top:0;
+  z-index:1;
 }
 td {
   padding:16px;
