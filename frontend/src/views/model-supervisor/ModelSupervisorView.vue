@@ -139,8 +139,13 @@
             <label class="field">模型文件<t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" /></label>
             <label class="field">任务<t-select v-model="form.task_type" :options="taskTypeOptions" /></label>
             <label class="field">端口<t-input-number v-model="form.port" :min="1" :max="65535" /></label>
-            <div class="field field-inline"><t-checkbox v-model="form.use_gpu">使用 GPU</t-checkbox></div>
-            <label class="field">GPU 层数<t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" /></label>
+            <label class="field">GPU 层数
+              <span class="gpu-row">
+                <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" class="gpu-layers" />
+                <t-switch v-model="form.use_gpu" />
+                <span class="gpu-label">使用 GPU</span>
+              </span>
+            </label>
           </div>
           <p class="hint">
             层数对应 llama-server 的 <code>-ngl</code>：留空表示把整模型卸载到显卡（99）；显卡装不下时填一个较小值做部分卸载；0 等于纯 CPU。
@@ -565,7 +570,9 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 /* Fields share one grid; controls are TDesign components, so no bare input rules. */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 8px; font-size: var(--td-font-size-body-medium); color: var(--td-text-color-primary); }
-.field-inline { justify-content: flex-end; min-height: 32px; }
+.gpu-row { display: flex; align-items: center; gap: 8px; }
+.gpu-row .gpu-layers { flex: 1; min-width: 0; }
+.gpu-label { white-space: nowrap; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); }
 .add-form .hint { margin: 12px 0 0; }
 .form-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
