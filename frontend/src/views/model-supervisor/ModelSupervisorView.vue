@@ -139,7 +139,7 @@
             <label class="field">模型文件<t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" /></label>
             <label class="field">任务<t-select v-model="form.task_type" :options="taskTypeOptions" /></label>
             <label class="field">端口<t-input-number v-model="form.port" :min="1" :max="65535" /></label>
-            <label class="field">GPU 层数
+            <label class="field field-gpu">GPU 层数
               <span class="gpu-row">
                 <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" class="gpu-layers" />
                 <t-switch v-model="form.use_gpu" />
@@ -570,9 +570,13 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 /* Fields share one grid; controls are TDesign components, so no bare input rules. */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; align-items: end; }
 .field { display: flex; flex-direction: column; gap: 8px; font-size: var(--td-font-size-body-medium); color: var(--td-text-color-primary); }
-.gpu-row { display: flex; align-items: center; gap: 8px; }
-.gpu-row .gpu-layers { flex: 1; min-width: 0; }
+/* The layers input needs room for the "留空=全部" placeholder; the switch sits
+   after it with the same 12px rhythm the other fields use. */
+.field-gpu { grid-column: span 2; }
+.gpu-row { display: flex; align-items: center; gap: 12px; }
+.gpu-row .gpu-layers { flex: 1 1 200px; min-width: 180px; }
 .gpu-label { white-space: nowrap; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); }
+@media (max-width: 700px) { .field-gpu { grid-column: auto; } }
 .add-form .hint { margin: 12px 0 0; }
 .form-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
