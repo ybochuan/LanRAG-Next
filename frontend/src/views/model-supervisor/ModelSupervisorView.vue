@@ -2,7 +2,7 @@
   <main class="supervisor-page" aria-labelledby="supervisor-title">
     <header class="page-heading">
       <div class="title-block">
-        <h1 id="supervisor-title"><t-icon name="server" size="24px" class="page-icon" />模型进程管理</h1>
+        <h1 id="supervisor-title"><ResourceIcon type="server" :size="24" class="page-icon" />模型进程管理</h1>
         <p class="page-subtitle">启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。</p>
       </div>
       <div class="heading-actions">
@@ -169,6 +169,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import * as api from '@/api/modelSupervisor'
 
 const statusLabel: Record<api.InstanceStatus, string> = {

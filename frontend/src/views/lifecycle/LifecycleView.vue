@@ -1,7 +1,7 @@
 <template>
  <main class="lifecycle-page" aria-labelledby="lifecycle-title">
   <header class="page-heading">
-   <div class="title-block"><h1 id="lifecycle-title"><t-icon name="file" size="24px" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
+   <div class="title-block"><h1 id="lifecycle-title"><ResourceIcon type="document" :size="24" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
    <t-button v-if="!workspaceView" variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
   </header>
   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
@@ -121,6 +121,7 @@ import type { FamilyActivity } from '@/api/families'
 import { actionLabels, httpStatus, statusLabels } from '../business/model'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import * as api from '@/api/lifecycle'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import SupplementEditor from './SupplementEditor.vue'
 import { useAuthStore } from '@/stores/auth'
 import { annotationsForSave, errorMessage, requestFence, reviewDeliveryClass, reviewDeliveryLabel, ruleSourceLabel, stateLabels, states, toLocalInput, validRules } from './model'
