@@ -2,7 +2,7 @@
   <main class="supervisor-page" aria-labelledby="supervisor-title">
     <header class="page-heading">
       <div class="title-block">
-        <h1 id="supervisor-title"><t-icon name="server" size="32px" class="page-icon" />模型进程管理</h1>
+        <h1 id="supervisor-title"><t-icon name="server" size="24px" class="page-icon" />模型进程管理</h1>
         <p class="page-subtitle">启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。</p>
       </div>
       <div class="heading-actions">
@@ -520,9 +520,10 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 <style scoped>
 .supervisor-page { padding: 24px 32px 48px; max-width: 1100px; }
 .page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
-.page-heading h1 { margin: 0; font-size: var(--td-font-size-headline-medium); line-height: 1.3; display: flex; align-items: center; gap: 10px; }
+.page-heading h1 { margin: 0; font-size: var(--app-text-4xl); font-weight: 600; line-height: 32px; display: flex; align-items: center; gap: 8px; color: var(--td-text-color-primary); }
 .page-icon { color: var(--td-text-color-primary); }
-.page-subtitle { margin: 4px 0 0; color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-large); }
+.title-block { display: flex; flex-direction: column; gap: 4px; }
+.page-subtitle { margin: 0; color: var(--td-text-color-placeholder); font-size: var(--app-text-base); font-weight: 400; line-height: 20px; }
 .heading-actions { display: flex; gap: 8px; }
 .notice { padding: 12px 14px; border-radius: var(--app-radius-md); background: #f5f7fa; font-size: var(--app-text-md); }
 .notice.error { background: #fdecee; color: #b3261e; }

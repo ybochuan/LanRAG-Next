@@ -1,7 +1,7 @@
 <template>
  <main class="lifecycle-page" aria-labelledby="lifecycle-title">
   <header class="page-heading">
-   <div class="title-block"><h1 id="lifecycle-title"><t-icon name="file" size="32px" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
+   <div class="title-block"><h1 id="lifecycle-title"><t-icon name="file" size="24px" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
    <t-button v-if="!workspaceView" variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
   </header>
   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
@@ -355,22 +355,31 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
   letter-spacing:.08em;
   font-weight:600;
 }
+/* Native page title: 24px / 600 / line-height 32px with a 24px icon. */
 h1 {
-  font-size:var(--td-font-size-headline-medium);
-  line-height:1.3;
-  margin:8px 0;
+  font-size:var(--app-text-4xl);
+  font-weight:600;
+  line-height:32px;
+  margin:0;
   color:var(--td-text-color-primary);
   display:flex;
   align-items:center;
   gap:8px;
+}
+.title-block {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
 }
 .page-icon {
   color:var(--td-text-color-primary);
 }
 .page-subtitle {
   color:var(--td-text-color-placeholder);
-  font-size:var(--td-font-size-body-large);
-  margin:4px 0 0;
+  font-size:var(--app-text-base);
+  font-weight:400;
+  line-height:20px;
+  margin:0;
 }
 h2 {
   font-size:var(--td-font-size-title-medium);
