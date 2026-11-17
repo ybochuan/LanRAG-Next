@@ -202,7 +202,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { listKnowledgeBases } from '@/api/knowledge-base'
-import { overview, type LifecycleState } from '@/api/lifecycle'
+import { authority, type LifecycleState } from '@/api/lifecycle'
 import { documentTitles, write, type BusinessAction, type BusinessBody, type BusinessPayload, type FamilyAction } from '@/api/business'
 import * as api from '@/api/families'
 import { useAuthStore } from '@/stores/auth'
@@ -303,7 +303,7 @@ async function loadFamilies(select = false) {
   listBusy.value = true
   try {
     const rowsPromise = api.listFamilies(scope,familyPage.value)
-    const accessPromise = props.canWrite === undefined ? overview(scope,1,'','',1) : Promise.resolve(undefined)
+    const accessPromise = props.canWrite === undefined ? authority(scope) : Promise.resolve(undefined)
     const [rows, access] = await Promise.all([rowsPromise, accessPromise])
     if (!listFence.current(token)) return
     families.value = rows

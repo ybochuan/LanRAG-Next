@@ -213,6 +213,11 @@ func (s *Server) execute(ctx context.Context, r Request) (any, error) {
 		return map[string]any{"supplements": view, "receipt": receipt, "evaluation_status": evaluation}, nil
 	case "overview":
 		return s.overview(ctx, r)
+	case "authority":
+		// The caller already resolved authorization from the native JWT/KB grant.
+		// Return only that decision: views which merely need can_write no longer
+		// pay for the overview counts, document page, annotations and rules.
+		return map[string]any{"can_write": r.CanWrite, "tenant_id": r.TenantID, "knowledge_base_id": r.KnowledgeBaseID}, nil
 	case "document", "put_annotations":
 		snap, err := m.Snapshot(ctx, scope)
 		if err != nil {

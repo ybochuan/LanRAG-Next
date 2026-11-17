@@ -106,6 +106,8 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 		}
 	case c.FullPath() == "/api/v1/knowledge-bases/:id/lifecycle/reviews":
 		action = "reviews"
+	case c.FullPath() == "/api/v1/knowledge-bases/:id/lifecycle/authority":
+		action = "authority"
 	}
 	req := extensionbridge.ManagementRequest{Action: action, TenantID: grant.EffectiveTenantID, KnowledgeBaseID: grant.KnowledgeBase.ID, DocumentID: c.Param("document_id"), CanWrite: canWrite, Page: 1, PageSize: 20, State: c.Query("state")}
 	if action == "business_lineage_graph" {

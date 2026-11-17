@@ -22,6 +22,9 @@ async function unwrap<T>(request:Promise<unknown>):Promise<T>{
  return response.data
 }
 export const overview=(kb:string,page:number,state:string,title='',pageSize=20)=>unwrap<Overview>(get(`${base(kb)}?${new URLSearchParams({page:String(page),page_size:String(pageSize),state,title})}`))
+// authority reads only the caller's write permission; views that need just
+// can_write avoid the counts, document page and annotations of overview.
+export const authority=(kb:string)=>unwrap<{can_write:boolean;tenant_id:number;knowledge_base_id:string}>(get(`${base(kb)}/authority`))
 export const documentDetail=(kb:string,id:string)=>unwrap<Detail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}`))
 export const saveAnnotations=(kb:string,id:string,expected_revision:number,annotations:Annotations)=>unwrap<Detail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}`,{expected_revision,annotations})).then(value=>{invalidateCache('document-picker-active');return value})
 export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules})).then(value=>{invalidateCache('document-picker-active');return value})

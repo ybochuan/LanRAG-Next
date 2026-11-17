@@ -177,7 +177,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { listKnowledgeBases } from '@/api/knowledge-base'
-import { overview } from '@/api/lifecycle'
+import { authority } from '@/api/lifecycle'
 import * as api from '@/api/business'
 import ClauseEvidence from './ClauseEvidence.vue'
 import CreateForm from './CreateForm.vue'
@@ -265,7 +265,7 @@ async function loadRecords(){
 async function loadAuthority(){
   if (props.canWrite !== undefined) { canWrite.value = props.canWrite; authorityError.value = ''; return }
   const token=kbFence.begin(),scope=kb.value;canWrite.value=false;authorityError.value=''
-  try{const value=await overview(scope,1,'','',1);if(!kbFence.current(token))return;canWrite.value=value.can_write;for(const row of value.documents)if(row.title)titles.value.set(row.document_id,row.title)}
+  try{const value=await authority(scope);if(!kbFence.current(token))return;canWrite.value=value.can_write}
   catch(e){if(kbFence.current(token))authorityError.value=`权限信息暂不可用：${businessError(e)}。记录列表仍可查看。`}
 }
 function refresh(){if(!kb.value){void loadKBs();return}const selected=detail.value;void loadAuthority();void loadRecords();if(selected)void openRecord(selected);if(kind.value==='relation'&&queryDocument.value)void queryRelated()}

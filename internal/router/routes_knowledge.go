@@ -231,6 +231,9 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	kbgrp := r.Group("/knowledge-bases")
 	// Intentionally JWT-only: no API-key policy is registered for these management routes.
 	kbgrp.GET("/:id/lifecycle", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	// Lightweight authority read: views that only need can_write use this
+	// instead of the full overview (counts + document page + annotations).
+	kbgrp.GET("/:id/lifecycle/authority", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
 	kbgrp.GET("/:id/lifecycle/documents/:document_id", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
 	kbgrp.GET("/:id/lifecycle/documents/:document_id/supplements", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
 	kbgrp.PUT("/:id/lifecycle/documents/:document_id/supplements", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)

@@ -154,3 +154,12 @@ test('the feedback governance page exposes pending sample review', () => {
   assert.ok(template.includes('value="failed"'), 'a failed review option must exist')
   assert.ok(template.includes('失败则隔离该反馈及其指导'), 'failed review must explain that it quarantines guidance')
 })
+
+test('permission-only views use the lightweight authority endpoint', () => {
+  const business = parse(readFileSync(new URL('../business/BusinessView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
+  const families = parse(readFileSync(new URL('../families/FamilyWorkspaceView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
+  assert.ok(business.includes('await authority(scope)'), 'business view must not load a full overview just for can_write')
+  assert.ok(!business.includes('overview(scope,1'), 'business view must not call overview for authority')
+  assert.ok(families.includes('authority(scope)'), 'family workspace must use the lightweight authority read')
+  assert.ok(!families.includes('overview(scope,1'), 'family workspace must not call overview for authority')
+})
