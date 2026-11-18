@@ -74,7 +74,6 @@
           <p v-if="probes[item.id]" class="probe-detail">
             <template v-if="probes[item.id]!.embedding_dim">向量维度 {{ probes[item.id]!.embedding_dim }} · </template>{{ probes[item.id]!.health_latency_ms }} ms
           </p>
-          <p v-if="probes[item.id]?.note" class="probe-note">{{ probes[item.id]!.note }}</p>
           <p v-if="item.last_error" class="probe-note error">{{ item.last_error }}</p>
 
           <div class="endpoint">
@@ -88,6 +87,7 @@
             <t-button
               v-if="item.status === 'stopped' || item.status === 'failed'"
               theme="primary"
+              size="small"
               :loading="acting === item.id"
               @click="doStart(item)"
             >
@@ -96,6 +96,7 @@
             <t-button
               v-else
               variant="outline"
+              size="small"
               :loading="acting === item.id"
               @click="doStop(item)"
             >
