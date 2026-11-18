@@ -9295,5 +9295,33 @@ export default {
       description:
         '먼저 이미지 특징을 관찰하여 설명을 생성하고, 그 특징을 바탕으로 OCR 실행 여부를 결정합니다. 모델 호출을 절약하고 분석 속도를 높입니다 이미지가 보정 가능한 문서나 라벨 사진으로 인식되면 인식 전에 페이지를 자동으로 정렬하고 잘라내어 OCR 정확도를 높입니다. 보정에 실패하면 원본 이미지를 사용합니다.'
     }
+  },
+  workbench: {
+    "title": "문서 작업대",
+    "subtitle": "수명 주기, 버전 및 문서 관계를 관리합니다.",
+    "tabs": {
+      "documents": "전체 문서",
+      "reviews": "검토 대기",
+      "rules": "지식베이스 규칙"
+    },
+    "workspace": {
+      "families": "업무 패밀리",
+      "associations": "관계",
+      "feedbackGovernance": "피드백 검토",
+      "revisions": "개정 발행",
+      "lineage": "관계 그래프"
+    },
+    "detail": {
+      "life": "수명 주기",
+      "family": "버전 패밀리",
+      "relations": "관계",
+      "graph": "관계 그래프",
+      "audit": "거버넌스 기록",
+      "suggestions": "연관 제안",
+      "revisions": "개정 발행"
+    },
+    "actions": {
+      "refresh": "새로고침"
+    }
   }
 }

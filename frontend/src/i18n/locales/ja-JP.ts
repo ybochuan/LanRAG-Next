@@ -9295,5 +9295,33 @@ export default {
       description:
         'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます 画像が補正可能な書類やラベルの写真と判定された場合、認識前にページを傾き補正・トリミングして OCR 精度を高めます。補正に失敗した場合は元の画像を使用します。'
     }
+  },
+  workbench: {
+    "title": "ドキュメントワークベンチ",
+    "subtitle": "ライフサイクル、バージョン、ドキュメント関係を管理します。",
+    "tabs": {
+      "documents": "すべてのドキュメント",
+      "reviews": "レビュー待ち",
+      "rules": "ナレッジベース規則"
+    },
+    "workspace": {
+      "families": "業務ファミリー",
+      "associations": "関連",
+      "feedbackGovernance": "フィードバック審査",
+      "revisions": "改訂公開",
+      "lineage": "関係グラフ"
+    },
+    "detail": {
+      "life": "ライフサイクル",
+      "family": "バージョンファミリー",
+      "relations": "関連",
+      "graph": "関係グラフ",
+      "audit": "ガバナンス記録",
+      "suggestions": "関連提案",
+      "revisions": "改訂公開"
+    },
+    "actions": {
+      "refresh": "更新"
+    }
   }
 }

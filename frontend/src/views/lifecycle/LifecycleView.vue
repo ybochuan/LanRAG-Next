@@ -1,7 +1,7 @@
 <template>
  <main class="lifecycle-page" aria-labelledby="lifecycle-title">
   <header class="page-heading">
-   <div class="title-block"><h1 id="lifecycle-title"><ResourceIcon type="document" :size="24" class="page-icon" />文档工作台</h1><p class="page-subtitle">集中管理生命周期、版本和文档关系。</p></div>
+   <div class="title-block"><h1 id="lifecycle-title"><ResourceIcon type="document" :size="24" class="page-icon" />{{ $t('workbench.title') }}</h1><p class="page-subtitle">{{ $t('workbench.subtitle') }}</p></div>
    <t-button v-if="!workspaceView" variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
   </header>
   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
@@ -12,8 +12,8 @@
   <t-empty v-else-if="!kb" class="empty" description="请选择一个知识库。" />
   <template v-if="kb">
    <div class="tabs" role="tablist" aria-label="工作台视图">
-    <button v-for="item in tabs" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :aria-controls="`panel-${item.key}`" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">{{ item.label }}</button>
-    <button v-for="item in workspaceTabs" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ item.label }}</button>
+    <button v-for="item in tabs" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :aria-controls="`panel-${item.key}`" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">{{ $t(item.labelKey) }}</button>
+    <button v-for="item in workspaceTabs" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ $t(item.labelKey) }}</button>
    </div>
    <template v-if="workspaceView">
     <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" :can-write="data?.can_write" @changed="loadAll" @locked="viewLocked=$event" />
@@ -62,7 +62,7 @@
      <t-button variant="text" shape="square" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
     </header>
     <nav class="tabs detail-tabs" aria-label="文档详情标签">
-     <button v-for="item in detailTabs" :key="item.key" type="button" :disabled="detailLocked" :aria-pressed="detailTab===item.key" :class="{selected:detailTab===item.key}" @click="detailTab=item.key">{{ item.label }}</button>
+     <button v-for="item in detailTabs" :key="item.key" type="button" :disabled="detailLocked" :aria-pressed="detailTab===item.key" :class="{selected:detailTab===item.key}" @click="detailTab=item.key">{{ $t(item.labelKey) }}</button>
     </nav>
     <div v-if="detailBusy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在加载文档…</span></div>
     <t-alert v-if="detailError" theme="error" class="notice" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">重新载入</t-button></t-alert>
@@ -132,20 +132,20 @@ const stateOptions=computed(()=>[{label:'全部状态',value:''},...states.map(s
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
-const tabs=[{key:'documents',label:'全部文档'},{key:'reviews',label:'待复核'},{key:'rules',label:'库级规则'}] as const
+const tabs=[{key:'documents',labelKey:'workbench.tabs.documents'},{key:'reviews',labelKey:'workbench.tabs.reviews'},{key:'rules',labelKey:'workbench.tabs.rules'}] as const
 // Every workspace view the router accepts is reachable from the top tab bar.
 // The URL keeps its ?view= contract, so old links and bookmarks still land
 // on the same view; only the missing entry points are added.
 const workspaceTabs=[
-  {key:'families',label:'业务族'},
- {key:'associations',label:'关联关系'},
- {key:'feedback-governance',label:'反馈审核'},
- {key:'revisions',label:'修订发布'},
- {key:'lineage',label:'关系图'},
+  {key:'families',labelKey:'workbench.workspace.families'},
+ {key:'associations',labelKey:'workbench.workspace.associations'},
+ {key:'feedback-governance',labelKey:'workbench.workspace.feedbackGovernance'},
+ {key:'revisions',labelKey:'workbench.workspace.revisions'},
+ {key:'lineage',labelKey:'workbench.workspace.lineage'},
 ] as const
 const detailTabs=[
- {key:'life',label:'生命周期'},{key:'family',label:'版本族'},{key:'relations',label:'关联关系'},
- {key:'graph',label:'关系图'},{key:'audit',label:'治理记录'},{key:'suggestions',label:'关联建议'},{key:'revisions',label:'修订发布'},
+ {key:'life',labelKey:'workbench.detail.life'},{key:'family',labelKey:'workbench.detail.family'},{key:'relations',labelKey:'workbench.detail.relations'},
+ {key:'graph',labelKey:'workbench.detail.graph'},{key:'audit',labelKey:'workbench.detail.audit'},{key:'suggestions',labelKey:'workbench.detail.suggestions'},{key:'revisions',labelKey:'workbench.detail.revisions'},
 ] as const
 const route=useRoute(), router=useRouter()
 const workspaceView=computed(()=>{

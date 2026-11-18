@@ -9294,5 +9294,33 @@ export default {
       },
       description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。当识别到图片为可校正的文档或标签页照片时，会在识别前自动摆正并裁剪页面，以提升 OCR 准确率；若校正失败则直接使用原图。'
     }
+  },
+  workbench: {
+    "title": "文档工作台",
+    "subtitle": "集中管理生命周期、版本和文档关系。",
+    "tabs": {
+      "documents": "全部文档",
+      "reviews": "待复核",
+      "rules": "库级规则"
+    },
+    "workspace": {
+      "families": "业务族",
+      "associations": "关联关系",
+      "feedbackGovernance": "反馈审核",
+      "revisions": "修订发布",
+      "lineage": "关系图"
+    },
+    "detail": {
+      "life": "生命周期",
+      "family": "版本族",
+      "relations": "关联关系",
+      "graph": "关系图",
+      "audit": "治理记录",
+      "suggestions": "关联建议",
+      "revisions": "修订发布"
+    },
+    "actions": {
+      "refresh": "刷新"
+    }
   }
 }

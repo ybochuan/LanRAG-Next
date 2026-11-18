@@ -9292,4 +9292,32 @@ export default {
       description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。當辨識到圖片為可校正的文件或標籤頁照片時，會在辨識前自動擺正並裁切頁面，以提升 OCR 準確率；若校正失敗則直接使用原圖。',
     },
   },
+  workbench: {
+    "title": "文件工作台",
+    "subtitle": "集中管理生命週期、版本和文件關係。",
+    "tabs": {
+      "documents": "全部文件",
+      "reviews": "待複核",
+      "rules": "庫級規則"
+    },
+    "workspace": {
+      "families": "業務族",
+      "associations": "關聯關係",
+      "feedbackGovernance": "回饋審核",
+      "revisions": "修訂發佈",
+      "lineage": "關係圖"
+    },
+    "detail": {
+      "life": "生命週期",
+      "family": "版本族",
+      "relations": "關聯關係",
+      "graph": "關係圖",
+      "audit": "治理記錄",
+      "suggestions": "關聯建議",
+      "revisions": "修訂發佈"
+    },
+    "actions": {
+      "refresh": "重新整理"
+    }
+  }
 }
