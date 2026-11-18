@@ -337,6 +337,7 @@ export default {
       automation_failed: 'オートメーション失敗',
       automation_awaiting_approval: 'オートメーション承認待ち',
       automation_paused: 'オートメーション一時停止',
+      lifecycle_cleanup_due: 'ドキュメント整理の通知',
     },
   },
   toolbox: {
@@ -9438,6 +9439,7 @@ export default {
     "subtitle": "ライフサイクル、バージョン、ドキュメント関係を管理します。",
     "tabs": {
       "documents": "すべてのドキュメント",
+      "cleanup": "整理待ち",
       "reviews": "レビュー待ち",
       "rules": "ナレッジベース規則"
     },

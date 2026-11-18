@@ -8,9 +8,37 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
+// nativeOverviewFrom makes native knowledges the document membership source.
+// Extension lifecycle rows are joined as attributes; a document without a
+// lifecycle row still appears as pending because it exists in the native list.
+const nativeOverviewFrom = ` FROM weknora.knowledges k LEFT JOIN ext_lifecycle_current c ON c.tenant_id=k.tenant_id AND c.knowledge_base_id=k.knowledge_base_id AND c.document_id=k.id` + store.LifecycleEventJoinSQL
+
+func nativeOverviewState() string {
+	return `COALESCE(CASE WHEN c.document_id IS NULL OR NOT (` + store.LifecycleCurrentVerifiedSQL + `) THEN 'pending' ELSE c.state END,'pending')`
+}
+
+func (s *Server) nativeOverviewCounts(ctx context.Context, tenant, kb string) (map[string]int, error) {
+	counts := map[string]int{}
+	err := s.db.ViewNative(ctx, s.nativeDB, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT `+nativeOverviewState()+` state,count(*)`+nativeOverviewFrom+` WHERE k.tenant_id=? AND k.knowledge_base_id=? AND COALESCE(k.deleted_at,'')='' GROUP BY state`, tenant, kb)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var state string
+			var n int
+			if err := rows.Scan(&state, &n); err != nil {
+				return err
+			}
+			counts[state] = n
+		}
+		return rows.Err()
+	})
+	return counts, err
+}
+
 func (s *Server) overviewPage(ctx context.Context, r Request, tenant string) ([]document, int, bool, error) {
-	const scope = ` WHERE c.tenant_id=? AND c.knowledge_base_id=? AND (?='' OR c.state=?) AND ` + store.LifecycleCurrentVerifiedSQL
-	args := []any{tenant, r.KnowledgeBaseID, r.State, r.State}
 	offset := (r.Page - 1) * r.PageSize
 	read := func(tx *sql.Tx, query string, args ...any) ([]document, error) {
 		rows, err := tx.QueryContext(ctx, query, args...)
@@ -33,14 +61,13 @@ func (s *Server) overviewPage(ctx context.Context, r Request, tenant string) ([]
 	degraded := false
 	if s.nativeDB != "" {
 		err := s.db.ViewNative(ctx, s.nativeDB, func(tx *sql.Tx) error {
-			const from = ` FROM ext_lifecycle_current c LEFT JOIN weknora.knowledges k
-ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.knowledge_base_id AND k.deleted_at IS NULL` + store.LifecycleEventJoinSQL + scope + ` AND (?='' OR instr(lower(k.title), lower(?))>0)`
-			params := append(args, r.Title, r.Title)
-			if err := tx.QueryRowContext(ctx, "SELECT count(*)"+from, params...).Scan(&total); err != nil {
+			where := ` WHERE k.tenant_id=? AND k.knowledge_base_id=? AND COALESCE(k.deleted_at,'')='' AND (?='' OR ` + nativeOverviewState() + `=? ) AND (?='' OR instr(lower(k.title), lower(?))>0)`
+			params := []any{tenant, r.KnowledgeBaseID, r.State, r.State, r.Title, r.Title}
+			if err := tx.QueryRowContext(ctx, `SELECT count(*)`+nativeOverviewFrom+where, params...).Scan(&total); err != nil {
 				return err
 			}
 			var err error
-			docs, err = read(tx, `SELECT c.document_id,c.state,c.last_event_id,coalesce(k.title,'')`+from+` ORDER BY c.document_id LIMIT ? OFFSET ?`, append(params, r.PageSize, offset)...)
+			docs, err = read(tx, `SELECT k.id,`+nativeOverviewState()+`,COALESCE(c.last_event_id,''),COALESCE(k.title,'')`+nativeOverviewFrom+where+` ORDER BY k.id LIMIT ? OFFSET ?`, append(params, r.PageSize, offset)...)
 			return err
 		})
 		if err == nil {
@@ -51,10 +78,11 @@ ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.know
 		}
 		degraded = true
 	}
-	// Release the attached connection before calling Core. Fetch only the visible
-	// page unless a title filter requires matching the entire scoped list first.
-	const extOnly = ` FROM ext_lifecycle_current c` + store.LifecycleEventJoinSQL + scope
+	// Native unavailable: keep the last verified extension projection, but mark
+	// the response degraded and let the normal title reader fill names.
+	const extOnly = ` FROM ext_lifecycle_current c` + store.LifecycleEventJoinSQL + ` WHERE c.tenant_id=? AND c.knowledge_base_id=? AND (?='' OR c.state=?) AND ` + store.LifecycleCurrentVerifiedSQL
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
+		args := []any{tenant, r.KnowledgeBaseID, r.State, r.State}
 		if r.Title != "" {
 			var err error
 			docs, total, err = s.titleFallbackPage(ctx, tx, extOnly, args, r)
@@ -64,9 +92,8 @@ ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.know
 		if err := tx.QueryRowContext(ctx, `SELECT count(*)`+extOnly, args...).Scan(&total); err != nil {
 			return err
 		}
-		query += ` LIMIT ? OFFSET ?`
 		var err error
-		docs, err = read(tx, query, append(args, r.PageSize, offset)...)
+		docs, err = read(tx, query+` LIMIT ? OFFSET ?`, append(args, r.PageSize, offset)...)
 		return err
 	})
 	if err != nil || len(docs) == 0 || r.Title != "" {
@@ -94,8 +121,6 @@ ON k.id=c.document_id AND k.tenant_id=c.tenant_id AND k.knowledge_base_id=c.know
 func (s *Server) titleFallbackPage(ctx context.Context, tx *sql.Tx, from string, args []any, r Request) ([]document, int, error) {
 	const chunk = 256
 	if s.titles == nil {
-		// Preserve the previous behavior for empty scopes: only a non-empty
-		// title-filtered fallback requires the native title reader.
 		var exists bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1`+from+`)`, args...).Scan(&exists); err != nil {
 			return nil, 0, err

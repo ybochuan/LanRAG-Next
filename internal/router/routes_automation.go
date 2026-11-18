@@ -41,6 +41,7 @@ func RegisterAutomationRoutes(r *gin.RouterGroup, h *handler.AutomationHandler, 
 	// management key. Deliberately outside the Viewer group: the caller is a
 	// machine principal, and the handler authenticates the key itself.
 	r.POST("/notifications/internal/review-alert", h.NotifyReviewAlert)
+	r.POST("/notifications/internal/cleanup-alert", h.NotifyCleanupAlert)
 	notifications := r.Group("/notifications", g.Viewer())
 	{
 		notifications.GET("", h.ListNotifications)

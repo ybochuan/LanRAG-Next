@@ -11,6 +11,43 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 )
 
+func TestOverviewUsesNativeLiveDocumentSet(t *testing.T) {
+	s := fixture(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "native.db")
+	native, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	if _, err = native.Exec("CREATE TABLE knowledges (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, title TEXT, deleted_at DATETIME); INSERT INTO knowledges VALUES ('live',7,'kb','Live document',NULL),('gone',7,'kb','Deleted document','2026-11-01T00:00:00Z')"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"live", "gone"} {
+		if _, err = lifecycle.NewStore(s.db).Append(ctx, lifecycle.Event{EventID: id, TenantID: 7, KnowledgeBaseID: "kb", DocumentID: id, ToState: lifecycle.Active, Reason: "test", OccurredAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.WithNativeSQLite(path, nil)
+	w := call(s, `{"action":"overview","tenant_id":7,"knowledge_base_id":"kb","page":1,"page_size":20}`, s.key)
+	var out struct {
+		Data struct {
+			Total     int
+			Documents []document
+			Counts    map[string]int
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != 200 {
+		t.Fatalf("overview=%d %s", w.Code, w.Body.String())
+	}
+	if out.Data.Total != 1 || len(out.Data.Documents) != 1 || out.Data.Documents[0].DocumentID != "live" || out.Data.Documents[0].Title != "Live document" {
+		t.Fatalf("deleted document leaked: %+v", out.Data)
+	}
+	if out.Data.Counts["active"] != 1 {
+		t.Fatalf("counts=%+v", out.Data.Counts)
+	}
+}
+
 func TestOverviewCannotOpenNativeFallsBack(t *testing.T) {
 	s := fixture(t)
 	ctx := context.Background()
@@ -99,7 +136,7 @@ func TestOverviewTitleFilterAndBusyFallback(t *testing.T) {
 	}
 	defer native.Close()
 	if _, err = native.Exec(`CREATE TABLE knowledges (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, title TEXT, deleted_at DATETIME);
-INSERT INTO knowledges VALUES ('a',7,'kb','other',NULL),('b',7,'kb','历史ABC%',NULL),('c',8,'kb','历史ABC%',NULL)`); err != nil {
+INSERT INTO knowledges VALUES ('a',7,'kb','other',NULL),('b',7,'kb','历史ABC%',NULL),('c',7,'kb','历史XYZ%',NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b", "c"} {

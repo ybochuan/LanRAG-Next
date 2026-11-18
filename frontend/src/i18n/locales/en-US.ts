@@ -337,6 +337,7 @@ export default {
       automation_failed: 'Automation failed',
       automation_awaiting_approval: 'Automation needs approval',
       automation_paused: 'Automation paused',
+      lifecycle_cleanup_due: 'Document cleanup reminder',
     },
   },
   toolbox: {
@@ -9444,6 +9445,7 @@ export default {
     "subtitle": "Manage lifecycle, versions and document relations.",
     "tabs": {
       "documents": "All documents",
+      "cleanup": "Cleanup",
       "reviews": "Reviews",
       "rules": "KB rules"
     },

@@ -74,6 +74,20 @@ func TestGuidanceIsEphemeralBoundToActualRequestAndFailsOpen(t *testing.T) {
 			if len(actual) != want {
 				t.Fatalf("mode=%s messages=%v", mode, actual)
 			}
+			// Qwen3.x chat templates reject any system message after the first one
+			// ("System message must be at the beginning"). Guidance is delivered as a
+			// trailing user turn so the request stays valid for every provider.
+			for i := 1; i < len(actual); i++ {
+				if actual[i].Role == "system" {
+					t.Fatalf("mode=%s system message at index %d breaks strict chat templates", mode, i)
+				}
+			}
+			if want == 3 {
+				last := actual[len(actual)-1]
+				if last.Role != "user" || last.Content != "CURRENT_GUIDANCE" {
+					t.Fatalf("mode=%s guidance message role=%q content=%q", mode, last.Role, last.Content)
+				}
+			}
 			encoded, _ := json.Marshal(struct{ Messages, Options any }{actual, (*chat.ChatOptions)(nil)})
 			if call.inputHash != SourceHash(encoded) {
 				t.Fatal("provenance does not hash actual injected request")

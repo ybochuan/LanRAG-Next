@@ -1,5 +1,12 @@
 # 原生薄补丁记录
 
+## 文档清理提醒原生通知（2026-11-18）
+
+- 用户要求工作台文档列表与原生列表一致、清理提醒进入原生顶部铃铛。原生仅新增 `internal/handler/automation.go` 的 `NotifyCleanupAlert` 薄处理器、`internal/router/routes_automation.go` 的内部路由、`internal/middleware/auth.go` 的内部免 JWT 白名单，以及 `internal/handler/extension_lifecycle.go` 的 `business_cleanup_list` 只读动作白名单；固定使用管理密钥、服务端解析知识库 owner，不接收用户/角色/任意收件人。
+- 通知 Kind 为 `lifecycle.cleanup_due`、SourceType 为 `cleanup_alert`；工作台列表、30 天清理队列、扫描/确认/保留和通知内容均在 `extensions/cleanup/`、`extensions/management/` 与 `extensions/host/`。不修改原生文档、检索、生命周期或通知存储算法。
+- 共享空间成员：Core 处理器注入 `KBShareService`/`OrganizationService`，把同一铃铛通知发给知识库创建者及每个共享租户的代表用户；服务缺失或查询失败时退化为仅创建者，去重按 `tenant:user`。
+- 证据保留：新增 schema 35 与 `extensions/retention/`，每日按 30 天剪除已封存/失败 run 的子表证据（receipts/audit/inputs/intents/steps、快照证据、tag 同步失败），保留 run 头以保证 `feedback_qa_bindings` 外键和治理身份可核验；当前版本族的根节点证据不删。清理结果写入 `ext_evidence_retention_runs` 审计表。
+
 ## ATTACH-08B 主件删除接线
 
 - `internal/application/service/knowledge_delete.go` 只在 `executeKnowledgeDelete` 处理已校验的原生记录、开始修改状态之前调用 Bridge。已由数据源替换软删的旧行沿用原路径。
@@ -74,7 +81,7 @@
 
 ### 生成前指导（M5-QA，2026-11-05）
 
-- `internal/application/service/chat_pipeline/chat_completion{,_stream}.go` 与 `internal/agent/think.go` 的既有实际模型调用点改用 `extensionbridge.BeginGuidedSourceCall`。新增 `internal/extensionbridge/generate.go` 通过版本1、500ms回环HTTP调用 `/bridge/before-generate`，校验trace、scope、step、call及预算后追加临时消息。
+- `internal/application/service/chat_pipeline/chat_completion{,_stream}.go` 与 `internal/agent/think.go` 的既有实际模型调用点改用 `extensionbridge.BeginGuidedSourceCall`。新增 `internal/extensionbridge/generate.go` 通过版本1、500ms回环HTTP调用 `/bridge/before-generate`，校验trace、scope、step、call及预算后追加临时消息。指导使用user角色追加在请求末尾：Qwen3.x等严格chat模板会拒绝非首位的system消息（`System message must be at the beginning`），尾置user消息同时保留缓存前缀。
 - Host从认证run派生用户与会话身份。调用回执与active指导版本同事务写入，可绑定model step时同时保存指导指纹，原生记录追加后的实际请求hash。unattributed运行也能接受指导，来源状态保持不完整。指导接口错误、省略或非法响应时继续发送原消息。
 - 业务与预算位于 `extensions/guidance/`、`provenance/guidance.go` 及迁移013。每次3条、同ID每会话2次，800预算按UTF-8字节加16消息开销保守扣减。仅当前授权库按置信度排序，缺少认证run时省略指导。
 - 验证覆盖原生三包、扩展全量/build/vet、模块边界、定向race及 `AGENTRAG_GUIDANCE_E2E=1` 的真实Core/Host隔离联合运行。部署需要更新Host和重编Core。

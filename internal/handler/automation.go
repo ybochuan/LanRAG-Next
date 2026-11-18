@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	stderrors "errors"
@@ -25,13 +26,18 @@ type AutomationHandler struct {
 	automations    *service.AutomationService
 	notifications  *service.NotificationService
 	knowledgeBases interfaces.KnowledgeBaseService
+	// Cleanup reminders must reach every tenant sharing the knowledge base.
+	// Both dependencies are optional: a nil service degrades to the KB owner.
+	shares interfaces.KBShareService
+	orgs   interfaces.OrganizationService
 }
 
 // NewAutomationHandler builds the handler.
 func NewAutomationHandler(
 	automations *service.AutomationService, notifications *service.NotificationService, knowledgeBases interfaces.KnowledgeBaseService,
+	shares interfaces.KBShareService, orgs interfaces.OrganizationService,
 ) *AutomationHandler {
-	return &AutomationHandler{automations: automations, notifications: notifications, knowledgeBases: knowledgeBases}
+	return &AutomationHandler{automations: automations, notifications: notifications, knowledgeBases: knowledgeBases, shares: shares, orgs: orgs}
 }
 
 func (h *AutomationHandler) fail(c *gin.Context, err error) {
@@ -550,4 +556,116 @@ func (h *AutomationHandler) NotifyReviewAlert(c *gin.Context) {
 		SourceID:   req.SourceID,
 	})
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// NotifyCleanupAlert is the trusted Host's cleanup-reminder path into the
+// native notification bell. It is intentionally separate from review alerts so
+// the bell can label and filter the two kinds independently.
+func (h *AutomationHandler) NotifyCleanupAlert(c *gin.Context) {
+	key := os.Getenv("AGENTRAG_MANAGEMENT_KEY")
+	if len(key) < 32 || subtle.ConstantTimeCompare([]byte(c.GetHeader("X-AgentRAG-Management-Key")), []byte(key)) != 1 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized"})
+		return
+	}
+	var req reviewAlertNotification
+	dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&req) != nil || dec.Decode(new(any)) != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
+		return
+	}
+	if !strings.HasPrefix(req.Link, "/platform/documents") || req.SourceID == "" || req.KnowledgeBaseID == "" || req.TenantID == 0 || req.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
+		return
+	}
+	ctx := c.Request.Context()
+	kb, err := h.knowledgeBases.GetKnowledgeBaseByIDOnly(ctx, req.KnowledgeBaseID)
+	if err != nil || kb == nil || kb.TenantID != req.TenantID || kb.CreatorID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "knowledge_base_not_found"})
+		return
+	}
+	notified := map[string]bool{}
+	notify := func(tenant uint64, user string) {
+		if tenant == 0 || user == "" {
+			return
+		}
+		key := strconv.FormatUint(tenant, 10) + ":" + user
+		if notified[key] {
+			return
+		}
+		notified[key] = true
+		h.notifications.Notify(ctx, &types.Notification{
+			TenantID:   tenant,
+			UserID:     user,
+			Kind:       "lifecycle.cleanup_due",
+			Title:      req.Title,
+			Body:       req.Content,
+			Link:       req.Link,
+			SourceType: "cleanup_alert",
+			SourceID:   req.SourceID,
+		})
+	}
+	for _, recipient := range h.cleanupRecipients(ctx, req, kb, h.resolveSharedTenants) {
+		notify(recipient.tenant, recipient.user)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type cleanupRecipient struct {
+	tenant uint64
+	user   string
+}
+
+// cleanupRecipients resolves the KB owner plus one representative per tenant
+// sharing the KB. Missing services degrade to owner-only, never to no recipient.
+func (h *AutomationHandler) cleanupRecipients(ctx context.Context, req reviewAlertNotification, kb *types.KnowledgeBase, shared func(context.Context, uint64, string) []cleanupRecipient) []cleanupRecipient {
+	seen := map[string]bool{}
+	out := []cleanupRecipient{}
+	add := func(tenant uint64, user string) {
+		if tenant == 0 || user == "" {
+			return
+		}
+		key := strconv.FormatUint(tenant, 10) + ":" + user
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, cleanupRecipient{tenant: tenant, user: user})
+	}
+	add(req.TenantID, kb.CreatorID)
+	if shared != nil {
+		for _, recipient := range shared(ctx, req.TenantID, req.KnowledgeBaseID) {
+			add(recipient.tenant, recipient.user)
+		}
+	}
+	return out
+}
+
+// resolveSharedTenants is the production resolver; it is nil-safe and never
+// blocks the owner notification when share metadata is unavailable.
+func (h *AutomationHandler) resolveSharedTenants(ctx context.Context, tenant uint64, kbID string) []cleanupRecipient {
+	if h.shares == nil || h.orgs == nil {
+		return nil
+	}
+	shares, err := h.shares.ListSharesByKnowledgeBase(ctx, kbID, tenant)
+	if err != nil {
+		return nil
+	}
+	out := []cleanupRecipient{}
+	for _, share := range shares {
+		if share == nil || share.OrganizationID == "" {
+			continue
+		}
+		members, err := h.orgs.ListTenantMembers(ctx, share.OrganizationID)
+		if err != nil {
+			continue
+		}
+		for _, member := range members {
+			if member == nil || member.TenantID == tenant || member.RepresentativeUserID == "" {
+				continue
+			}
+			out = append(out, cleanupRecipient{tenant: member.TenantID, user: member.RepresentativeUserID})
+		}
+	}
+	return out
 }

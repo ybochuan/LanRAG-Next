@@ -18,7 +18,7 @@ func businessRead(action string) bool {
 	case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
 		"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
 		"business_family_replacements", "business_family_backfill_plans", "business_family_projection", "business_family_workspace",
-		"business_family_suggestions":
+		"business_family_suggestions", "business_cleanup_list":
 		return true
 	default:
 		return false
@@ -47,6 +47,9 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	// acknowledgement needs its own write path here.
 	if r.Action == "business_notification_ack" {
 		return s.notificationAck(ctx, r, body.ID)
+	}
+	if strings.HasPrefix(r.Action, "business_cleanup_") {
+		return s.executeCleanup(ctx, r, body.ID, body.Payload)
 	}
 	if body.Payload.TargetKnowledgeBaseID != "" &&
 		!s.scopes[lifecycle.PolicyScope{TenantID: r.TenantID, KnowledgeBaseID: body.Payload.TargetKnowledgeBaseID}] {

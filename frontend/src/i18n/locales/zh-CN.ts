@@ -337,6 +337,7 @@ export default {
       automation_failed: '自动化失败',
       automation_awaiting_approval: '自动化等待审批',
       automation_paused: '自动化已暂停',
+      lifecycle_cleanup_due: '文档清理提醒',
     },
   },
   toolbox: {
@@ -9437,6 +9438,7 @@ export default {
     "subtitle": "集中管理生命周期、版本和文档关系。",
     "tabs": {
       "documents": "全部文档",
+      "cleanup": "待清理",
       "reviews": "待复核",
       "rules": "库级规则"
     },

@@ -7,6 +7,7 @@
   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
   <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="loadAll">重新载入</t-button></t-alert>
   <t-alert v-if="data?.degraded" theme="info" class="notice" role="status">{{ degradedMessage }}</t-alert>
+   <t-alert v-if="data?.cleanup?.total" theme="warning" class="notice" role="status">{{ cleanupBanner }} <t-button variant="text" size="small" @click="showList('cleanup')">查看待清理</t-button></t-alert>
   <t-empty v-if="loadingKB" class="empty" role="status" description="正在加载知识库…" />
   <t-empty v-else-if="!knowledgeBases.length && !error" class="empty" description="还没有可访问的知识库。创建或加入知识库后即可管理文档。" />
   <t-empty v-else-if="!kb" class="empty" description="请选择一个知识库。" />
@@ -30,7 +31,30 @@
    <div v-if="busy && tab==='documents'" class="loading" role="status">{{ $t('workbench.list.loading') }}</div>
    <template v-else-if="data || tab==='reviews'">
     <template v-if="data">
-    <section v-if="tab==='documents'" id="panel-documents" class="document-panel" role="tabpanel" aria-labelledby="tab-documents">
+    <section v-if="tab==='cleanup'" id="panel-cleanup" class="document-panel" role="tabpanel" aria-labelledby="tab-cleanup">
+      <div class="section-heading"><div><h2>待清理文档</h2><p>已删除文档保留 30 天，到期后需要确认才清理扩展表记录；原生文档和原件不会被删除。</p></div></div>
+      <p v-if="cleanupError" class="notice error" role="alert">{{ cleanupError }}</p>
+      <p v-if="cleanupBusy" class="loading" role="status">正在加载清理任务…</p>
+      <div v-else class="table-wrap">
+       <table>
+        <thead><tr><th>文档</th><th>删除时间</th><th>清理时间</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+         <tr v-for="task in cleanupItems" :key="task.document_id">
+          <td>{{ task.title || task.document_id }}</td>
+          <td>{{ date(task.native_deleted_at) }}</td>
+          <td>{{ date(task.cleanup_due_at) }}</td>
+          <td><t-tag variant="light" size="small" :theme="cleanupStatusTheme(task.status)">{{ cleanupStatusLabel(task.status) }}</t-tag></td>
+          <td class="cleanup-actions">
+           <t-button v-if="data?.can_write && (task.status==='pending_cleanup'||task.status==='awaiting_confirmation'||task.status==='failed')" variant="outline" size="small" @click="holdCleanup(task)">保留 90 天</t-button>
+           <t-popconfirm v-if="data?.can_write && (task.status==='pending_cleanup'||task.status==='awaiting_confirmation'||task.status==='failed')" content="确认清理这些扩展表记录？原生文档和原件不会被删除。" theme="danger" @confirm="confirmCleanup(task)"><t-button theme="danger" variant="outline" size="small">确认清理</t-button></t-popconfirm>
+          </td>
+         </tr>
+         <tr v-if="!cleanupItems.length"><td colspan="5" class="empty">当前没有待清理文档。</td></tr>
+        </tbody>
+       </table>
+      </div>
+     </section>
+     <section v-if="tab==='documents'" id="panel-documents" class="document-panel" role="tabpanel" aria-labelledby="tab-documents">
      <div class="table-wrap">
       <table>
        <thead><tr><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('title')">{{ $t('workbench.list.colDocument') }}{{ sortMark('title') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('state')">{{ $t('workbench.list.colLifecycle') }}{{ sortMark('state') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('family')">{{ $t('workbench.list.colFamily') }}{{ sortMark('family') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('effective_until')">{{ $t('workbench.list.colEffectiveUntil') }}{{ sortMark('effective_until') }}</t-button></th></tr></thead>
@@ -133,7 +157,7 @@ const stateOptions=computed(()=>[{label:t('workbench.list.allStates'),value:''},
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
-const tabs=[{key:'documents',labelKey:'workbench.tabs.documents'},{key:'reviews',labelKey:'workbench.tabs.reviews'},{key:'rules',labelKey:'workbench.tabs.rules'}] as const
+const tabs=[{key:'documents',labelKey:'workbench.tabs.documents'},{key:'cleanup',labelKey:'workbench.tabs.cleanup'},{key:'reviews',labelKey:'workbench.tabs.reviews'},{key:'rules',labelKey:'workbench.tabs.rules'}] as const
 // Every workspace view the router accepts is reachable from the top tab bar.
 // The URL keeps its ?view= contract, so old links and bookmarks still land
 // on the same view; only the missing entry points are added.
@@ -157,7 +181,7 @@ const workspaceView=computed(()=>{
 const auth=useAuthStore()
 const kbFence=requestFence()
 const tabFromQuery=route.query.tab
-const tab=ref<(typeof tabs)[number]['key']>(tabFromQuery==='reviews'||tabFromQuery==='rules'?tabFromQuery:'documents')
+const tab=ref<(typeof tabs)[number]['key']>(tabFromQuery==='reviews'||tabFromQuery==='rules'||tabFromQuery==='cleanup'?tabFromQuery:'documents')
 const kb=ref(''),knowledgeBases=ref<{id:string;name:string}[]>([]),loadingKB=ref(true)
 const filterFromQuery=typeof route.query.state==='string'?route.query.state:''
 const filter=ref<api.LifecycleState|''>(states.includes(filterFromQuery as api.LifecycleState)?filterFromQuery as api.LifecycleState:'')
@@ -181,6 +205,10 @@ function sortDocuments(key:DocumentSortKey){
 }
 const sortMark=(key:DocumentSortKey)=>sortKey.value===key?(sortDirection.value===1?' ↑':' ↓'):' ↕'
 const reviewItems=ref<api.ReviewAlert[]>([]),reviewError=ref(''),reviewBusy=ref(false),reviewsTruncated=ref(false),reviewsLoaded=ref(false)
+const cleanupItems=ref<api.CleanupTask[]>([]),cleanupError=ref(''),cleanupBusy=ref(false),cleanupLoaded=ref(false)
+const cleanupStatusLabel=(status:string)=>({pending_cleanup:'保留中',awaiting_confirmation:'待确认清理',held:'已保留',failed:'清理失败',cleaned:'已清理',cancelled:'已恢复'} as Record<string,string>)[status]||status
+const cleanupStatusTheme=(status:string)=>({pending_cleanup:'warning',awaiting_confirmation:'danger',held:'default',failed:'danger',cleaned:'success',cancelled:'default'} as Record<string,string>)[status]||'default'
+const cleanupBanner=computed(()=>{const c=data.value?.cleanup;if(!c?.total)return '';const due=c.due_soon?'，其中 '+c.due_soon+' 份将在 7 天内到期':'';return '已删除文档 '+c.total+' 份处于清理保留期'+due+'。'})
 const reviewSort=ref<'asc'|'desc'>('asc')
 const sortedReviewItems=computed(()=>[...reviewItems.value].sort((a,b)=>{
   const left=a.review_due||'',right=b.review_due||''
@@ -275,7 +303,10 @@ async function loadOverview(){
 }catch(e){if(listFence.current(token)){data.value=undefined;allDocuments.value=[];error.value=errorMessage(e)}}finally{if(listFence.current(token))busy.value=false}
 }
 async function loadReviews(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;reviewBusy.value=true;reviewError.value='';reviewItems.value=[];try{const result=await api.reviews(scope);if(reviewFence.current(token)){reviewItems.value=result.alerts||[];reviewsTruncated.value=result.truncated;reviewsLoaded.value=true}}catch(e){if(reviewFence.current(token))reviewError.value=errorMessage(e)}finally{if(reviewFence.current(token))reviewBusy.value=false}}
-function loadAll(){if(!kb.value){void loadKnowledgeBases();return}ruleError.value='';ruleSuccess.value=false;void loadOverview();if(tab.value==='reviews')void loadReviews()}
+async function loadCleanup(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;cleanupBusy.value=true;cleanupError.value='';try{const result=await api.cleanupList(scope,1,100,'');if(reviewFence.current(token)){cleanupItems.value=result.tasks||[];cleanupLoaded.value=true}}catch(e){if(reviewFence.current(token))cleanupError.value=errorMessage(e)}finally{if(reviewFence.current(token))cleanupBusy.value=false}}
+async function holdCleanup(task:api.CleanupTask){if(!data.value?.can_write)return;try{await api.holdCleanup(kb.value,task.document_id,task.revision,90,'用户保留','hold-'+task.document_id+'-'+task.revision);await loadCleanup();await loadOverview()}catch(e){cleanupError.value=errorMessage(e)}}
+async function confirmCleanup(task:api.CleanupTask){if(!data.value?.can_write)return;try{await api.confirmCleanup(kb.value,task.document_id,task.revision,'cleanup-'+task.document_id+'-'+task.revision);await loadCleanup();await loadOverview()}catch(e){cleanupError.value=errorMessage(e)}}
+function loadAll(){if(!kb.value){void loadKnowledgeBases();return}ruleError.value='';ruleSuccess.value=false;void loadOverview();if(tab.value==='reviews')void loadReviews();if(tab.value==='cleanup')void loadCleanup()}
 function listQuery(){
  const query:Record<string,string>={}
  if(kb.value)query.kb=kb.value
@@ -320,8 +351,8 @@ async function submitDocument(){if(!detail.value||!detailCanWrite.value||savingD
 function supplementSaved(){detailCache.delete(detailKey(selectedKB.value,selectedID.value));supplementRevision.value++;void loadOverview();void loadReviews()}
 async function submitRules(){if(!data.value?.can_write||!validRules(ruleForm)||savingRules.value)return;const token=ruleFence.begin(),scope=kb.value,revision=data.value.rule_revision;savingRules.value=true;ruleError.value='';ruleSuccess.value=false;try{const result=await api.saveRules(scope,revision,{...ruleForm});if(ruleFence.current(token)&&data.value){data.value.rules=result.rules;data.value.rule_revision=result.rule_revision;ruleSuccess.value=true}}catch(e){if(ruleFence.current(token))ruleError.value=errorMessage(e)}finally{if(ruleFence.current(token))savingRules.value=false}}
 watch([titleQuery,filter],([,state],[,previousState])=>{clearTimeout(searchTimer);listFence.invalidate();if(!kb.value)return;if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
-watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';selectedKB.value='';dateBaseline.value='';reviewItems.value=[];reviewsLoaded.value=false;reviewsTruncated.value=false;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
-watch(tab,value=>{if(value==='reviews'&&!reviewsLoaded.value)void loadReviews()})
+watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';selectedKB.value='';dateBaseline.value='';reviewItems.value=[];reviewsLoaded.value=false;reviewsTruncated.value=false;cleanupItems.value=[];cleanupLoaded.value=false;cleanupError.value='';cleanupBusy.value=false;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
+watch(tab,value=>{if(value==='reviews'&&!reviewsLoaded.value)void loadReviews();if(value==='cleanup'&&!cleanupLoaded.value)void loadCleanup()})
 
 async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];kb.value=knowledgeBases.value.find(row=>row.id===route.query.kb)?.id||knowledgeBases.value[0]?.id||''}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
 watch(()=>auth.effectiveTenantId,()=>void loadKnowledgeBases())

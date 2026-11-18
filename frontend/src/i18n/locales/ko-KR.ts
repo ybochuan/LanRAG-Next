@@ -337,6 +337,7 @@ export default {
       automation_failed: '자동화 실패',
       automation_awaiting_approval: '자동화 승인 필요',
       automation_paused: '자동화 일시 중지',
+      lifecycle_cleanup_due: '문서 정리 알림',
     },
   },
   toolbox: {
@@ -9438,6 +9439,7 @@ export default {
     "subtitle": "수명 주기, 버전 및 문서 관계를 관리합니다.",
     "tabs": {
       "documents": "전체 문서",
+      "cleanup": "정리 대기",
       "reviews": "검토 대기",
       "rules": "지식베이스 규칙"
     },

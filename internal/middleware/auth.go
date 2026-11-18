@@ -63,6 +63,7 @@ var noAuthAPI = map[string][]string{
 	// PATCH: the trusted extension Host authenticates with the shared
 	// management key inside the handler, not with a caller JWT/API key.
 	"/api/v1/notifications/internal/review-alert": {"POST"},
+	"/api/v1/notifications/internal/cleanup-alert": {"POST"},
 }
 
 // 检查请求是否在无需认证的API列表中

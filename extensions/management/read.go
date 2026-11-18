@@ -128,6 +128,20 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 	if err != nil {
 		return nil, errDatabase
 	}
+	if !nativeDegraded && s.nativeDB != "" {
+		// The workbench list follows native knowledges; state counts must use
+		// the same membership instead of the older extension-only projection.
+		nativeCounts, countErr := s.nativeOverviewCounts(ctx, tenant, r.KnowledgeBaseID)
+		if countErr != nil {
+			return nil, errDatabase
+		}
+		for state := range counts {
+			counts[state] = 0
+		}
+		for state, n := range nativeCounts {
+			counts[state] = n
+		}
+	}
 	degraded := nativeDegraded || lifecycleInconsistent
 	// Bounded page snapshots reuse the canonical date decoder and scoped policy read.
 	if err := s.enrichDocumentFamilies(ctx, r, ids); err != nil {
@@ -160,6 +174,9 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 	rules, err := s.rules(ctx, r)
 	if err != nil {
 		return nil, err
+	}
+	if summary := s.cleanupSummary(ctx, r); summary != nil {
+		rules["cleanup"] = summary
 	}
 	rules["counts"] = counts
 	rules["total"] = total

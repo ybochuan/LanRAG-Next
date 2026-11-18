@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
+	"github.com/ybochuan/LanRAG-Next/extensions/cleanup"
 	"github.com/ybochuan/LanRAG-Next/extensions/dependencies"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
@@ -27,6 +28,7 @@ type Server struct {
 	scopes     map[lifecycle.PolicyScope]bool
 	sources    *lineage.Registry
 	business   *business.Service
+	cleanup    *cleanup.Service
 	renditions *lineage.Renditions
 	nativeDB   string
 	titles     func(context.Context, string, []string) (map[string]string, error)
@@ -40,6 +42,9 @@ func (s *Server) WithNativeSQLite(path string, titles func(context.Context, stri
 
 // WithBusiness shares the worker's real source and native publisher adapters.
 func (s *Server) WithBusiness(b *business.Service) *Server { s.business = b; return s }
+
+// WithCleanup shares the worker's cleanup queue with workbench actions.
+func (s *Server) WithCleanup(c *cleanup.Service) *Server { s.cleanup = c; return s }
 
 // WithSources enables explicit declarations using the real native snapshot reader.
 func (s *Server) WithSources(r *lineage.Registry) *Server { s.sources = r; return s }

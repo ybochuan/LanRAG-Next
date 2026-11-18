@@ -47,6 +47,7 @@ type Payload struct {
 	EdgeType              string            `json:"edge_type,omitempty"`
 	Text                  string            `json:"text,omitempty"`
 	Reason                string            `json:"reason,omitempty"`
+	HoldDays              int               `json:"hold_days,omitempty"`
 	SuggestionPolicy      *SuggestionPolicy `json:"suggestion_policy,omitempty"`
 	Topic                 string            `json:"topic,omitempty"`
 	Risk                  string            `json:"risk,omitempty"`

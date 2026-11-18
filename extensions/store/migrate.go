@@ -103,8 +103,14 @@ var feedbackAcceptanceMigration string
 //go:embed migrations/033_review_acknowledgements.sql
 var reviewAcknowledgementsMigration string
 
+//go:embed migrations/034_cleanup_tasks.sql
+var cleanupTasksMigration string
+
+//go:embed migrations/035_evidence_retention.sql
+var evidenceRetentionMigration string
+
 // LatestSchemaVersion is the last published migration supported by this Host.
-const LatestSchemaVersion = 33
+const LatestSchemaVersion = 35
 
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
@@ -391,6 +397,22 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(33)"); err != nil {
+				return err
+			}
+		}
+		if version < 34 {
+			if _, err := tx.ExecContext(ctx, cleanupTasksMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(34)"); err != nil {
+				return err
+			}
+		}
+		if version < 35 {
+			if _, err := tx.ExecContext(ctx, evidenceRetentionMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(35)"); err != nil {
 				return err
 			}
 		}

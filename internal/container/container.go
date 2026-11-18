@@ -770,7 +770,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
-	must(container.Provide(handler.NewAutomationHandler))
+	must(container.Provide(func(automations *service.AutomationService, notifications *service.NotificationService, knowledgeBases interfaces.KnowledgeBaseService, shares interfaces.KBShareService, orgs interfaces.OrganizationService) *handler.AutomationHandler {
+		return handler.NewAutomationHandler(automations, notifications, knowledgeBases, shares, orgs)
+	}))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))

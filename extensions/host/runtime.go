@@ -15,6 +15,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/attachmentcleanup"
 	"github.com/ybochuan/LanRAG-Next/extensions/bridge"
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
+	"github.com/ybochuan/LanRAG-Next/extensions/cleanup"
 	"github.com/ybochuan/LanRAG-Next/extensions/ingest"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
@@ -24,6 +25,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/parser"
 	"github.com/ybochuan/LanRAG-Next/extensions/parser/attachment"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/retention"
 	"github.com/ybochuan/LanRAG-Next/extensions/retrieval"
 	"github.com/ybochuan/LanRAG-Next/extensions/review"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
@@ -94,8 +96,9 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			report("host_stopped")
 		}
 	}()
-	// Set in worker mode; the notifier drains review alerts outside the outbox tx.
+	// Set in worker mode; the notifiers drain alerts outside their write transactions.
 	var alertNotifier *reviewNotifier
+	var cleanupNotifier *cleanupNotifier
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var reconcile *ingest.Reconciler
@@ -108,6 +111,8 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	var businessService *business.Service
 	var upstream *weknora.Client
 	var attachmentCleanup *attachmentcleanup.Service
+	var cleanupService *cleanup.Service
+	var retentionService *retention.Service
 	var scopes []ingest.Scope
 	if cfg.Mode == "worker" {
 		client, err := weknora.NewClient(cfg.UpstreamURL, cfg.APIKey, cfg.TenantID)
@@ -227,6 +232,10 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		if cfg.NativeDBPath != "" {
 			attachmentCleanup = attachmentcleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, attachmentSource.DeleteAttachment, cfg.RetryDelay)
 			services.BeforeAttachmentDelete = &bridge.AttachmentDeleteHandler{Key: cfg.ManagementKey, Cleanup: attachmentCleanup}
+			cleanupService = cleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, cfg.CleanupRetention, cfg.CleanupAuto).WithReady(upstream.Health)
+			cleanupNotifier = newCleanupNotifier(cfg.UpstreamURL, cfg.ManagementKey)
+			cleanupService.WithNotifier(cleanupNotifier.Signal)
+			retentionService = retention.New(db, cfg.TenantID, cfg.KnowledgeBaseIDs, cfg.EvidenceRetention).WithReady(upstream.Health)
 		}
 		services.BeforeRetrieve, err = bridge.NewRetrieveHandler(cfg.TenantID, cfg.KnowledgeBaseIDs, policy)
 		if err != nil {
@@ -249,7 +258,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	server := bridge.NewServerWithServices(services)
 	{
 		original := server.Handler
-		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService)
+		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService).WithCleanup(cleanupService)
 		if upstream != nil {
 			manager.WithNativeSQLite(cfg.NativeDBPath, upstream.DocumentTitles)
 			manager.WithRenditions(lineage.NewRenditions(sourceRegistry, upstream.OriginalSHA256))
@@ -274,7 +283,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	serveResult := make(chan error, 1)
 	go func() { serveResult <- server.Serve(l) }()
 	var tasks sync.WaitGroup
-	backgroundResult := make(chan error, 7)
+	backgroundResult := make(chan error, 16)
 	launch := func(fn func(context.Context) error) {
 		tasks.Add(1)
 		go func() { defer tasks.Done(); backgroundResult <- fn(runCtx) }()
@@ -322,6 +331,19 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	if attachmentCleanup != nil {
 		launch(func(ctx context.Context) error {
 			return attachmentCleanup.Run(ctx, cfg.PollInterval, func(error) { report("attachment_cleanup_retry") })
+		})
+	}
+	if cleanupNotifier != nil {
+		launch(func(ctx context.Context) error { cleanupNotifier.Run(ctx, report); return nil })
+	}
+	if cleanupService != nil {
+		launch(func(ctx context.Context) error {
+			return cleanupService.Run(ctx, cfg.CleanupInterval, func(error) { report("cleanup_scan_failed") })
+		})
+	}
+	if retentionService != nil {
+		launch(func(ctx context.Context) error {
+			return retentionService.Run(ctx, cfg.EvidenceInterval, func(error) { report("evidence_retention_failed") })
 		})
 	}
 	started = true

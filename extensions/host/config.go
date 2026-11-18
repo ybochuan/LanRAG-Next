@@ -36,6 +36,11 @@ type Config struct {
 	RetryDelay        time.Duration
 	MaxAttempts       int
 	ShutdownTimeout   time.Duration
+	CleanupRetention  time.Duration
+	CleanupInterval   time.Duration
+	CleanupAuto       bool
+	EvidenceRetention time.Duration
+	EvidenceInterval  time.Duration
 }
 
 // String deliberately excludes configuration values, including KB metadata.
@@ -47,7 +52,7 @@ func (c Config) GoString() string { return c.String() }
 // LoadConfig reads process environment through the supplied function; it does
 // not read .env files, create a database or contact the upstream API.
 func LoadConfig(getenv func(string) string) (Config, error) {
-	c := Config{Mode: "probe", ReconcileInterval: time.Minute, PollInterval: time.Second, Lease: time.Minute, RetryDelay: 5 * time.Second, MaxAttempts: 5, ShutdownTimeout: 10 * time.Second}
+	c := Config{Mode: "probe", ReconcileInterval: time.Minute, PollInterval: time.Second, Lease: time.Minute, RetryDelay: 5 * time.Second, MaxAttempts: 5, ShutdownTimeout: 10 * time.Second, CleanupRetention: 30 * 24 * time.Hour, CleanupInterval: time.Hour, EvidenceRetention: 30 * 24 * time.Hour, EvidenceInterval: 24 * time.Hour}
 	if getenv == nil {
 		return c, errors.New("environment reader required")
 	}
@@ -133,6 +138,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}{
 		{"AGENTRAG_RECONCILE_INTERVAL", &c.ReconcileInterval}, {"AGENTRAG_OUTBOX_POLL_INTERVAL", &c.PollInterval},
 		{"AGENTRAG_OUTBOX_LEASE", &c.Lease}, {"AGENTRAG_OUTBOX_RETRY_DELAY", &c.RetryDelay}, {"AGENTRAG_SHUTDOWN_TIMEOUT", &c.ShutdownTimeout},
+		{"AGENTRAG_CLEANUP_INTERVAL", &c.CleanupInterval}, {"AGENTRAG_EVIDENCE_RETENTION_INTERVAL", &c.EvidenceInterval},
 	} {
 		if raw := getenv(setting.name); raw != "" {
 			duration, err := time.ParseDuration(raw)
@@ -148,6 +154,23 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 			return c, errors.New("invalid AGENTRAG_OUTBOX_MAX_ATTEMPTS")
 		}
 		c.MaxAttempts = attempts
+	}
+	if raw := getenv("AGENTRAG_CLEANUP_RETENTION_DAYS"); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days < 1 || days > 3650 {
+			return c, errors.New("invalid AGENTRAG_CLEANUP_RETENTION_DAYS")
+		}
+		c.CleanupRetention = time.Duration(days) * 24 * time.Hour
+	}
+	if raw := strings.ToLower(strings.TrimSpace(getenv("AGENTRAG_CLEANUP_AUTO"))); raw == "1" || raw == "true" {
+		c.CleanupAuto = true
+	}
+	if raw := getenv("AGENTRAG_EVIDENCE_RETENTION_DAYS"); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days < 1 || days > 3650 {
+			return c, errors.New("invalid AGENTRAG_EVIDENCE_RETENTION_DAYS")
+		}
+		c.EvidenceRetention = time.Duration(days) * 24 * time.Hour
 	}
 	return c, c.Validate()
 }
@@ -177,10 +200,13 @@ func (c Config) Validate() error {
 	if c.Mode != "probe" && c.Mode != "worker" {
 		return errors.New("AGENTRAG_MODE must be probe or worker")
 	}
-	for _, duration := range []time.Duration{c.ReconcileInterval, c.PollInterval, c.Lease, c.RetryDelay, c.ShutdownTimeout} {
+	for _, duration := range []time.Duration{c.ReconcileInterval, c.PollInterval, c.Lease, c.RetryDelay, c.ShutdownTimeout, c.CleanupInterval, c.EvidenceInterval} {
 		if duration < time.Millisecond || duration > 24*time.Hour {
 			return errors.New("host durations must be between 1ms and 24h")
 		}
+	}
+	if c.CleanupRetention < 24*time.Hour || c.CleanupRetention > 3650*24*time.Hour {
+		return errors.New("cleanup retention must be between 1 and 3650 days")
 	}
 	if c.MaxAttempts < 1 || c.MaxAttempts > 100 {
 		return errors.New("outbox attempts must be 1..100")

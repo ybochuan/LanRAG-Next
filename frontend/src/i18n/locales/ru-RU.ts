@@ -337,6 +337,7 @@ export default {
       automation_failed: 'Сбой автоматизации',
       automation_awaiting_approval: 'Автоматизация ждёт подтверждения',
       automation_paused: 'Автоматизация приостановлена',
+      lifecycle_cleanup_due: 'Напоминание об очистке документов',
     },
   },
   toolbox: {
@@ -9438,6 +9439,7 @@ export default {
     "subtitle": "Управление жизненным циклом, версиями и связями документов.",
     "tabs": {
       "documents": "Все документы",
+      "cleanup": "Очистка",
       "reviews": "На проверку",
       "rules": "Правила базы"
     },

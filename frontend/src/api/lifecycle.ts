@@ -7,7 +7,11 @@ export interface Rules {effective_delay_days:number;valid_days:number;review_day
 export interface ResolvedRules {rules:Rules;source:{tenant_id:number;knowledge_base_id:string};revision:number;token:string}
 export interface DocumentFamily {id:string;label:string}
 export interface DocumentRow {document_id:string;title?:string;state:LifecycleState;last_event_id:string;annotations:Annotations;business_family?:DocumentFamily;degraded?:boolean;degraded_reason?:string}
-export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean;degraded?:boolean;degraded_reason?:string}
+export type CleanupStatus='pending_cleanup'|'awaiting_confirmation'|'held'|'cleaned'|'failed'|'cancelled'
+export interface CleanupTask {tenant_id:number;knowledge_base_id:string;document_id:string;title?:string;native_deleted_at?:string;first_observed_at:string;cleanup_due_at:string;status:CleanupStatus;hold_until?:string;hold_reason?:string;last_error?:string;revision:number;cleaned_at?:string}
+export interface CleanupSummary {total:number;pending:number;awaiting:number;held:number;failed:number;due_soon:number}
+export interface CleanupList {tasks:CleanupTask[];total:number;counts:Record<string,number>}
+export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean;cleanup?:CleanupSummary;degraded?:boolean;degraded_reason?:string}
 export interface LifecycleEvent {event_id:string;from_state:string;to_state:string;reason:string;occurred_at:string;source_event_id?:string}
 export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean;attachment_parent_document_id?:string};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null;can_write?:boolean}
 export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string;delivered_at?:string;acknowledged_at?:string;unread?:boolean;title?:string;knowledge_base_id?:string}
@@ -29,6 +33,9 @@ export const documentDetail=(kb:string,id:string)=>unwrap<Detail>(get(`${base(kb
 export const saveAnnotations=(kb:string,id:string,expected_revision:number,annotations:Annotations)=>unwrap<Detail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}`,{expected_revision,annotations})).then(value=>{invalidateCache('document-picker-active');return value})
 export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules})).then(value=>{invalidateCache('document-picker-active');return value})
 export const reviews=(kb:string)=>unwrap<{alerts:ReviewAlert[];truncated:boolean}>(get(`${base(kb)}/reviews`))
+export const cleanupList=(kb:string,page=1,pageSize=20,state='')=>unwrap<CleanupList>(get(`${base(kb)}/business/cleanup_list?${new URLSearchParams({page:String(page),page_size:String(pageSize),state})}`))
+export const holdCleanup=(kb:string,id:string,expectedRevision:number,days:number,reason:string,operationId:string)=>unwrap<CleanupTask>(put(`${base(kb)}/business/cleanup_hold`,{expected_revision:expectedRevision,operation_id:operationId,business:{id,payload:{hold_days:days,reason}}}))
+export const confirmCleanup=(kb:string,id:string,expectedRevision:number,operationId:string)=>unwrap<CleanupTask>(put(`${base(kb)}/business/cleanup_confirm`,{expected_revision:expectedRevision,operation_id:operationId,business:{id,payload:{}}}))
 // acknowledgeReview marks one review reminder read in the message centre.
 // The server keeps the first read time, so a repeated click is harmless.
 export const acknowledgeReview=(kb:string,alertId:string)=>

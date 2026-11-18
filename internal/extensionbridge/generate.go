@@ -24,7 +24,11 @@ type generationResult struct {
 }
 
 // BeginGuidedSourceCall appends an optional instruction after the cached prefix.
-// A guidance failure preserves the original messages and provenance flow.
+// The instruction uses the user role: Qwen3.x chat templates reject any system
+// message that is not the first message ("System message must be at the
+// beginning"). A trailing user turn keeps the cached prefix intact and stays
+// valid for strict templates. A guidance failure preserves the original
+// messages and provenance flow.
 func BeginGuidedSourceCall(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions, inputs []SourceInput, complete bool) (context.Context, []chat.Message, *SourceCall, error) {
 	request := struct{ Messages, Options any }{messages, opts}
 	ctx, call, err := BeginSourceCall(ctx, "model", request, inputs, complete)
@@ -51,7 +55,7 @@ func BeginGuidedSourceCall(ctx context.Context, messages []chat.Message, opts *c
 		}
 		seen[item.ID] = true
 	}
-	messages = append(append([]chat.Message(nil), messages...), chat.Message{Role: "system", Content: out.Content})
+	messages = append(append([]chat.Message(nil), messages...), chat.Message{Role: "user", Content: out.Content})
 	body, err := json.Marshal(struct{ Messages, Options any }{messages, opts})
 	if err != nil {
 		return ctx, messages, call, err
