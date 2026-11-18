@@ -20,6 +20,7 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
     vue: {...vue,onMounted(){},onBeforeUnmount(){}},
     'vue-router': {useRoute:()=>({query:{}}),onBeforeRouteLeave(){}},
     '@/stores/auth': {useAuthStore:()=>({effectiveTenantId:7})},
+    'vue-i18n': {useI18n:()=>({t:(key:string)=>key})},
     '@/api/families': {workspace,listFamilies:async()=>[]},
     '@/api/knowledge-base': {},
     '@/api/lifecycle': {overview:async()=>{overviewCalls++;return {can_write:true}}},
