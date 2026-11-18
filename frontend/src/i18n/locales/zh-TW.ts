@@ -9293,6 +9293,28 @@ export default {
     },
   },
   workbench: {
+    "supplement": {
+      "removeParent": "移除父文件 {title}",
+      "title": "補充文件相依",
+      "desc": "為本篇補充文件選擇父文件，最多 8 篇；父文件可來自目前知識庫或另一個已授權知識庫。任一父文件失效、過期或版本變更，本篇將停止參與問答。複核到期只提醒，不改變狀態。",
+      "checking": "正在核驗相依…",
+      "version": "關係版本 {n}",
+      "declared": "已宣告相依",
+      "undeclared": "未宣告相依",
+      "reviewDue": "父層最早複核：{date}。本篇原有日期保持不變。",
+      "mixed": "目前相依分散在多個知識庫；儲存會依每篇父文件所屬知識庫分別提交。",
+      "parentKb": "父文件所屬知識庫",
+      "search": "搜尋全部父文件",
+      "searchPlaceholder": "文件名稱或 ID",
+      "loadingDocs": "正在載入該知識庫的生效文件…",
+      "noDocs": "沒有可選文件。",
+      "totalDocs": "共 {n} 篇可選父文件",
+      "selected": "已選 {n}/8；清空並儲存即撤銷關係，已有失效狀態不會恢復。",
+      "save": "儲存相依",
+      "saving": "正在儲存…",
+      "reload": "重新載入",
+      "remove": "移除"
+    },
     "form": {
       "content": "內容",
       "confirmCross": "我確認這是跨庫語意關聯",

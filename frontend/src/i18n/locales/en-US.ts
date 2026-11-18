@@ -9303,6 +9303,28 @@ export default {
     }
   },
   workbench: {
+    "supplement": {
+      "removeParent": "Remove parent document {title}",
+      "title": "Supplement dependencies",
+      "desc": "Choose up to 8 parent documents for this supplement. Parents may come from this knowledge base or another authorised one. If any parent expires or changes version, this document stops answering. A due review only reminds; it does not change state.",
+      "checking": "Verifying dependencies…",
+      "version": "Relation revision {n}",
+      "declared": "Dependencies declared",
+      "undeclared": "No dependencies declared",
+      "reviewDue": "Earliest parent review: {date}. This document keeps its own dates.",
+      "mixed": "Dependencies span several knowledge bases; saving submits each parent under its own knowledge base.",
+      "parentKb": "Parent document knowledge base",
+      "search": "Search all parent documents",
+      "searchPlaceholder": "Document name or ID",
+      "loadingDocs": "Loading active documents for this knowledge base…",
+      "noDocs": "No selectable documents.",
+      "totalDocs": "{n} selectable parent documents",
+      "selected": "Selected {n}/8; clearing and saving removes the relation, and expired states are not restored.",
+      "save": "Save dependencies",
+      "saving": "Saving…",
+      "reload": "Reload",
+      "remove": "Remove"
+    },
     "form": {
       "content": "Content",
       "confirmCross": "I confirm this is a cross-KB semantic relation",

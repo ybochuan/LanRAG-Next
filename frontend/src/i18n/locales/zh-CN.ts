@@ -9296,6 +9296,28 @@ export default {
     }
   },
   workbench: {
+    "supplement": {
+      "removeParent": "移除父文档 {title}",
+      "title": "补充文档依赖",
+      "desc": "为本篇补充文档选择父文档，最多 8 篇；父文档可来自当前知识库或另一个已授权知识库。任一父文档失效、过期或版本变化，本篇将停止参与问答。复核到期只提醒，不改变状态。",
+      "checking": "正在核验依赖…",
+      "version": "关系版本 {n}",
+      "declared": "已声明依赖",
+      "undeclared": "未声明依赖",
+      "reviewDue": "父级最早复核：{date}。本篇原有日期保持不变。",
+      "mixed": "当前依赖分布在多个知识库；保存会按每篇父文档所属知识库分别提交。",
+      "parentKb": "父文档所属知识库",
+      "search": "搜索全部父文档",
+      "searchPlaceholder": "文档名称或 ID",
+      "loadingDocs": "正在加载该知识库的生效文档…",
+      "noDocs": "没有可选文档。",
+      "totalDocs": "共 {n} 篇可选父文档",
+      "selected": "已选 {n}/8；清空并保存即撤销关系，已有失效状态不会恢复。",
+      "save": "保存依赖",
+      "saving": "正在保存…",
+      "reload": "重新载入",
+      "remove": "移除"
+    },
     "form": {
       "content": "内容",
       "confirmCross": "我确认这是跨库语义关联",
