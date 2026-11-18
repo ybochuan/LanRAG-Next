@@ -34,7 +34,7 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
   }
   const window = {confirm(message:string){prompts.push(message);return approved}}
   const state = scope.run(()=>new Function('require','exports','window','defineProps','defineEmits',`${code}
-    return {kb,familyId,family,canWrite,members,projection,recoverDocument,recoverReason,loadFamilies,loadView,recoverHead,toggleProjection,approve,confirmSuggestions,perform,pending};
+    return {kb,familyId,family,canWrite,members,recoverDocument,recoverReason,loadFamilies,loadView,recoverHead,approve,confirmSuggestions,perform,pending};
   `)((id:string)=>modules[id],{},window,()=>props,()=>()=>{}))
   return {state,calls,prompts,allow:()=>{approved=true},overviewCalls:()=>overviewCalls,stop:()=>scope.stop()}
 }
@@ -140,22 +140,6 @@ test('missing published head can be recovered through an explicit member selecti
     assert.equal(view.calls[0]?.action,'family_head_recover')
     assert.equal(view.calls[0]?.body.expected_revision,4)
     assert.deepEqual(view.calls[0]?.body.business.payload,{document_id:'new',reason:'old source deleted',second_confirmation:true})
-  } finally { view.stop() }
-})
-
-test('projection switch is explicit and uses the stored projection revision', async () => {
-  const view=setup(async()=>[])
-  try {
-    view.state.kb.value='kb'
-    await vue.nextTick()
-    view.state.canWrite.value=true
-    view.state.projection.value={enabled:false,revision:3,pending:1,failed:0}
-    view.allow()
-    view.state.toggleProjection()
-    assert.equal(view.calls.length,1)
-    assert.equal(view.calls[0]?.action,'family_projection_set')
-    assert.equal(view.calls[0]?.body.expected_revision,3)
-    assert.deepEqual(view.calls[0]?.body.business.payload,{projection_enabled:true,second_confirmation:true})
   } finally { view.stop() }
 })
 

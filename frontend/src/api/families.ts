@@ -59,15 +59,8 @@ export interface FamilyReplacementHistory {
   fingerprint?: string
   blocked_reason?: string
 }
-export interface FamilyProjectionSetting {
-  enabled: boolean
-  revision: number
-  pending: number
-  failed: number
-}
 export interface FamilyWorkspace {
   family: BusinessFamily
-  projection?: FamilyProjectionSetting
   view: WorkspaceTab
   has_next: boolean
   can_write: boolean

@@ -302,7 +302,7 @@ func (s *Service) applyLegacyFamily(ctx context.Context, c Command) (Result, err
 		if err := requireFamilyChange(changed, err); err != nil {
 			return Result{}, err
 		}
-		if err := enqueueFamilyProjectionIfEnabled(ctx, tx, c, now, plan.DocumentIDs); err != nil {
+		if err := enqueueFamilyProjection(ctx, tx, c, now, plan.DocumentIDs); err != nil {
 			return Result{}, err
 		}
 		return Result{ID: c.ID, Revision: c.ExpectedRevision + 1, Status: "applied"}, nil

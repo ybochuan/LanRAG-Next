@@ -102,7 +102,7 @@ func (s *Service) applyFamilySuggestionTx(ctx context.Context, tx *sql.Tx, c Com
 		if err := addFamilyMemberTx(ctx, tx, c.Scope, item.BusinessFamilyID, item.DocumentID, item.SourceVersionID, documents); err != nil {
 			return "", err
 		}
-		return item.BusinessFamilyID, enqueueFamilyProjectionIfEnabled(ctx, tx, c, now, []string{item.DocumentID})
+		return item.BusinessFamilyID, enqueueFamilyProjection(ctx, tx, c, now, []string{item.DocumentID})
 	case item.EdgeType == "supersedes":
 		rev, err := suggestionFamilyRevision(ctx, tx, c.Scope, item.BusinessFamilyID)
 		if err != nil {

@@ -109,7 +109,7 @@ func (s *Service) recoverFamilyHead(ctx context.Context, c Command) (Result, err
 		if err := recordDocumentAvailabilityTx(ctx, tx, c.Scope, p.DocumentID, documentAvailabilityActive, "", now.Format(time.RFC3339Nano)); err != nil {
 			return Result{}, err
 		}
-		if err := enqueueFamilyProjectionIfEnabled(ctx, tx, c, now, []string{oldDocument, p.DocumentID}); err != nil {
+		if err := enqueueFamilyProjection(ctx, tx, c, now, []string{oldDocument, p.DocumentID}); err != nil {
 			return Result{}, err
 		}
 		return out, nil

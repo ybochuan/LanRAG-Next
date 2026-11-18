@@ -124,8 +124,7 @@ LEFT JOIN ext_document_version v ON v.tenant_id=n.tenant_id AND v.knowledge_base
 LEFT JOIN ext_document_version_family f ON f.tenant_id=v.tenant_id AND f.knowledge_base_id=v.knowledge_base_id AND f.family_id=v.family_id
 LEFT JOIN ext_lifecycle_current c ON c.tenant_id=v.tenant_id AND c.knowledge_base_id=v.knowledge_base_id AND c.document_id=v.document_id
 LEFT JOIN ext_document_availability av ON av.tenant_id=v.tenant_id AND av.knowledge_base_id=v.knowledge_base_id AND av.document_id=v.document_id
-LEFT JOIN ext_business_family_projection_scopes p ON p.tenant_id=v.tenant_id AND p.knowledge_base_id=v.knowledge_base_id AND p.enabled=1
-LEFT JOIN ext_business_document_family_members m ON m.tenant_id=p.tenant_id AND m.knowledge_base_id=p.knowledge_base_id AND m.document_id=v.document_id
+LEFT JOIN ext_business_document_family_members m ON m.tenant_id=v.tenant_id AND m.knowledge_base_id=v.knowledge_base_id AND m.document_id=v.document_id
 WHERE n.tenant_id=? AND n.knowledge_base_id=?`+where+" ORDER BY n.created_at DESC,n.node_id LIMIT 257", params...)
 		if err != nil {
 			return err
@@ -378,8 +377,7 @@ LEFT JOIN ext_document_version v ON v.tenant_id=n.tenant_id AND v.knowledge_base
 LEFT JOIN ext_document_version_family f ON f.tenant_id=v.tenant_id AND f.knowledge_base_id=v.knowledge_base_id AND f.family_id=v.family_id
 LEFT JOIN ext_lifecycle_current c ON c.tenant_id=v.tenant_id AND c.knowledge_base_id=v.knowledge_base_id AND c.document_id=v.document_id
 LEFT JOIN ext_document_availability av ON av.tenant_id=v.tenant_id AND av.knowledge_base_id=v.knowledge_base_id AND av.document_id=v.document_id
-LEFT JOIN ext_business_family_projection_scopes p ON p.tenant_id=v.tenant_id AND p.knowledge_base_id=v.knowledge_base_id AND p.enabled=1
-LEFT JOIN ext_business_document_family_members m ON m.tenant_id=p.tenant_id AND m.knowledge_base_id=p.knowledge_base_id AND m.document_id=v.document_id
+LEFT JOIN ext_business_document_family_members m ON m.tenant_id=v.tenant_id AND m.knowledge_base_id=v.knowledge_base_id AND m.document_id=v.document_id
 WHERE n.tenant_id=? AND n.knowledge_base_id=? AND n.node_id IN (SELECT value FROM json_each(?))
 ORDER BY n.created_at DESC,n.node_id`, strconv.FormatUint(tenant, 10), kb, string(body))
 	if err != nil {

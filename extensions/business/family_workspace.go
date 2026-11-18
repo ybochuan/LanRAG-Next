@@ -125,13 +125,12 @@ SELECT operation_id,actor_id,action,aggregate_id,status,occurred_at FROM (
 
 // FamilyWorkspace contains one tab of the workbench and the authoritative family header.
 type FamilyWorkspace struct {
-	Family     BusinessFamily           `json:"family"`
-	Projection *FamilyProjectionSetting `json:"projection,omitempty"`
-	View       string                   `json:"view"`
-	HasNext    bool                     `json:"has_next"`
-	Members    []WorkspaceMember        `json:"members,omitempty"`
-	Relations  []WorkspaceRelation      `json:"relations,omitempty"`
-	Activity   []WorkspaceActivity      `json:"activity,omitempty"`
+	Family    BusinessFamily      `json:"family"`
+	View      string              `json:"view"`
+	HasNext   bool                `json:"has_next"`
+	Members   []WorkspaceMember   `json:"members,omitempty"`
+	Relations []WorkspaceRelation `json:"relations,omitempty"`
+	Activity  []WorkspaceActivity `json:"activity,omitempty"`
 }
 
 // FamilyWorkspace reads one page within one scoped SQLite snapshot.
@@ -147,9 +146,6 @@ func (s *Service) FamilyWorkspace(ctx context.Context, c Command, view string) (
 		view = "members"
 	}
 	out := FamilyWorkspace{View: view}
-	if projection, e := s.FamilyProjection(ctx, c.Scope); e == nil {
-		out.Projection = &projection
-	}
 	if err := s.refreshFamilyAvailability(ctx, c.Scope, c.ID); err != nil {
 		return FamilyWorkspace{}, err
 	}

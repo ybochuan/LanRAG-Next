@@ -325,7 +325,7 @@ func (s *Service) applyFamilyReplacement(ctx context.Context, tx *sql.Tx, c Comm
 	if err != nil {
 		return Result{}, err
 	}
-	if err := enqueueFamilyProjectionIfEnabled(ctx, tx, c, now, []string{p.OldDocumentID, p.NewDocumentID}); err != nil {
+	if err := enqueueFamilyProjection(ctx, tx, c, now, []string{p.OldDocumentID, p.NewDocumentID}); err != nil {
 		return Result{}, err
 	}
 	return out, s.current(ctx, tx, c.Scope, p.NewDocumentID, p.NewVersionNodeID)

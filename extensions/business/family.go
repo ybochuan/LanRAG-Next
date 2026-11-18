@@ -130,7 +130,7 @@ func (s *Service) family(ctx context.Context, c Command) (Result, error) {
 				return Result{}, err
 			}
 		}
-		return out, enqueueFamilyProjectionIfEnabled(ctx, tx, c, now, []string{doc})
+		return out, enqueueFamilyProjection(ctx, tx, c, now, []string{doc})
 	})
 }
 

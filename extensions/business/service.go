@@ -38,7 +38,6 @@ type Payload struct {
 	BackfillFingerprint   string            `json:"backfill_fingerprint,omitempty"`
 	ReplacementIDs        []string          `json:"replacement_ids,omitempty"`
 	HistoryFingerprint    string            `json:"history_fingerprint,omitempty"`
-	ProjectionEnabled     *bool             `json:"projection_enabled,omitempty"`
 	TargetKnowledgeBaseID string            `json:"target_knowledge_base_id,omitempty"`
 	TargetDocumentID      string            `json:"target_document_id,omitempty"`
 	SessionID             string            `json:"session_id,omitempty"`
@@ -315,8 +314,6 @@ func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 		return s.applyFamilyReplacementHistory(ctx, c)
 	case "family_backfill_apply":
 		return s.applyLegacyFamily(ctx, c)
-	case "family_projection_set":
-		return s.setFamilyProjection(ctx, c)
 	case "family_suggestion_policy_set":
 		return s.setFamilySuggestionPolicy(ctx, c)
 	case "family_suggestion_scan":

@@ -7,7 +7,7 @@ export type BusinessKind = 'relation' | 'feedback' | 'guidance' | 'revision'
 export type BusinessSection = 'associations' | 'feedback-governance' | 'revisions'
 export type FamilyAction = 'family_create' | 'family_member_add' | 'family_member_remove'
   | 'family_replace_create' | 'family_replace_approve' | 'family_replace_cancel' | 'family_replace_history'
-  | 'family_head_recover' | 'family_backfill_apply' | 'family_projection_set'
+  | 'family_head_recover' | 'family_backfill_apply'
   | 'family_suggestion_scan' | 'family_suggestion_confirm' | 'family_suggestion_ignore' | 'family_suggestion_policy_set'
 export type BusinessAction = 'relation_declare' | 'relation_confirm' | 'relation_revoke'
   | 'repeal_create' | 'repeal_approve' | 'repeal_cancel'
@@ -29,7 +29,7 @@ export interface SplitPartRecord {
 }
 export interface BusinessPayload {
   family_label?: string; business_family_id?: string; family_revision?: number; reason?: string
-  legacy_family_id?: string; backfill_fingerprint?: string; projection_enabled?: boolean
+  legacy_family_id?: string; backfill_fingerprint?: string
   replacement_ids?: string[]; history_fingerprint?: string
   suggestion_policy?: Omit<SuggestionPolicy, 'revision'>
   document_id?: string; target_document_id?: string; target_knowledge_base_id?: string; edge_type?: string

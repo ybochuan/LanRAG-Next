@@ -17,7 +17,7 @@ func businessRead(action string) bool {
 	switch action {
 	case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
 		"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
-		"business_family_replacements", "business_family_backfill_plans", "business_family_projection", "business_family_workspace",
+		"business_family_replacements", "business_family_backfill_plans", "business_family_workspace",
 		"business_family_suggestions", "business_cleanup_list":
 		return true
 	default:
@@ -80,8 +80,6 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 		return b.FamilySuggestions(ctx, c)
 	case "family_backfill_plans":
 		return b.FamilyBackfillPlans(ctx, c)
-	case "family_projection":
-		return b.FamilyProjection(ctx, c.Scope)
 	case "rendition_bind":
 		return s.renditions.Bind(ctx, c.Scope, c.Payload.DocumentID, c.ID)
 	case "related":

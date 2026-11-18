@@ -27,6 +27,13 @@
 - **证据保留**：schema 35 新增 `ext_evidence_retention_runs` 审计表和相关索引；`extensions/retention/` 每日按 30 天剪除终态 run 的子表证据（receipts/audit/inputs/intents/steps）、快照证据和 tag 同步失败记录。run 头本身不删，因为 `ext_feedback_qa_bindings` 外键指向它；当前版本族的 root/current 版本证据受保护。配置 `AGENTRAG_EVIDENCE_RETENTION_DAYS=30` 与 `AGENTRAG_EVIDENCE_RETENTION_INTERVAL=24h`。
 - **共享空间成员通知**：Core `NotifyCleanupAlert` 在知识库创建者之外，还遍历 KB 分享和 org 成员，逐租户给代表用户写同一铃铛通知；`tenant:user` 去重。服务缺失或查询失败退化为仅创建者，不影响通知主路径。
 
+## 最终形态（2026-11-18 深夜）
+
+- **移除投影开关**：`family_projection_set`、投影开关表 `ext_business_family_projection_scopes` 及其读/写/UI 全面删除；业务族成员与发布头变化后自动向 Outbox 入队 `family_tag`，投影始终按当前业务族事实执行。
+- **环境初始化**：原生库知识库/文档/分块/标签/资源/会话/通知/审计清空，保留模型/存储/系统设置；扩展库 83 张业务表清空，schema 35 与完整性保留。
+- 凭证校验接受「知识库尚未创建」的空环境，干净安装可直接启动。
+- 清理审计表里的运行记录由服务运行时产生，不属于知识库数据。
+
 ## 限制
 
 - 清理只删除扩展表投影；原生文档、原件、FAQ 和向量索引不受影响。

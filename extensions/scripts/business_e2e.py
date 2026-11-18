@@ -744,10 +744,12 @@ def run_family_cutover(http, kb, emit, management_key, history, extension_db):
             raise RuntimeError("scope cutover misrepresented the two family identities")
 
     def settled():
-        status = read("family_projection")
-        if status["failed"]:
+        with sqlite3.connect(extension_db) as db:
+            pending = db.execute("SELECT count(*) FROM ext_projection_outbox WHERE projection_type='family_tag' AND status IN ('pending','processing')").fetchone()[0]
+            failed = db.execute("SELECT count(*) FROM ext_projection_outbox WHERE projection_type='family_tag' AND status='dead'").fetchone()[0]
+        if failed:
             raise RuntimeError("a family projection entered terminal failure")
-        return status["pending"] == 0
+        return pending == 0
 
     plans = read("family_backfill_plans", legacy)
     if len(plans) != 1 or plans[0]["status"] != "ready" or set(plans[0]["document_ids"]) != {old, new}:
@@ -763,18 +765,13 @@ def run_family_cutover(http, kb, emit, management_key, history, extension_db):
     if read("family_backfill_plans", legacy)[0]["mapped_business_family_id"] != family["id"]:
         raise RuntimeError("legacy ID mapping was not recorded")
     check_native_tags("gov:family:" + legacy)
-    enabled = write("family_projection_set", 0, {"projection_enabled": True, "second_confirmation": True})
     wait_until(settled, 30)
     check_graph(family["id"], plan["head_version_node_id"])
     check_native_tags("gov:family:" + family["id"])
-    write("family_projection_set", enabled["revision"], {"projection_enabled": False, "second_confirmation": True})
-    wait_until(settled, 30)
-    check_graph("", plan["head_version_node_id"])
-    check_native_tags("gov:family:" + legacy)
     with sqlite3.connect(extension_db) as db:
         if db.execute("PRAGMA foreign_key_check").fetchone():
             raise RuntimeError("family cutover left invalid foreign keys")
-    emit("[FAM-03] PASS: historical receipt, explicit replay-safe backfill, business head, reversible graph/tag cutover and preserved user labels")
+    emit("[FAM-03] PASS: historical receipt, explicit replay-safe backfill, business head, automatic graph/tag projection and preserved user labels")
 
 
 def run_split(http, kb, emit, extension_db, guidance_id):

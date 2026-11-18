@@ -30,11 +30,3 @@ WHERE NOT EXISTS (
     SELECT 1 FROM ext_business_document_family_heads h WHERE h.tenant_id=m.tenant_id
     AND h.knowledge_base_id=m.knowledge_base_id AND h.business_family_id=m.business_family_id
 );
-
-CREATE TABLE ext_business_family_projection_scopes (
-    tenant_id TEXT NOT NULL,
-    knowledge_base_id TEXT NOT NULL,
-    enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
-    revision INTEGER NOT NULL CHECK(revision > 0),
-    PRIMARY KEY(tenant_id,knowledge_base_id)
-);

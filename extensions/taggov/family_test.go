@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -30,7 +29,9 @@ INSERT INTO ext_revision_proposals(tenant_id,knowledge_base_id,proposal_id,sourc
 VALUES('7','kb-a','revision','doc-a','version-source','family-real','[]','body','hash','published',1,'key','doc-b','now','now'),
 ('7','kb-a','split-part','doc-a','version-source','family-part','[]','body','hash','published',1,'split-key','doc-c','now','now');
 INSERT INTO ext_revision_split_batches VALUES('7','kb-a','batch','doc-a','version-source','approved',2,'split-part','now');
-INSERT INTO ext_revision_split_parts VALUES('7','kb-a','batch','split-part',1,'Part','version-part');`); err != nil {
+INSERT INTO ext_revision_split_parts VALUES('7','kb-a','batch','split-part',1,'Part','version-part');
+INSERT INTO ext_business_document_families VALUES('7','kb-a','business','Business',1,'now','now');
+INSERT INTO ext_business_document_family_members VALUES('7','kb-a','doc-a','business');`); err != nil {
 			return err
 		}
 		return outbox.EnqueueTx(ctx, tx, item)
@@ -41,7 +42,7 @@ INSERT INTO ext_revision_split_parts VALUES('7','kb-a','batch','split-part',1,'P
 	businessTag := nativeTag{ID: "user-tag", Name: "用户标签", TenantID: 7, KBID: "kb-a"}
 	stateTag := nativeTag{ID: "state-tag", Name: "gov:state:superseded", TenantID: 7, KBID: "kb-a"}
 	oldTag := nativeTag{ID: "old-tag", Name: "gov:family:old", TenantID: 7, KBID: "kb-a"}
-	familyTag := nativeTag{ID: "native-family-tag", Name: "gov:family:family-real", TenantID: 7, KBID: "kb-a"}
+	familyTag := nativeTag{ID: "native-family-tag", Name: "gov:family:business", TenantID: 7, KBID: "kb-a"}
 	catalog := []nativeTag{businessTag, stateTag, oldTag}
 	var docTags []nativeTag // Unknown native tag load on first attempt.
 	creates, replaces := 0, 0
@@ -93,18 +94,12 @@ INSERT INTO ext_revision_split_parts VALUES('7','kb-a','batch','split-part',1,'P
 	}
 	defer writer.Close()
 	p := NewProjector(db, lifecycle.NewStore(db), NewMapping(db, api), writer)
-	if family, err := p.publishedFamily(ctx, Scope{TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: "doc-c"}); err != nil || family != "family-part" {
-		t.Fatalf("split part family = %q, %v", family, err)
+	if family, err := p.publishedFamily(ctx, Scope{TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: "doc-c"}); err == nil || family != "" {
+		t.Fatalf("unregistered split part must not be projected: %q, %v", family, err)
 	}
-	if err := p.Handle(ctx, item); !errors.Is(err, ErrAmbiguousTags) {
-		t.Fatalf("unknown tag list must refuse document replacement: %v", err)
-	}
-	mu.Lock()
-	if creates != 1 || replaces != 0 {
-		t.Error("catalog create or null protection failed")
-	}
+	// A stale payload is ignored; the projector uses current business membership
+	// and creates the governed family tag when it is missing from the catalog.
 	docTags = []nativeTag{businessTag, stateTag, oldTag}
-	mu.Unlock()
 	for range 2 {
 		if err := p.Handle(ctx, item); err != nil {
 			t.Fatal(err)
@@ -121,15 +116,13 @@ func TestBusinessFamilyProjectionReconcilesOnlyFamilyNamespace(t *testing.T) {
 	ctx := t.Context()
 	db := tagDatabase(t)
 	tags := fixtureStore()
-	tags.tags["legacy"] = Tag{ID: "legacy", Name: "gov:family:legacy"}
 	tags.tags["new"] = Tag{ID: "new", Name: "gov:family:business"}
-	tags.ids = append(tags.ids, "legacy")
+	tags.tags["legacy"] = Tag{ID: "legacy", Name: "gov:family:legacy"}
 	if err := db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO ext_lineage_node VALUES('observed','7','kb-a','document_version','doc-a','now');
 			INSERT INTO ext_document_version_family VALUES('chain','7','kb-a','doc-a','','observed','observed',1,'now','now');
 			INSERT INTO ext_business_document_families VALUES('7','kb-a','business','Business',1,'now','now');
-			INSERT INTO ext_business_document_family_members VALUES('7','kb-a','doc-a','business');
-			INSERT INTO ext_business_family_projection_scopes VALUES('7','kb-a',1,1)`)
+			INSERT INTO ext_business_document_family_members VALUES('7','kb-a','doc-a','business')`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -158,29 +151,15 @@ func TestBusinessFamilyProjectionReconcilesOnlyFamilyNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !equalIDs(tags.ids, []string{"business-a", "business-b", "old-state", "finance", "new"}) {
-		t.Fatal("cutover changed unrelated labels", tags.ids)
+		t.Fatal("projection changed unrelated labels", tags.ids)
 	}
-	if err := db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE ext_business_family_projection_scopes SET enabled=0,revision=2`)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Handle(ctx, intent); err != nil {
-		t.Fatal(err)
-	}
-	if !equalIDs(tags.ids, []string{"business-a", "business-b", "old-state", "finance"}) {
-		t.Fatal("rollback changed unrelated labels or left a new family label", tags.ids)
-	}
-	// An explicit removal while projection is disabled remains actionable
-	// even though there is no dedicated projection intent for that removal.
+	// An explicit removal is actionable without a dedicated projection intent.
 	tags.ids = append(tags.ids, "legacy")
 	if err := db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`DELETE FROM ext_business_document_family_members WHERE document_id='doc-a';
 			INSERT INTO ext_business_family_member_history
 			(tenant_id,knowledge_base_id,business_family_id,document_id,status,removed_at,reason)
-			VALUES('7','kb-a','business','doc-a','removed','now','explicit removal');
-			UPDATE ext_business_family_projection_scopes SET enabled=1,revision=3`)
+			VALUES('7','kb-a','business','doc-a','removed','now','explicit removal')`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -189,6 +168,6 @@ func TestBusinessFamilyProjectionReconcilesOnlyFamilyNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !equalIDs(tags.ids, []string{"business-a", "business-b", "old-state", "finance"}) {
-		t.Fatal("re-enabled projection did not reconcile the explicit removal", tags.ids)
+		t.Fatal("removal did not reconcile the family label", tags.ids)
 	}
 }

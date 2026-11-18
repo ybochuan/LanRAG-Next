@@ -283,7 +283,15 @@ def authenticate(result):
             return json.load(response)
     def verified(key):
         for kb in values["AGENTRAG_KB_IDS"].split(","):
-            call("GET", "/knowledge-bases/" + kb, {"X-API-Key": key})
+            if not kb.strip():
+                continue
+            try:
+                call("GET", "/knowledge-bases/" + kb, {"X-API-Key": key})
+            except urllib.error.HTTPError as missing:
+                # A fresh environment has no knowledge base yet; the machine
+                # credential is still valid and becomes scoped on first import.
+                if missing.code != 404:
+                    raise
     try:
         verified(values["AGENTRAG_WEKNORA_API_KEY"])
         Path(result).write_text("unchanged")

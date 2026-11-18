@@ -207,7 +207,7 @@ func (s *Service) applyFamilyReplacementHistory(ctx context.Context, c Command) 
 		if err := s.current(ctx, tx, c.Scope, last.NewDocumentID, last.NewVersionNodeID); err != nil {
 			return Result{}, err
 		}
-		if err := enqueueFamilyProjectionIfEnabled(ctx, tx, c, now, docs); err != nil {
+		if err := enqueueFamilyProjection(ctx, tx, c, now, docs); err != nil {
 			return Result{}, err
 		}
 		return Result{ID: c.ID, Revision: current.FamilyRevision + int64(len(current.Steps)),
