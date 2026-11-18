@@ -4,7 +4,7 @@
     <p v-if="kind==='revision'" class="subtle">填写完整的新 Markdown，提交后进入审核。自动发布支持在线 Markdown；上传文件先保存修订建议。</p>
     <p v-if="kind==='guidance'" class="subtle">种子指导立即进入指导清单；已触发主题复核的内容会进入隔离区。</p>
     <form @submit.prevent="submit">
-      <label v-if="kind==='revision'">发布方式
+      <label v-if="kind==='revision'">{{ $t('workbench.form.publishMode') }}
         <t-select v-model="revisionMode" :options="revisionModeOptions" :disabled="disabled" />
       </label>
       <p v-if="fixedDocument?.end==='source'" class="subtle">源文档 · {{ fixedDocument.title }}</p>
@@ -17,45 +17,45 @@
         </label>
         <p v-if="crossEligible&&crossKB" class="subtle">跨库规范性关联仅支持修订、解释和相关；相关候选需要显式确认。</p>
         <DocumentPicker v-model="form.target_document_id" :kb="crossEligible?(form.target_knowledge_base_id||kb):kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
-        <label v-if="form.edge_type==='related_to'&&crossEligible&&crossKB" class="check-label"><t-checkbox v-model="form.second_confirmation" :disabled="disabled">我确认这是跨库语义关联</t-checkbox></label>
+        <label v-if="form.edge_type==='related_to'&&crossEligible&&crossKB" class="check-label"><t-checkbox v-model="form.second_confirmation" :disabled="disabled">{{ $t('workbench.form.confirmCross') }}</t-checkbox></label>
       </template>
       <template v-if="kind==='relation'">
-        <label>关系类型<t-select v-model="form.edge_type" :options="relationTypeOptions" :disabled="disabled" /></label>
+        <label>{{ $t('workbench.form.relationType') }}<t-select v-model="form.edge_type" :options="relationTypeOptions" :disabled="disabled" /></label>
         <p class="subtle">{{ relationChoices.find(item => item.key === form.edge_type)?.direction }}</p>
-        <div v-if="form.edge_type==='related_to'" class="score-fields"><label>语义相似度<t-input-number v-model="form.similarity" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>声明信号<t-input-number v-model="form.declaration" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>结构信号<t-input-number v-model="form.structure" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label></div>
+        <div v-if="form.edge_type==='related_to'" class="score-fields"><label>{{ $t('workbench.form.similarity') }}<t-input-number v-model="form.similarity" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>{{ $t('workbench.form.declarationSignal') }}<t-input-number v-model="form.declaration" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>{{ $t('workbench.form.structureSignal') }}<t-input-number v-model="form.structure" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label></div>
         <template v-if="form.edge_type==='repeals'">
-          <label>废止生效时间（本机时区）<t-date-picker v-model="effectiveAtPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="disabled" clearable /></label>
+          <label>{{ $t('workbench.form.repealTime') }}<t-date-picker v-model="effectiveAtPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="disabled" clearable /></label>
           <p class="subtle">批准后按指定时点执行。生效后旧制度归档并退出普通检索。</p>
         </template>
         <template v-else-if="clauseMode">
-          <ClausePicker v-model="clauses.source_clause" :kb="kb" :document-id="form.document_id" label="源条款" :disabled="disabled" />
-          <ClausePicker v-model="clauses.target_clause" :kb="kb" :document-id="form.target_document_id" label="目标条款" :disabled="disabled" />
-          <label>适用范围与条件<t-textarea v-model="clauses.applies_when" :maxlength="4000" :autosize="{minRows:3}" :disabled="disabled" /></label>
+          <ClausePicker v-model="clauses.source_clause" :kb="kb" :document-id="form.document_id" :label="$t('workbench.form.sourceClause')" :disabled="disabled" />
+          <ClausePicker v-model="clauses.target_clause" :kb="kb" :document-id="form.target_document_id" :label="$t('workbench.form.targetClause')" :disabled="disabled" />
+          <label>{{ $t('workbench.form.scope') }}<t-textarea v-model="clauses.applies_when" :maxlength="4000" :autosize="{minRows:3}" :disabled="disabled" /></label>
         </template>
         <p v-else class="subtle">相关候选需要确认；评分低于 0.70 不进入有效关联查询。补充依赖请在生命周期的文档详情中维护。</p>
       </template>
       <template v-if="kind==='feedback' || kind==='guidance'">
-        <label>主题<t-input v-model="form.topic" :maxlength="128" :disabled="disabled" placeholder="例如：生效日期、适用范围" /></label>
-        <label v-if="kind==='feedback'">风险级别<t-select v-model="form.risk" :options="riskOptions" :disabled="disabled" /></label>
-        <label v-if="kind==='feedback'" class="check-label"><t-checkbox v-model="form.negative" :disabled="disabled">这是一次负面反馈</t-checkbox></label>
+        <label>{{ $t('workbench.form.subject') }}<t-input v-model="form.topic" :maxlength="128" :disabled="disabled" placeholder="例如：生效日期、适用范围" /></label>
+        <label v-if="kind==='feedback'">{{ $t('workbench.form.risk') }}<t-select v-model="form.risk" :options="riskOptions" :disabled="disabled" /></label>
+        <label v-if="kind==='feedback'" class="check-label"><t-checkbox v-model="form.negative" :disabled="disabled">{{ $t('workbench.form.negative') }}</t-checkbox></label>
       </template>
       <div v-if="kind==='revision'&&revisionMode==='split'" class="split-parts">
         <p class="subtle">提交 2–8 份完整 Markdown。整批审批后锁定内容，可逐份发布。首份正式发布时，旧制度退出普通检索。</p>
         <fieldset v-for="(part,index) in splitParts" :key="part.key" :disabled="disabled" class="split-part">
           <legend>分件 {{ index + 1 }}</legend>
-          <label>新制度标题<t-input v-model="part.title" :maxlength="120" /></label>
-          <label>完整正文<t-textarea v-model="part.text" :autosize="{minRows:6}" /></label>
-          <t-button v-if="splitParts.length>2" variant="text" size="small" @click="splitParts.splice(index,1)">移除此分件</t-button>
+          <label>{{ $t('workbench.form.newTitle') }}<t-input v-model="part.title" :maxlength="120" /></label>
+          <label>{{ $t('workbench.form.fullText') }}<t-textarea v-model="part.text" :autosize="{minRows:6}" /></label>
+          <t-button v-if="splitParts.length>2" variant="text" size="small" @click="splitParts.splice(index,1)">{{ $t('workbench.form.removePart') }}</t-button>
         </fieldset>
-        <t-button variant="outline" :disabled="disabled||splitParts.length>=8" @click="addSplitPart">添加分件</t-button>
+        <t-button variant="outline" :disabled="disabled||splitParts.length>=8" @click="addSplitPart">{{ $t('workbench.form.addPart') }}</t-button>
       </div>
-      <label v-else-if="kind!=='relation'">{{ kind==='revision'?'完整修订正文':'内容' }}<t-textarea v-model="form.text" :autosize="{minRows:kind==='revision'?12:5}" :disabled="disabled" :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
+      <label v-else-if="kind!=='relation'">{{ kind==='revision' ? $t('workbench.form.fullText') : $t('workbench.form.content') }}<t-textarea v-model="form.text" :autosize="{minRows:kind==='revision'?12:5}" :disabled="disabled" :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
       <fieldset v-if="kind==='revision'" :disabled="disabled"><legend>选用 1–3 条生效指导</legend>
         <t-alert v-if="guidanceError" role="alert" theme="error" class="notice">{{ guidanceError }}</t-alert>
         <label v-for="item in guidances.filter(v=>v.status==='active')" :key="item.id" class="guidance-choice"><t-checkbox :checked="selected.includes(item.id)" :disabled="disabled || (!selected.includes(item.id)&&selected.length>=3)" @change="toggleGuidance(item.id)"><span><strong>{{ item.topic }}</strong><small>{{ item.text }}</small></span></t-checkbox></label>
         <p v-if="!guidanceLoading&&!guidances.some(v=>v.status==='active')" class="subtle">本页没有生效指导，可翻页或先去反馈治理添加。</p>
-        <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">上一页</t-button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">下一页</t-button></div>
-        <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <t-button variant="text" size="small" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">移除</t-button></small>
+        <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">{{ $t('workbench.form.prev') }}</t-button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">{{ $t('workbench.form.next') }}</t-button></div>
+        <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <t-button variant="text" size="small" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">{{ $t('workbench.form.remove') }}</t-button></small>
       </fieldset>
       <t-button theme="primary" type="submit" :disabled="disabled || targetSideCrossBlocked || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</t-button>
     </form>
@@ -68,8 +68,10 @@ import DocumentPicker from './DocumentPicker.vue'
 import ClausePicker from './ClausePicker.vue'
 import { requestFence } from '../lifecycle/model'
 import { clauseRelation, relationChoices } from './model'
+import { useI18n } from 'vue-i18n'
 const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;knowledgeBases?:{id:string;name:string}[];initialGuidance?:string;fixedDocument?:{id:string;title:string;end:'source'|'target'}}>()
 const emit=defineEmits<{submit:[action:api.BusinessAction,payload:api.BusinessPayload]}>()
+const { t } = useI18n()
 const knowledgeBases=computed(()=>props.knowledgeBases||[])
 const form=reactive({document_id:'',target_document_id:'',target_knowledge_base_id:'',edge_type:'amends',effective_at:'',topic:'',risk:'medium',text:'',negative:false,similarity:0.8,declaration:0.8,structure:0.8,second_confirmation:false})
 const clauses=reactive({source_clause:undefined as api.ClauseAnchor|undefined,target_clause:undefined as api.ClauseAnchor|undefined,applies_when:''})
@@ -90,10 +92,10 @@ const effectiveAtPicker=computed({
   set:(value:string)=>{form.effective_at=value?value.replace(' ','T'):''},
 })
 // TDesign selects take data options; these mirror the previous <option> lists.
-const revisionModeOptions=[{label:'单件修订',value:'single'},{label:'拆分为多份新制度',value:'split'}]
-const targetKBOptions=computed(()=>[{label:'当前知识库',value:''},...(props.knowledgeBases||[]).filter(item=>item.id!==props.kb).map(item=>({label:item.name,value:item.id}))])
+const revisionModeOptions=computed(()=>[{label:t('workbench.form.singleRevision'),value:'single'},{label:t('workbench.form.splitRevision'),value:'split'}])
+const targetKBOptions=computed(()=>[{label:t('workbench.form.currentKb'),value:''},...(props.knowledgeBases||[]).filter(item=>item.id!==props.kb).map(item=>({label:item.name,value:item.id}))])
 const relationTypeOptions=computed(()=>relationChoices.map(item=>({label:item.label,value:item.key})))
-const riskOptions=[{label:'低风险 · 批准后等待 24 小时',value:'low'},{label:'中风险 · 人工批准后等待 48 小时',value:'medium'},{label:'高风险 · 人工批准后等待 72 小时并二次确认',value:'high'}]
+const riskOptions=computed(()=>[{label:t('workbench.form.riskLow'),value:'low'},{label:t('workbench.form.riskMedium'),value:'medium'},{label:t('workbench.form.riskHigh'),value:'high'}])
 const splitParts=ref([{key:0,title:'',text:''},{key:1,title:'',text:''}])
 let nextPartKey=2
 const selected=ref<string[]>([]),selectedLabels=ref(new Map<string,string>()),guidances=ref<api.BusinessRecord[]>([]),guidancePage=ref(1),guidanceLoading=ref(false),guidanceError=ref('')
