@@ -6,7 +6,7 @@ export interface Annotations { revision:number; effective_from?:string|null; eff
 export interface Rules {effective_delay_days:number;valid_days:number;review_days:number}
 export interface ResolvedRules {rules:Rules;source:{tenant_id:number;knowledge_base_id:string};revision:number;token:string}
 export interface DocumentFamily {id:string;label:string}
-export interface DocumentRow {document_id:string;title?:string;state:LifecycleState;last_event_id:string;annotations:Annotations;business_family?:DocumentFamily;degraded?:boolean;degraded_reason?:string}
+export interface DocumentRow {document_id:string;title?:string;native_title?:string;display_name?:string;mapping_status?:string;annex_original?:string;state:LifecycleState;last_event_id:string;annotations:Annotations;business_family?:DocumentFamily;degraded?:boolean;degraded_reason?:string}
 export type CleanupStatus='pending_cleanup'|'awaiting_confirmation'|'held'|'cleaned'|'failed'|'cancelled'
 export interface CleanupTask {tenant_id:number;knowledge_base_id:string;document_id:string;title?:string;native_deleted_at?:string;first_observed_at:string;cleanup_due_at:string;status:CleanupStatus;hold_until?:string;hold_reason?:string;last_error?:string;revision:number;cleaned_at?:string}
 export interface CleanupSummary {total:number;pending:number;awaiting:number;held:number;failed:number;due_soon:number}

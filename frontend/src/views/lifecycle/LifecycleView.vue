@@ -60,7 +60,7 @@
        <thead><tr><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('title')">{{ $t('workbench.list.colDocument') }}{{ sortMark('title') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('state')">{{ $t('workbench.list.colLifecycle') }}{{ sortMark('state') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('family')">{{ $t('workbench.list.colFamily') }}{{ sortMark('family') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('effective_until')">{{ $t('workbench.list.colEffectiveUntil') }}{{ sortMark('effective_until') }}</t-button></th></tr></thead>
        <tbody>
         <tr v-for="doc in sortedDocuments" :key="doc.document_id">
-         <td><t-button variant="text" class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</t-button></td>
+         <td><t-button variant="text" class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</t-button><t-tag v-if="doc.mapping_status" variant="light" size="small" :theme="doc.mapping_status==='confirmed'?'success':'warning'" class="annex-tag">{{ doc.mapping_status==='confirmed'?'附件':'待确认' }}</t-tag><span v-if="doc.native_title" class="annex-original">原文件：{{ doc.annex_original || doc.native_title }}</span></td>
          <td><t-tag variant="light" size="small" :theme="stateTagTheme(doc.state)">{{ stateLabels[doc.state] || doc.state }}</t-tag></td>
          <td>{{ doc.business_family?.label || $t('workbench.list.unassigned') }}</td><td>{{ date(doc.annotations.effective_until) }}</td>
         </tr>
@@ -367,6 +367,8 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
 </script>
 
 <style scoped>
+.annex-tag { margin-left:6px; }
+.annex-original { display:block; color:var(--td-text-color-secondary); font-size:var(--td-font-size-body-small); margin-top:2px; }
 .drawer-meta { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 .detail-tabs { flex-wrap:wrap; margin:16px 0 20px; }
 /* One heading scale for every section in the drawer, whatever component hosts

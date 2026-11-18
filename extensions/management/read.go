@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,10 @@ import (
 type document struct {
 	DocumentID     string                `json:"document_id"`
 	Title          string                `json:"title,omitempty"`
+	NativeTitle    string                `json:"native_title,omitempty"`
+	DisplayName    string                `json:"display_name,omitempty"`
+	MappingStatus  string                `json:"mapping_status,omitempty"`
+	AnnexOriginal  string                `json:"annex_original,omitempty"`
 	State          string                `json:"state"`
 	LastEventID    string                `json:"last_event_id"`
 	Annotations    lifecycle.Annotations `json:"annotations"`
@@ -29,6 +34,50 @@ type documentFamily struct {
 }
 
 // enrichDocumentFamilies uses confirmed membership, independently of legacy projections.
+// enrichAttachmentTitles overlays a recognised attachment name on documents
+// whose native title is a generic annex filename. The native title survives in
+// NativeTitle; confirmed/candidate mappings are surfaced for the UI.
+func (s *Server) enrichAttachmentTitles(ctx context.Context, r Request, documents []document) {
+	if len(documents) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(documents))
+	for _, d := range documents {
+		ids = append(ids, d.DocumentID)
+	}
+	semantics, err := s.db.AttachmentSemantics(ctx, r.TenantID, ids)
+	if err != nil || len(semantics) == 0 {
+		return
+	}
+	for i := range documents {
+		d := &documents[i]
+		sem, ok := semantics[d.DocumentID]
+		if !ok || sem.DisplayName == "" {
+			continue
+		}
+		if !isGenericAnnexTitle(d.Title) || strings.EqualFold(sem.DisplayName, d.Title) {
+			if d.Title != "" {
+				d.NativeTitle = d.Title
+			}
+			continue
+		}
+		d.NativeTitle = d.Title
+		d.Title = sem.DisplayName
+		d.DisplayName = sem.DisplayName
+		d.MappingStatus = sem.MappingStatus
+		d.AnnexOriginal = sem.OriginalFilename
+	}
+}
+
+func isGenericAnnexTitle(title string) bool {
+	t := strings.ToLower(strings.TrimSpace(title))
+	if !strings.HasPrefix(t, "annex-") {
+		return false
+	}
+	ext := filepath.Ext(t)
+	return ext != "" && len(t) > len("annex-")+len(ext)
+}
+
 func (s *Server) enrichDocumentFamilies(ctx context.Context, r Request, documents []document) error {
 	if len(documents) == 0 {
 		return nil
@@ -171,6 +220,10 @@ func (s *Server) overview(ctx context.Context, r Request) (any, error) {
 			ids[i].Annotations = snap.Annotations
 		}
 	}
+	// Attachments carry a generic native title (annex-N.docx). Overlay the
+	// recognised semantic name for display only; native title and permissions
+	// stay untouched.
+	s.enrichAttachmentTitles(ctx, r, ids)
 	rules, err := s.rules(ctx, r)
 	if err != nil {
 		return nil, err
