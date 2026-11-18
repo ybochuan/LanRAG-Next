@@ -2,8 +2,8 @@
   <main class="supervisor-page" aria-labelledby="supervisor-title">
     <header class="page-heading">
       <div class="title-block">
-        <h1 id="supervisor-title"><ResourceIcon type="server" :size="24" class="page-icon" />模型进程管理</h1>
-        <p class="page-subtitle">启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。</p>
+        <h1 id="supervisor-title"><ResourceIcon type="server" :size="24" class="page-icon" />{{ $t('workbench.supervisor.title') }}</h1>
+        <p class="page-subtitle">{{ $t('workbench.supervisor.subtitle') }}</p>
       </div>
       <div class="heading-actions">
         <t-button v-if="hasToken" variant="outline" @click="toggleTokenForm">

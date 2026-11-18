@@ -9293,6 +9293,34 @@ export default {
     },
   },
   workbench: {
+    "family": {
+      "title": "版本族",
+      "suggestions": "關聯建議",
+      "subtitle": "依業務主題管理版本、關係和治理記錄。",
+      "tabs": {
+        "members": "目前成員",
+        "unassigned": "未歸族",
+        "removed": "移出歷史",
+        "relations": "目前關係",
+        "history": "關係記錄",
+        "replacements": "版本更替",
+        "activity": "治理記錄",
+        "suggestions": "關聯建議"
+      }
+    },
+    "business": {
+      "associations": "關聯關係",
+      "feedback": "回饋審核",
+      "revisions": "修訂發佈",
+      "subAssociations": "維護修訂、解釋、引用、實施細則和範本，查看自動登記的附件歸屬。",
+      "subFeedback": "審閱回饋、管理指導，依風險確認生效。",
+      "subRevisions": "審核完整修訂內容，發佈單件修訂或逐份發佈拆分批次。",
+      "fallback": "業務治理"
+    },
+    "supervisor": {
+      "title": "模型進程管理",
+      "subtitle": "啟停本機的 llama-server 實例，並驗證它們的位址在 Core 一側確實可達。"
+    },
     "reviews": {
       "title": "待複核",
       "desc": "到期提醒不會自動改變文件狀態。調整複核日期後，由後台掃描更新提醒。",

@@ -9303,6 +9303,34 @@ export default {
     }
   },
   workbench: {
+    "family": {
+      "title": "Version family",
+      "suggestions": "Suggestions",
+      "subtitle": "Manage versions, relations and governance records by business topic.",
+      "tabs": {
+        "members": "Current members",
+        "unassigned": "Unassigned",
+        "removed": "Removal history",
+        "relations": "Current relations",
+        "history": "Relation records",
+        "replacements": "Replacements",
+        "activity": "Governance log",
+        "suggestions": "Suggestions"
+      }
+    },
+    "business": {
+      "associations": "Relations",
+      "feedback": "Feedback review",
+      "revisions": "Revisions",
+      "subAssociations": "Maintain amendments, interpretations, references, rules and templates; review auto-registered attachment ownership.",
+      "subFeedback": "Review feedback and manage guidance; confirm activation by risk.",
+      "subRevisions": "Review the full revision and publish a single amendment or a split batch.",
+      "fallback": "Business governance"
+    },
+    "supervisor": {
+      "title": "Model processes",
+      "subtitle": "Start and stop local llama-server instances and verify they are reachable from Core."
+    },
     "reviews": {
       "title": "Reviews",
       "desc": "Reminders do not change a document's state. After you adjust a review date, the background scan refreshes the reminder.",

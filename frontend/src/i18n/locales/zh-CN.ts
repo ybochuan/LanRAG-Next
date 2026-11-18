@@ -9296,6 +9296,34 @@ export default {
     }
   },
   workbench: {
+    "family": {
+      "title": "版本族",
+      "suggestions": "关联建议",
+      "subtitle": "按业务主题管理版本、关系和治理记录。",
+      "tabs": {
+        "members": "当前成员",
+        "unassigned": "未归族",
+        "removed": "移出历史",
+        "relations": "当前关系",
+        "history": "关系记录",
+        "replacements": "版本更替",
+        "activity": "治理记录",
+        "suggestions": "关联建议"
+      }
+    },
+    "business": {
+      "associations": "关联关系",
+      "feedback": "反馈审核",
+      "revisions": "修订发布",
+      "subAssociations": "维护修订、解释、引用、实施细则和模板，查看自动登记的附件归属。",
+      "subFeedback": "审阅反馈、管理指导，按风险确认生效。",
+      "subRevisions": "审核完整修订内容，发布单件修订或逐份发布拆分批次。",
+      "fallback": "业务治理"
+    },
+    "supervisor": {
+      "title": "模型进程管理",
+      "subtitle": "启停本机的 llama-server 实例，并验证它们的地址在 Core 一侧确实可达。"
+    },
     "reviews": {
       "title": "待复核",
       "desc": "到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。",

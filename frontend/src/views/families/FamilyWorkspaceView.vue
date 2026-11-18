@@ -1,7 +1,7 @@
 <template>
   <section class="business-page family-workspace" :class="{ 'embedded-family': scope }">
     <header class="page-heading">
-      <div><h2>{{ initialView==='suggestions' ? '关联建议' : '版本族' }}</h2><p v-if="!documentId">按业务主题管理版本、关系和治理记录。</p></div>
+      <div><h2>{{ initialView==='suggestions' ? $t('workbench.family.suggestions') : $t('workbench.family.title') }}</h2><p v-if="!documentId">{{ $t('workbench.family.subtitle') }}</p></div>
       <t-button variant="outline" :loading="busy" :disabled="locked" @click="refresh">刷新</t-button>
     </header>
     <section class="scope-bar" aria-label="工作范围">
@@ -48,10 +48,10 @@
       <nav v-if="visibleTabs.length > 1" class="sub-tabs" aria-label="文档族视图">
         <button v-for="item in visibleTabs" :key="item.key" type="button" :class="{selected:tab===item.key}"
           :aria-pressed="tab===item.key" :disabled="locked || (!familyId && item.key!=='unassigned')"
-          @click="tab=item.key">{{ item.label }}</button>
+          @click="tab=item.key">{{ $t(item.labelKey) }}</button>
       </nav>
       <div class="workspace-grid">
-        <section class="panel" :aria-label="tabs.find(item=>item.key===tab)?.label">
+        <section class="panel" :aria-label="currentTabLabel">
           <div v-if="busy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取工作台…</span></div>
           <template v-else>
             <template v-if="tab==='members' || tab==='removed' || tab==='unassigned'">
@@ -193,22 +193,27 @@ import { authority, type LifecycleState } from '@/api/lifecycle'
 import { documentTitles, write, type BusinessAction, type BusinessBody, type BusinessPayload, type FamilyAction } from '@/api/business'
 import * as api from '@/api/families'
 import { useAuthStore } from '@/stores/auth'
+import { useI18n } from 'vue-i18n'
 import { actionLabels, actionsFor, buildIntent, date, edgeLabels, httpStatus, shortID, statusLabels } from '../business/model'
 import CreateForm from '../business/CreateForm.vue'
 import DocumentPicker from '../business/DocumentPicker.vue'
 import { requestFence, stateLabels } from '../lifecycle/model'
 import FamilyDocumentPanel from './FamilyDocumentPanel.vue'
 import FamilySuggestionPanel from './FamilySuggestionPanel.vue'
-import '../business/business.css'
 
 const props = defineProps<{ scope?:string; documentId?:string; currentFamily?:string; initialView?:api.FamilyTab; canWrite?:boolean }>()
 const emit = defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string]; changed:[]; locked:[value:boolean] }>()
 
-const tabs: {key:api.FamilyTab; label:string}[] = [
-  {key:'members',label:'当前成员'}, {key:'unassigned',label:'未归族'}, {key:'removed',label:'移出历史'},
-  {key:'relations',label:'当前关系'}, {key:'history',label:'关系记录'}, {key:'replacements',label:'版本更替'},
-  {key:'activity',label:'治理记录'}, {key:'suggestions',label:'关联建议'},
+const tabs: {key:api.FamilyTab; labelKey:string}[] = [
+  {key:'members',labelKey:'workbench.family.tabs.members'}, {key:'unassigned',labelKey:'workbench.family.tabs.unassigned'}, {key:'removed',labelKey:'workbench.family.tabs.removed'},
+  {key:'relations',labelKey:'workbench.family.tabs.relations'}, {key:'history',labelKey:'workbench.family.tabs.history'}, {key:'replacements',labelKey:'workbench.family.tabs.replacements'},
+  {key:'activity',labelKey:'workbench.family.tabs.activity'}, {key:'suggestions',labelKey:'workbench.family.tabs.suggestions'},
 ]
+const { t } = useI18n()
+const currentTabLabel = computed(() => {
+  const hit = tabs.find(item => item.key === tab.value)
+  return hit ? t(hit.labelKey) : ''
+})
 const visibleTabs = computed(() => props.documentId
   ? tabs.filter(item => props.initialView==='suggestions' ? item.key==='suggestions' : ['members','removed','replacements','activity'].includes(item.key))
   : tabs)

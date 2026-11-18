@@ -9297,6 +9297,34 @@ export default {
     }
   },
   workbench: {
+    "family": {
+      "title": "バージョンファミリー",
+      "suggestions": "関連提案",
+      "subtitle": "業務テーマごとにバージョン、関係、ガバナンス記録を管理します。",
+      "tabs": {
+        "members": "現在のメンバー",
+        "unassigned": "未分類",
+        "removed": "除外履歴",
+        "relations": "現在の関係",
+        "history": "関係記録",
+        "replacements": "バージョン更新",
+        "activity": "ガバナンス記録",
+        "suggestions": "関連提案"
+      }
+    },
+    "business": {
+      "associations": "関連",
+      "feedback": "フィードバック審査",
+      "revisions": "改訂公開",
+      "subAssociations": "改訂・解釈・引用・実施細則・テンプレートを維持し、自動登録された添付の帰属を確認します。",
+      "subFeedback": "フィードバックを審査し指導を管理し、リスクに応じて有効化します。",
+      "subRevisions": "改訂内容全体を審査し、単一改訂または分割バッチを公開します。",
+      "fallback": "業務ガバナンス"
+    },
+    "supervisor": {
+      "title": "モデルプロセス",
+      "subtitle": "ローカルの llama-server を起動・停止し、Core から到達可能か確認します。"
+    },
     "reviews": {
       "title": "レビュー待ち",
       "desc": "リマインダーはドキュメントの状態を変更しません。レビュー日を変更すると、バックグラウンドスキャンがリマインダーを更新します。",

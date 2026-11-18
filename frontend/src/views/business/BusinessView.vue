@@ -181,14 +181,16 @@ import CreateForm from './CreateForm.vue'
 import BinaryRevisionPanel from './BinaryRevisionPanel.vue'
 import DocumentPicker from './DocumentPicker.vue'
 import { requestFence } from '../lifecycle/model'
+import { useI18n } from 'vue-i18n'
 import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, sampleReviewPending, shortID, statusLabels, type WriteIntent } from './model'
 
 const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
+const { t }=useI18n()
 const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string]}>()
-const sections=[{key:'associations',label:'关联关系'},{key:'feedback-governance',label:'反馈审核'},{key:'revisions',label:'修订发布'}]
+const sections=[{key:'associations',labelKey:'workbench.business.associations'},{key:'feedback-governance',labelKey:'workbench.business.feedback'},{key:'revisions',labelKey:'workbench.business.revisions'}]
 const riskLabels:Record<string,string>={low:'低风险',medium:'中风险',high:'高风险'}
-const heading=computed(()=>sections.find(v=>v.key===props.section)?.label||'业务治理')
-const subtitle=computed(()=>props.section==='associations'?'维护修订、解释、引用、实施细则和模板，查看自动登记的附件归属。':props.section==='revisions'?'审核完整修订内容，发布单件修订或逐份发布拆分批次。':'审阅反馈、管理指导，按风险确认生效。')
+const heading=computed(()=>{const hit=sections.find(v=>v.key===props.section);return hit?t(hit.labelKey):t('workbench.business.fallback')})
+const subtitle=computed(()=>props.section==='associations'?t('workbench.business.subAssociations'):props.section==='revisions'?t('workbench.business.subRevisions'):t('workbench.business.subFeedback'))
 const feedbackTab=ref<'feedback'|'guidance'>('feedback')
 const feedbackStatus=ref('pending_review')
 // TDesign option list and tag colouring for the feedback status filter.

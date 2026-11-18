@@ -9297,6 +9297,34 @@ export default {
     }
   },
   workbench: {
+    "family": {
+      "title": "버전 패밀리",
+      "suggestions": "연관 제안",
+      "subtitle": "업무 주제별로 버전, 관계 및 거버넌스 기록을 관리합니다.",
+      "tabs": {
+        "members": "현재 구성원",
+        "unassigned": "미분류",
+        "removed": "이동 이력",
+        "relations": "현재 관계",
+        "history": "관계 기록",
+        "replacements": "버전 교체",
+        "activity": "거버넌스 기록",
+        "suggestions": "연관 제안"
+      }
+    },
+    "business": {
+      "associations": "관계",
+      "feedback": "피드백 검토",
+      "revisions": "개정 발행",
+      "subAssociations": "개정, 해석, 인용, 시행 세칙 및 템플릿을 관리하고 자동 등록된 첨부 소유권을 확인합니다.",
+      "subFeedback": "피드백을 검토하고 지침을 관리하며 위험도에 따라 활성화합니다.",
+      "subRevisions": "전체 개정 내용을 검토하고 단일 개정 또는 분할 배치를 발행합니다.",
+      "fallback": "업무 거버넌스"
+    },
+    "supervisor": {
+      "title": "모델 프로세스",
+      "subtitle": "로컬 llama-server 인스턴스를 시작·중지하고 Core에서 접근 가능한지 확인합니다."
+    },
     "reviews": {
       "title": "검토 대기",
       "desc": "알림은 문서 상태를 변경하지 않습니다. 검토 날짜를 조정하면 백그라운드 스캔이 알림을 갱신합니다.",
