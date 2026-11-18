@@ -70,7 +70,10 @@ export function fixture(
       .replace('return __returned__', '__expose(__returned__); return __returned__')
     const require = createRequire(file)
     const compiled = evaluate(script, {
-      vue, '@/utils/assistantDataChange': dataChange, '@/utils/polling': polling, ...dependencies,
+      vue, '@/utils/assistantDataChange': dataChange, '@/utils/polling': polling,
+      // Components wire $t for i18n; the fixture only needs the keys echoed back.
+      'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+      ...dependencies,
     }, name => {
       if (name.endsWith('.vue')) return { default: {} }
       if (name.startsWith('.')) return require(name)

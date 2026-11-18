@@ -25,6 +25,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { overview, type DocumentRow } from '@/api/lifecycle'
 import { requestFence } from '../lifecycle/model'
+import { cached, cacheKey } from '@/api/requestCache'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ kb: string; modelValue: string; label: string; disabled?: boolean; exclude?: string; searchable?: boolean; selectedTitle?: string; showIdentity?: boolean }>()
@@ -63,7 +64,10 @@ async function load() {
   truncated.value = false
   serverMode.value = false
   try {
-    const first = await overview(kb, 1, 'active', '', PAGE_SIZE)
+    // Cache the first page per tenant and KB: reopening the drawer for the same
+    // KB must not refetch it, and a tenant switch must not reuse the old list.
+    const tenant = (() => { try { return localStorage.getItem('weknora_selected_tenant_id') || '' } catch { return '' } })()
+    const first = await cached(cacheKey('document-picker-active', tenant, kb, 1), () => overview(kb, 1, 'active', '', PAGE_SIZE))
     if (!fence.current(token)) return
     total.value = first.total
     if (first.total > SERVER_THRESHOLD) {
@@ -122,7 +126,8 @@ async function searchServer() {
   }
 }
 watch(keyword, () => {
-  if (!serverMode.value) return
+  // Every keyword change is answered by the server (debounced); the client-side
+  // filter only narrows what is already on screen.
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => { void searchServer() }, 350)
 })

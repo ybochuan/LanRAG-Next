@@ -230,13 +230,11 @@ test('DocumentPicker searches active titles from page one without reusing unfilt
     '@/api/requestCache': requestCache,
   }, { kb: 'kb-a', modelValue: '', label: 'document', searchable: true })
   await flush()
-  picker.vm.move(1)
+  picker.vm.keyword = ' 管理办法 '
   await flush()
-  picker.vm.title = ' 管理办法 '
+  t.mock.timers.tick(350)
   await flush()
-  t.mock.timers.tick(300)
-  await flush()
-  assert.deepEqual(calls.at(-1), ['kb-a', 1, 'active', '管理办法'])
+  assert.deepEqual(calls.at(-1), ['kb-a', 1, 'active', '管理办法', 50])
 })
 
 test('lifecycle saves invalidate the document picker cache', async (t) => {

@@ -141,7 +141,7 @@ details > summary::before {
   border-left:6px solid currentColor;
   border-top:4px solid transparent;
   border-bottom:4px solid transparent;
-  transition:transform .15s ease;
+  transition:transform var(--app-motion-fast) ease;
 }
 details[open] > summary::before { transform:rotate(90deg); }
 </style>

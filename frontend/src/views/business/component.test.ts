@@ -18,6 +18,7 @@ function mountSetup(api: Record<string, unknown>, lifecycle: Record<string, unkn
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
     'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({}), onBeforeRouteLeave: (guard: () => boolean) => guards.push(guard), onBeforeRouteUpdate: (guard: () => boolean) => guards.push(guard) },
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
+    'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }) },
     '@/api/lifecycle': { overview: async () => { overviewCalls++; return { can_write: true, documents: [] } }, ...lifecycle },
     '@/api/business': { documentTitle: async () => '', ...api },
