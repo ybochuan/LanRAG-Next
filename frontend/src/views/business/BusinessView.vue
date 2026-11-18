@@ -21,7 +21,7 @@
           <DocumentPicker :key="kb" v-model="queryDocument" :kb="kb" label="查询文档" :selected-title="docName(queryDocument, queryScope||kb)" searchable />
           <t-button theme="primary" type="submit" :loading="querying" :disabled="!queryDocument">查询关联</t-button>
         </form>
-        <p v-if="querying" role="status">正在核对关联…</p>
+        <div v-if="querying" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在核对关联…</span></div>
         <t-alert v-if="queryError" theme="error" class="notice">{{ queryError }}</t-alert>
         <template v-if="queryResult">
           <p role="status">{{ docName(queryDocument, queryScope||kb) }} · {{ queryResult.length }} 条有效关联</p>
@@ -31,13 +31,13 @@
               <t-button variant="text" size="small" :aria-label="`查询 ${docName(row.document_id, row.knowledge_base_id)} 的关联`" @click="inspectRelated(row.document_id, row.knowledge_base_id)">继续查询</t-button>
             </li>
           </ul>
-          <p v-else class="empty">当前没有满足条件的有效关联。</p>
+          <t-empty v-else class="empty" description="当前没有满足条件的有效关联。" />
         </template>
       </section>
       <div class="workspace-grid">
         <section class="panel records-panel" aria-label="治理记录">
           <div class="section-heading"><h2>{{ kind==='relation'?'关联记录':kind==='feedback'?'反馈记录':kind==='guidance'?'指导清单':'修订提案' }}</h2><span class="subtle">本页 {{ records.length }} 项</span></div>
-          <p v-if="loading" role="status">正在读取记录…</p>
+          <div v-if="loading" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取记录…</span></div>
           <div v-else class="record-list"><div v-for="row in records" :key="row.id" class="record-card" :class="{chosen:detail?.id===row.id}" role="button" tabindex="0" @click="openRecord(row)" @keydown.enter="openRecord(row)"><span class="record-top"><strong>{{ recordTitle(row) }}</strong><t-tag variant="light" size="small" :theme="statusTagTheme(row.status)">{{ stateLabel(row) }}</t-tag></span><span v-if="kind==='relation'" class="subtle">{{ docName(row.document_id, row.knowledge_base_id || kb) }} → {{ docName(row.target_document_id, row.target_knowledge_base_id || kb) }}</span><span v-else class="record-summary">{{ row.text||row.proposed_patch }}</span><small>{{ shortID(row.id) }} · 版本 {{ row.revision }}<template v-if="row.ready_at"> · 冷静期至 {{ date(row.ready_at) }}</template></small></div>
             <p v-if="!records.length" class="empty">{{ kind==='feedback'&&feedbackStatus ? '此状态下没有反馈。可切到「全部状态」查看其他记录。' : '当前还没有记录。' }}</p>
           </div>
@@ -47,7 +47,7 @@
         <section v-else-if="detail" class="panel detail-panel" aria-label="记录详情">
           <div class="section-heading"><h2 ref="detailHeading" tabindex="-1">{{ recordTitle(detail) }}</h2><t-button variant="text" @click="detail=undefined">关闭详情</t-button></div>
           <t-tag variant="light" :theme="statusTagTheme(detail.status)">{{ stateLabel(detail) }}</t-tag><dl><dt>记录编号</dt><dd><code>{{ detail.id }}</code></dd><dt>当前版本</dt><dd>{{ detail.revision }}</dd><template v-if="detail.topic"><dt>主题</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>风险</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>冷静期至</dt><dd>{{ date(detail.ready_at) }}</dd></template><template v-if="detail.document_id||detail.source_document_id"><dt>源文档</dt><dd>{{ docName(detail.document_id||detail.source_document_id, detail.knowledge_base_id || kb) }}</dd></template><template v-if="detail.target_document_id"><dt>{{ kind==='revision'?'发布的新文档':'关联文档' }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || kb) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>评分</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template><template v-if="detail.edge_type==='attachment_of'&&(detail.effective_from||detail.effective_until)"><dt>主件生效日期</dt><dd>{{ date(detail.effective_from) }}<template v-if="detail.effective_until"> 至 {{ date(detail.effective_until) }}</template></dd></template></dl>
-          <p v-if="detail.publish_error" class="notice" role="status">{{ publicationError(detail.publish_error) }}</p>
+          <t-alert v-if="detail.publish_error" theme="info" class="notice" role="status">{{ publicationError(detail.publish_error) }}</t-alert>
           <template v-if="kind==='feedback' && detail.source==='qa'">
             <section v-if="detail.feedback_context" class="feedback-excerpt">
               <h3>提交的问答摘录</h3>
@@ -84,7 +84,7 @@
               </div>
               <p v-if="part.target_document_id" class="subtle">目标文档 · {{ docName(part.target_document_id, part.target_knowledge_base_id || detail.knowledge_base_id || kb) }}</p>
               <pre class="content-preview">{{ part.proposed_patch }}</pre>
-              <p v-if="part.publish_error" class="notice" role="status">{{ publicationError(part.publish_error) }}</p>
+              <t-alert v-if="part.publish_error" theme="info" class="notice" role="status">{{ publicationError(part.publish_error) }}</t-alert>
               <t-button v-if="detail.status==='approved'&&actionsFor(kind,part,canWrite,now).includes('revision_publish')"
                 theme="primary" :disabled="running||!!pending"
                 @click="beginWrite('revision_publish',{}, {...part,record_kind:'split_part',split_id:detail.id,split_title:part.title})">
@@ -102,10 +102,10 @@
               <dt>废止生效时间</dt><dd>{{ date(detail.effective_at) }}</dd>
               <template v-if="detail.applied_at"><dt>实际执行时间</dt><dd>{{ date(detail.applied_at) }}</dd></template>
             </dl>
-            <p v-if="detail.status==='needs_review'" class="notice">文档版本或状态已变化。核对两份文档后重新提交。</p>
+            <t-alert v-if="detail.status==='needs_review'" theme="info" class="notice">文档版本或状态已变化。核对两份文档后重新提交。</t-alert>
           </template>
           <template v-else-if="clauseRelation(detail.edge_type)">
-            <p v-if="!detail.pins_current" class="notice">锁定版本已变化或失效。此条款关系仅作历史记录。</p>
+            <t-alert v-if="!detail.pins_current" theme="info" class="notice">锁定版本已变化或失效。此条款关系仅作历史记录。</t-alert>
             <ClauseEvidence v-if="detail.source_clause&&detail.document_id&&detail.source_version_id" :kb="kb" :document-id="detail.document_id" :version="detail.source_version_id" :anchor="detail.source_clause" :current="detail.pins_current===true" label="源条款" />
             <ClauseEvidence v-if="detail.target_clause&&detail.target_document_id&&detail.target_version_id" :kb="kb" :document-id="detail.target_document_id" :version="detail.target_version_id" :anchor="detail.target_clause" :current="detail.pins_current===true" label="目标条款" />
             <h4>适用范围与条件</h4>
@@ -145,7 +145,7 @@
             <p v-if="!canWrite" class="subtle">当前账号仅有查看权限。</p>
           </section>
           <p v-else-if="kind==='feedback'&&detail.sample_decision" class="subtle">抽样复核 · {{ sampleLabels[detail.sample_decision] || detail.sample_decision }}</p>
-          <p v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" class="notice">尚在冷静期，达到上面的时间后可激活指导。</p>
+          <t-alert v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" theme="info" class="notice">尚在冷静期，达到上面的时间后可激活指导。</t-alert>
           <div class="actions"><t-button v-for="action in actionsFor(kind,detail,canWrite,now)" :key="action"
             :theme="PRIMARY_ACTIONS.includes(action)?'primary':'default'"
             :disabled="running||!!pending||(action==='clause_resolve'&&(!clauseDecision||!clauseDecisionNote.trim()))||(action==='feedback_approve'&&!!detail.feedback_context&&!validGuidance)"

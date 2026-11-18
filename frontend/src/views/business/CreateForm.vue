@@ -10,7 +10,7 @@
       <p v-if="fixedDocument?.end==='source'" class="subtle">源文档 · {{ fixedDocument.title }}</p>
       <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
       <p v-if="fixedDocument?.end==='target'" class="subtle">关联文档 · {{ fixedDocument.title }}</p>
-      <p v-if="fixedDocument?.end==='target'&&kind==='relation'" class="notice">当前从目标文档创建关系，仅支持同库关联。跨库关系请前往源文档所在知识库发起；此入口已禁用。</p>
+      <t-alert v-if="fixedDocument?.end==='target'&&kind==='relation'" theme="info" class="notice">当前从目标文档创建关系，仅支持同库关联。跨库关系请前往源文档所在知识库发起；此入口已禁用。</t-alert>
       <template v-if="kind==='relation'&&fixedDocument?.end!=='target'">
         <label v-if="crossEligible" class="target-kb">目标知识库
           <t-select v-model="form.target_knowledge_base_id" :options="targetKBOptions" :disabled="disabled" />
@@ -51,7 +51,7 @@
       </div>
       <label v-else-if="kind!=='relation'">{{ kind==='revision'?'完整修订正文':'内容' }}<t-textarea v-model="form.text" :autosize="{minRows:kind==='revision'?12:5}" :disabled="disabled" :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
       <fieldset v-if="kind==='revision'" :disabled="disabled"><legend>选用 1–3 条生效指导</legend>
-        <p v-if="guidanceError" role="alert" class="notice error">{{ guidanceError }}</p>
+        <t-alert v-if="guidanceError" role="alert" theme="error" class="notice">{{ guidanceError }}</t-alert>
         <label v-for="item in guidances.filter(v=>v.status==='active')" :key="item.id" class="guidance-choice"><t-checkbox :checked="selected.includes(item.id)" :disabled="disabled || (!selected.includes(item.id)&&selected.length>=3)" @change="toggleGuidance(item.id)"><span><strong>{{ item.topic }}</strong><small>{{ item.text }}</small></span></t-checkbox></label>
         <p v-if="!guidanceLoading&&!guidances.some(v=>v.status==='active')" class="subtle">本页没有生效指导，可翻页或先去反馈治理添加。</p>
         <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">上一页</t-button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">下一页</t-button></div>

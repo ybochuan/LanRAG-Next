@@ -176,6 +176,8 @@
 .business-page .workspace-grid + .panel{
   margin-top:16px
 }
+/* Inline loading row used across the workbench. */
+.wb-loading{display:inline-flex;align-items:center;gap:8px;color:var(--td-text-color-secondary);font-size:var(--td-font-size-body-medium)}
 .business-page .subtle,.business-page small{
   font-size:var(--td-font-size-body-small);
   font-weight:normal;

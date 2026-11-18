@@ -5,9 +5,9 @@
       <t-button v-if="canWrite" variant="outline" :loading="queued" :disabled="disabled" @click="$emit('scan')">扫描本库</t-button>
     </div>
     <p class="subtle">建议根据同库文档的标题、提及和分块证据产生。配置本地模型的库还可使用标题语义。请核对方向与依据后再确认。</p>
-    <p v-if="queued" role="status">后台正在扫描，现有文档操作可继续使用。</p>
-    <p v-else-if="inbox.scan_status==='failed'" role="status">上次扫描未完成，可再次扫描。</p>
-    <p v-else-if="!inbox.items.length" class="empty">本页没有待确认建议。</p>
+    <div v-if="queued" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>后台正在扫描，现有文档操作可继续使用。</span></div>
+    <div v-else-if="inbox.scan_status==='failed'" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>上次扫描未完成，可再次扫描。</span></div>
+    <t-empty v-else-if="!inbox.items.length" class="empty" description="本页没有待确认建议。" />
     <t-button v-if="canWrite && selected.length" theme="primary" :disabled="disabled" @click="confirmSelected">
       批量确认（{{ selected.length }}）
     </t-button>

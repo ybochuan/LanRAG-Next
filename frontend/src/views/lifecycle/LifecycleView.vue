@@ -6,10 +6,10 @@
   </header>
   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
   <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="loadAll">重新载入</t-button></t-alert>
-  <p v-if="data?.degraded" class="notice" role="status">{{ degradedMessage }}</p>
-  <div v-if="loadingKB" class="empty" role="status">正在加载知识库…</div>
-  <div v-else-if="!knowledgeBases.length && !error" class="empty">还没有可访问的知识库。创建或加入知识库后即可管理文档。</div>
-  <div v-else-if="!kb" class="empty">请选择一个知识库。</div>
+  <t-alert v-if="data?.degraded" theme="info" class="notice" role="status">{{ degradedMessage }}</t-alert>
+  <t-empty v-if="loadingKB" class="empty" role="status" description="正在加载知识库…" />
+  <t-empty v-else-if="!knowledgeBases.length && !error" class="empty" description="还没有可访问的知识库。创建或加入知识库后即可管理文档。" />
+  <t-empty v-else-if="!kb" class="empty" description="请选择一个知识库。" />
   <template v-if="kb">
    <div class="tabs" role="tablist" aria-label="工作台视图">
     <button v-for="item in tabs" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :aria-controls="`panel-${item.key}`" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">{{ item.label }}</button>
@@ -64,8 +64,8 @@
     <nav class="tabs detail-tabs" aria-label="文档详情标签">
      <button v-for="item in detailTabs" :key="item.key" type="button" :disabled="detailLocked" :aria-pressed="detailTab===item.key" :class="{selected:detailTab===item.key}" @click="detailTab=item.key">{{ item.label }}</button>
     </nav>
-    <p v-if="detailBusy && !detail" role="status">正在加载文档…</p>
-    <p v-if="detailError" class="notice error" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">重新载入</t-button></p>
+    <div v-if="detailBusy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在加载文档…</span></div>
+    <t-alert v-if="detailError" theme="error" class="notice" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">重新载入</t-button></t-alert>
     <template v-if="detail">
      <template v-if="detailTab==='life'">
       <h3>有效期与复核</h3>
@@ -75,7 +75,7 @@
        <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
        <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
        <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
-       <p v-if="documentSuccess" class="notice success" role="status">{{ documentSuccess }}</p>
+       <t-alert v-if="documentSuccess" theme="success" class="notice" role="status">{{ documentSuccess }}</t-alert>
        <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
       </form>
      </template>
@@ -95,7 +95,7 @@
       <p v-if="detail.events_truncated" class="source-note">仅展示最近 100 条事件。</p>
      <h3>关联与版本操作</h3>
      <p v-if="activityError" role="alert">{{ activityError }} <t-button variant="text" size="small" @click="loadActivity">重试</t-button></p>
-     <p v-else-if="activityBusy" role="status">正在读取治理记录…</p>
+     <div v-else-if="activityBusy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取治理记录…</span></div>
      <ol v-else-if="activity.length" class="timeline"><li v-for="event in activity" :key="event.operation_id">
       <strong>{{ governanceAction(event.action) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ statusLabels[event.status] || event.status }}</p>
      </li></ol>

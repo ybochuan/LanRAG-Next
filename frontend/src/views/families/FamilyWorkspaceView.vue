@@ -20,8 +20,8 @@
       <t-button theme="primary" :disabled="!canWrite" @click="perform">重试原请求</t-button>
       <t-button variant="outline" @click="pending=undefined; refresh()">结束重试并刷新</t-button>
     </section>
-    <p v-if="catalogBusy" role="status">正在读取知识库…</p>
-    <p v-else-if="!scope && !bases.length" class="empty">还没有可访问的知识库。</p>
+    <div v-if="catalogBusy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取知识库…</span></div>
+    <t-empty v-else-if="!scope && !bases.length" class="empty" description="还没有可访问的知识库。" />
     <template v-if="kb">
       <form v-if="canWrite && initialView!=='suggestions'" class="panel family-create" @submit.prevent="createFamily">
         <label>新版本族名称<t-input v-model="newLabel" :maxlength="120" placeholder="例如：员工手册" :disabled="locked" /></label>
@@ -35,13 +35,13 @@
           <RouterLink v-if="family.published_version_node_id" :to="{path:'/platform/lineage',query:{kb,mode:'version-ancestry',id:family.published_version_node_id}}">版本历史</RouterLink>
         </p>
         <p v-else>尚未确认发布头。</p>
-        <p v-if="family.published_document_id && family.published_head_availability==='missing'" class="notice error" role="alert">当前发布件在原生文档中不可用。请从当前成员中选择新的发布头并显式确认恢复。</p>
+        <t-alert v-if="family.published_document_id && family.published_head_availability==='missing'" theme="error" class="notice" role="alert">当前发布件在原生文档中不可用。请从当前成员中选择新的发布头并显式确认恢复。</t-alert>
       </section>
       <section v-if="family && projection" class="panel family-projection" aria-labelledby="family-projection-title">
         <div class="section-heading"><h3 id="family-projection-title">投影设置</h3><t-tag :theme="projection.enabled?'success':'default'" variant="light" size="small">{{ projection.enabled?'已启用':'未启用' }}</t-tag></div>
         <p class="subtle">启用后按业务族成员和确认关系重算旧图与标签；关闭后沿用旧规则。</p>
         <p v-if="projection.pending" role="status">待处理投影任务 {{ projection.pending }} 条。</p>
-        <p v-if="projection.failed" class="notice error" role="alert">失败投影任务 {{ projection.failed }} 条，请检查 Outbox。</p>
+        <t-alert v-if="projection.failed" theme="error" class="notice" role="alert">失败投影任务 {{ projection.failed }} 条，请检查 Outbox。</t-alert>
         <t-button v-if="canWrite" :theme="projection.enabled?'default':'primary'" :disabled="locked || saving" @click="toggleProjection">{{ projection.enabled?'关闭投影':'启用投影' }}</t-button>
         <p v-else class="source-note">当前账号仅有查看权限。</p>
       </section>
@@ -52,7 +52,7 @@
       </nav>
       <div class="workspace-grid">
         <section class="panel" :aria-label="tabs.find(item=>item.key===tab)?.label">
-          <p v-if="busy" role="status">正在读取工作台…</p>
+          <div v-if="busy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取工作台…</span></div>
           <template v-else>
             <template v-if="tab==='members' || tab==='removed' || tab==='unassigned'">
               <p v-if="tab==='unassigned'" class="subtle">已建立观察记录且尚未归族的文档。新入库的生效文档也可通过右侧搜索加入。</p>
@@ -93,7 +93,7 @@
                     @click="changeRelation(row,action)">{{ actionLabels[action] }}</t-button>
                 </li>
               </ul>
-              <p v-else class="empty">这一页没有关系。</p>
+              <t-empty v-else class="empty" description="这一页没有关系。" />
             </template>
             <template v-else-if="tab==='replacements'">
               <ol v-if="plans.length" class="family-items">
@@ -108,7 +108,7 @@
                     :disabled="locked" @click="cancel(row)">撤回计划</t-button>
                 </li>
               </ol>
-              <p v-else class="empty">还没有同族替代计划。</p>
+              <t-empty v-else class="empty" description="还没有同族替代计划。" />
             </template>
             <FamilySuggestionPanel v-else-if="tab==='suggestions' && inbox" :inbox="inbox" :title="title" :can-write="canWrite"
               :disabled="locked" @scan="scanSuggestions" @confirm="confirmSuggestion" @confirm-batch="confirmSuggestions"
@@ -120,7 +120,7 @@
                 <small>操作编号 {{ row.operation_id }}</small>
               </li>
             </ol>
-            <p v-else class="empty">这一页没有治理记录。</p>
+            <t-empty v-else class="empty" description="这一页没有治理记录。" />
           </template>
           <footer class="pagination">
             <t-button variant="outline" size="small" :disabled="busy || locked || page<=1" @click="page--">上一页</t-button>

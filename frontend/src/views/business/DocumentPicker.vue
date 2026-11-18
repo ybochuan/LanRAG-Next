@@ -16,6 +16,7 @@
     </label>
     <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
     <p v-else-if="!loading && !items.length" class="subtle">当前知识库没有可选的生效文档。</p>
+    <div v-if="serverMode && loading && keyword.trim()" class="wb-loading" role="status"><t-loading size="small" :loading="true" /> <span>正在检索全部生效文档…</span></div>
     <p v-else-if="!loading" class="subtle"><template v-if="serverMode">共 {{ total }} 篇可选生效文档，当前显示 {{ items.length }} 篇；输入关键词由服务端检索。</template><template v-else>共 {{ items.length }} 篇可选生效文档<span v-if="truncated">（已达 {{ items.length }} 篇上限）</span><template v-if="keyword.trim()">，匹配 {{ filteredItems.length }} 篇</template>。</template></p>
   </div>
 </template>

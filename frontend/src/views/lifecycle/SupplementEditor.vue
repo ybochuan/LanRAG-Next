@@ -2,21 +2,21 @@
  <section class="supplements" aria-labelledby="supplement-title" data-testid="supplement-editor">
   <h3 id="supplement-title">补充文档依赖</h3>
   <p>为本篇补充文档选择父文档，最多 8 篇；父文档可来自当前知识库或另一个已授权知识库。任一父文档失效、过期或版本变化，本篇将停止参与问答。复核到期只提醒，不改变状态。</p>
-  <p v-if="loading" role="status">正在核验依赖…</p>
+  <div v-if="loading" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在核验依赖…</span></div>
   <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
   <template v-if="value">
    <p class="subtle">关系版本 {{ value.revision }} · {{ value.assessment.configured?'已声明依赖':'未声明依赖' }}</p>
-   <p v-if="dependencyReason(value.assessment.reason)" class="notice" role="status">{{ dependencyReason(value.assessment.reason) }}</p>
+   <t-alert v-if="dependencyReason(value.assessment.reason)" theme="info" class="notice" role="status">{{ dependencyReason(value.assessment.reason) }}</t-alert>
    <ul v-if="value.assessment.parents.length" class="evidence">
     <li v-for="parent in value.assessment.parents" :key="`${parent.knowledge_base_id}:${parent.document_id}:${parent.version_id}`"><strong>{{ title(parent.knowledge_base_id, parent.document_id) }}</strong><span>{{ stateLabels[parent.state] || '缺少状态' }}<template v-if="parent.effective_until"> · 失效 {{ date(parent.effective_until) }}</template><template v-if="parent.review_due"> · 复核 {{ date(parent.review_due) }}</template></span></li>
    </ul>
    <p v-if="value.assessment.review_due" class="subtle">父级最早复核：{{ date(value.assessment.review_due) }}。本篇原有日期保持不变。</p>
-   <p v-if="mixedParents" class="notice" role="status">当前依赖分布在多个知识库；保存会按每篇父文档所属知识库分别提交。</p>
+   <t-alert v-if="mixedParents" theme="info" class="notice" role="status">当前依赖分布在多个知识库；保存会按每篇父文档所属知识库分别提交。</t-alert>
    <div v-if="canWrite" class="picker">
     <label class="search-label">父文档所属知识库<t-select v-model="parentKB" :options="parentKBOptions" :disabled="locked" class="kb-select" @change="changeParentKB" /></label>
     <label class="search-label">搜索全部父文档<t-input v-model="query" placeholder="文档名称或 ID" :disabled="locked" clearable /></label>
     <t-alert v-if="candidateError" theme="error" class="notice">{{ candidateError }}</t-alert>
-    <p v-if="candidateBusy" role="status">正在加载该知识库的生效文档…</p>
+    <p v-if="candidateBusy" role="status">正在加载该知识库的生效文档<template v-if="serverMode && query.trim()">（服务端检索）</template>…</p>
     <ul v-else class="choices">
      <li v-for="candidate in filtered" :key="candidate.document_id"><label><t-checkbox :checked="selected.includes(selectionKey(parentKB,candidate.document_id))" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" @change="toggleCandidate(selectionKey(parentKB,candidate.document_id))"><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></t-checkbox></label></li>
     </ul>
@@ -29,7 +29,7 @@
    <p v-else class="subtle">当前账号仅有查看权限。</p>
   </template>
   <t-button v-if="!value&&!loading" variant="outline" :disabled="locked" @click="reload">重新载入</t-button>
-  <p v-if="success" class="notice success" role="status">{{ success }}</p>
+  <t-alert v-if="success" theme="success" class="notice" role="status">{{ success }}</t-alert>
  </section>
 </template>
 

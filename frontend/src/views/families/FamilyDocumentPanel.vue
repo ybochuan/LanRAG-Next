@@ -6,7 +6,7 @@
     </div>
     <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" :disabled="busy" @click="load">重新载入</t-button></t-alert>
     <t-alert v-if="notice" theme="success" class="notice">{{ notice }}</t-alert>
-    <p v-if="busy && !detail" role="status">正在读取文档状态…</p>
+    <div v-if="busy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取文档状态…</span></div>
     <template v-if="detail">
       <p>文档状态 · {{ stateLabels[detail.snapshot.current.state] || detail.snapshot.current.state }}</p>
       <form @submit.prevent="save">

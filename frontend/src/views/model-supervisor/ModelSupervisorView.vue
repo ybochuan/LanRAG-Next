@@ -26,7 +26,7 @@
     </div>
 
     <template v-if="hasToken">
-      <p v-if="error" class="notice error" role="alert">{{ error }}</p>
+      <t-alert v-if="error" theme="error" class="notice" role="alert">{{ error }}</t-alert>
 
       <section v-if="res" class="resource-bar" aria-label="主机资源">
         <div class="resource-head">
@@ -52,7 +52,7 @@
               <h2>{{ item.id }}</h2>
               <p class="model-name">{{ item.model }}</p>
             </div>
-            <span class="status-badge" :class="item.status">{{ statusLabel[item.status] }}</span>
+            <t-tag variant="light" size="small" :theme="statusTheme(item.status)">{{ statusLabel[item.status] }}</t-tag>
           </header>
 
           <dl class="facts">
@@ -120,7 +120,7 @@
           </section>
         </article>
 
-        <p v-if="!instances.length && !busy" class="empty">还没有配置任何实例。</p>
+        <t-empty v-if="!instances.length && !busy" class="empty" description="还没有配置任何实例。" />
       </section>
 
       <section class="add-panel">
@@ -132,7 +132,7 @@
           从 <code>{{ catalogData?.model_dir || 'data/models' }}</code> 选择 .gguf，运行时固定用
           <code>{{ catalogData?.binary || 'data/bin/llama-server.exe' }}</code><span v-if="catalogData && !catalogData.binary_ready" class="warn">（未找到该文件）</span>
         </p>
-        <p v-if="catalogData?.note" class="notice">{{ catalogData.note }}</p>
+        <t-alert v-if="catalogData?.note" theme="info" class="notice">{{ catalogData.note }}</t-alert>
         <form class="add-form" @submit.prevent="doAdd">
           <div class="form-grid">
             <label class="field">标识<t-input v-model="form.id" placeholder="embedding" /></label>
@@ -219,6 +219,8 @@ const form = reactive({
 })
 
 const catalogData = ref<api.Catalog>()
+// Status badge uses the shared tag palette instead of bespoke colours.
+const statusTheme=(status:string)=>({running:'success',failed:'danger',starting:'warning',stopping:'warning'} as Record<string,string>)[status]||'default'
 // TDesign select options built from the local catalog and the fixed task list.
 const modelOptions=computed(()=>((catalogData.value?.models??[]).map(file=>({label:`${file.name}（${formatSize(file.size_bytes)}）`,value:file.name}))))
 const taskTypeOptions=[{label:'向量化',value:'embedding'},{label:'重排',value:'rerank'},{label:'生成（对话）',value:'chat'}]
@@ -538,10 +540,7 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .card h2 { margin: 0; font-size: var(--td-font-size-body-large); }
 .model-name { margin: 2px 0 0; font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); word-break: break-all; }
-.status-badge { font-size: var(--td-font-size-body-small); padding: 2px 8px; border-radius: var(--td-radius-round); background: #eef0f4; color: #555; white-space: nowrap; }
-.status-badge.running { background: var(--td-success-color-1); color: var(--td-success-color); }
-.status-badge.failed { background: var(--td-error-color-1); color: var(--td-error-color); }
-.status-badge.starting, .status-badge.stopping { background: var(--td-warning-color-1); color: var(--td-warning-color); }
+
 .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0; }
 .facts dt { font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); }
 .facts dd { margin: 2px 0 0; font-size: var(--td-font-size-body-medium); }
