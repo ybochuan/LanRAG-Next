@@ -9293,6 +9293,21 @@ export default {
     },
   },
   workbench: {
+    "picker": {
+      "searchByTitle": "依標題搜尋",
+      "titlePlaceholder": "輸入文件名稱關鍵字，搜尋全部生效文件",
+      "loading": "正在載入…",
+      "selectDocument": "請選擇生效文件",
+      "noDocuments": "目前知識庫沒有可選的生效文件。",
+      "totalAll": "共 {n} 篇可選生效文件",
+      "serverHint": "共 {total} 篇可選生效文件，目前顯示 {shown} 篇；輸入關鍵字由伺服器檢索。",
+      "searching": "正在檢索全部生效文件…",
+      "searchByContent": "依內容搜尋",
+      "contentPlaceholder": "輸入條款關鍵字，搜尋全部正文分塊",
+      "selectClause": "請選擇條款分塊",
+      "selectDocFirst": "請先選擇文件",
+      "noChunks": "該文件沒有可選正文分塊。"
+    },
     "family": {
       "title": "版本族",
       "suggestions": "關聯建議",

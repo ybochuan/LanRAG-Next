@@ -9297,6 +9297,21 @@ export default {
     }
   },
   workbench: {
+    "picker": {
+      "searchByTitle": "タイトルで検索",
+      "titlePlaceholder": "ドキュメントタイトルのキーワードを入力し、すべての有効なドキュメントを検索",
+      "loading": "読み込み中…",
+      "selectDocument": "有効なドキュメントを選択",
+      "noDocuments": "このナレッジベースには選択可能な有効ドキュメントがありません。",
+      "totalAll": "選択可能なドキュメント {n} 件",
+      "serverHint": "全 {total} 件中 {shown} 件を表示、キーワードを入力するとサーバーで検索します。",
+      "searching": "すべての有効ドキュメントを検索中…",
+      "searchByContent": "内容で検索",
+      "contentPlaceholder": "条項のキーワードを入力し、すべての本文チャンクを検索",
+      "selectClause": "条項チャンクを選択",
+      "selectDocFirst": "先にドキュメントを選択してください",
+      "noChunks": "このドキュメントには選択可能な本文チャンクがありません。"
+    },
     "family": {
       "title": "バージョンファミリー",
       "suggestions": "関連提案",

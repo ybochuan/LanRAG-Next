@@ -9297,6 +9297,21 @@ export default {
     }
   },
   workbench: {
+    "picker": {
+      "searchByTitle": "제목으로 검색",
+      "titlePlaceholder": "문서 제목 키워드를 입력하여 모든 활성 문서를 검색합니다",
+      "loading": "불러오는 중…",
+      "selectDocument": "활성 문서를 선택하세요",
+      "noDocuments": "이 지식베이스에는 선택 가능한 활성 문서가 없습니다.",
+      "totalAll": "선택 가능한 문서 {n}건",
+      "serverHint": "전체 {total}건 중 {shown}건 표시, 키워드를 입력하면 서버에서 검색합니다.",
+      "searching": "모든 활성 문서를 검색하는 중…",
+      "searchByContent": "내용으로 검색",
+      "contentPlaceholder": "조항 키워드를 입력하여 모든 본문 블록을 검색합니다",
+      "selectClause": "조항 블록을 선택하세요",
+      "selectDocFirst": "먼저 문서를 선택하세요",
+      "noChunks": "이 문서에는 선택 가능한 본문 블록이 없습니다."
+    },
     "family": {
       "title": "버전 패밀리",
       "suggestions": "연관 제안",

@@ -1,14 +1,14 @@
 <template>
   <div class="clause-picker">
-    <label>按内容搜索{{ label }}
-      <t-input v-model="keyword" :maxlength="160" :disabled="disabled || !documentId" placeholder="输入条款关键词，搜索全部正文分块" clearable />
+    <label>{{ $t('workbench.picker.searchByContent') }}{{ label }}
+      <t-input v-model="keyword" :maxlength="160" :disabled="disabled || !documentId" :placeholder="$t('workbench.picker.contentPlaceholder')" clearable />
     </label>
     <label>{{ label }}
-      <t-select :value="modelValue?.chunk_id || ''" :disabled="disabled || !documentId || loading || hashing" :options="options" :placeholder="documentId ? '请选择条款分块' : '请先选择文档'" @change="choose" />
+      <t-select :value="modelValue?.chunk_id || ''" :disabled="disabled || !documentId || loading || hashing" :options="options" :placeholder="documentId ? $t('workbench.picker.selectClause') : $t('workbench.picker.selectDocFirst')" @change="choose" />
     </label>
     <pre v-if="selectedText" class="content-preview">{{ selectedText }}</pre>
     <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
-    <p v-else-if="documentId && !loading && !rows.length" class="subtle">该文档没有可选正文分块。</p>
+    <p v-else-if="documentId && !loading && !rows.length" class="subtle">{{ $t('workbench.picker.noChunks') }}</p>
     <p v-else-if="documentId && !loading" class="subtle">共 {{ rows.length }} 个分块<template v-if="keyword.trim()">，匹配 {{ filteredRows.length }} 个</template>。</p>
   </div>
 </template>
@@ -17,9 +17,11 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { clauseAnchor, clauseChunks, type ClauseAnchor, type ClauseChunk } from '@/api/business'
 import { requestFence } from '../lifecycle/model'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ kb: string; documentId: string; label: string; modelValue?: ClauseAnchor; disabled?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value?: ClauseAnchor] }>()
+const { t } = useI18n()
 
 // Same rule as the document picker: load the whole chunk set once and filter
 // globally, so a keyword does not silently search only the current page.
@@ -74,7 +76,7 @@ const options = computed(() => {
   if (props.modelValue && !items.some(item => item.value === props.modelValue?.chunk_id)) {
     items.unshift({ label: `已选分块 ${selectedIndex.value}`, value: props.modelValue.chunk_id })
   }
-  return [{ label: props.documentId ? '请选择条款分块' : '请先选择文档', value: '' }, ...items]
+  return [{ label: props.documentId ? t('workbench.picker.selectClause') : t('workbench.picker.selectDocFirst'), value: '' }, ...items]
 })
 
 async function choose(id: string) {

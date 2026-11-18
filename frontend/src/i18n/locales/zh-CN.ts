@@ -9296,6 +9296,21 @@ export default {
     }
   },
   workbench: {
+    "picker": {
+      "searchByTitle": "按标题搜索",
+      "titlePlaceholder": "输入文档标题关键词，搜索全部生效文档",
+      "loading": "正在载入…",
+      "selectDocument": "请选择生效文档",
+      "noDocuments": "当前知识库没有可选的生效文档。",
+      "totalAll": "共 {n} 篇可选生效文档",
+      "serverHint": "共 {total} 篇可选生效文档，当前显示 {shown} 篇；输入关键词由服务端检索。",
+      "searching": "正在检索全部生效文档…",
+      "searchByContent": "按内容搜索",
+      "contentPlaceholder": "输入条款关键词，搜索全部正文分块",
+      "selectClause": "请选择条款分块",
+      "selectDocFirst": "请先选择文档",
+      "noChunks": "该文档没有可选正文分块。"
+    },
     "family": {
       "title": "版本族",
       "suggestions": "关联建议",

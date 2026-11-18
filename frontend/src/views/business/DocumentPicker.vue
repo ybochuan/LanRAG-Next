@@ -1,7 +1,7 @@
 <template>
   <div class="document-picker">
-    <label v-if="searchable">按标题搜索{{ label }}
-      <t-input v-model="keyword" :maxlength="160" :disabled="disabled" placeholder="输入文档标题关键词，搜索全部生效文档" clearable />
+    <label v-if="searchable">{{ $t('workbench.picker.searchByTitle') }}{{ label }}
+      <t-input v-model="keyword" :maxlength="160" :disabled="disabled" :placeholder="$t('workbench.picker.titlePlaceholder')" clearable />
     </label>
     <label>{{ label }}
       <t-select
@@ -10,14 +10,14 @@
         :options="options"
         :filterable="!searchable"
         :loading="loading"
-        :placeholder="loading ? '正在载入…' : '请选择生效文档'"
+        :placeholder="loading ? $t('workbench.picker.loading') : $t('workbench.picker.selectDocument')"
         @change="chooseValue"
       />
     </label>
     <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
-    <p v-else-if="!loading && !items.length" class="subtle">当前知识库没有可选的生效文档。</p>
-    <div v-if="serverMode && loading && keyword.trim()" class="wb-loading" role="status"><t-loading size="small" :loading="true" /> <span>正在检索全部生效文档…</span></div>
-    <p v-else-if="!loading" class="subtle"><template v-if="serverMode">共 {{ total }} 篇可选生效文档，当前显示 {{ items.length }} 篇；输入关键词由服务端检索。</template><template v-else>共 {{ items.length }} 篇可选生效文档<span v-if="truncated">（已达 {{ items.length }} 篇上限）</span><template v-if="keyword.trim()">，匹配 {{ filteredItems.length }} 篇</template>。</template></p>
+    <p v-else-if="!loading && !items.length" class="subtle">{{ $t('workbench.picker.noDocuments') }}</p>
+    <div v-if="serverMode && loading && keyword.trim()" class="wb-loading" role="status"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.picker.searching') }}</span></div>
+    <p v-else-if="!loading" class="subtle"><template v-if="serverMode">{{ $t('workbench.picker.serverHint', { total, shown: items.length }) }}</template><template v-else>{{ $t('workbench.picker.totalAll', { n: items.length }) }}</template></p>
   </div>
 </template>
 
@@ -25,9 +25,11 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { overview, type DocumentRow } from '@/api/lifecycle'
 import { requestFence } from '../lifecycle/model'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ kb: string; modelValue: string; label: string; disabled?: boolean; exclude?: string; searchable?: boolean; selectedTitle?: string; showIdentity?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [id: string] }>()
+const { t } = useI18n()
 
 // The picker is a global search over the KB's active documents, not a page of
 // them: pagination hid most candidates behind "next page" and made the title
@@ -137,7 +139,7 @@ const options = computed(() => {
   if (props.modelValue && !rows.some(row => row.value === props.modelValue)) {
     rows.unshift({ label: displayTitle(props.selectedTitle || selectedName.value, props.modelValue), value: props.modelValue })
   }
-  return [{ label: '请选择生效文档', value: '' }, ...rows]
+  return [{ label: t('workbench.picker.selectDocument'), value: '' }, ...rows]
 })
 
 function chooseValue(id: string) {

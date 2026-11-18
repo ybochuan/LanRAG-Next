@@ -9303,6 +9303,21 @@ export default {
     }
   },
   workbench: {
+    "picker": {
+      "searchByTitle": "Search by title",
+      "titlePlaceholder": "Enter a document title keyword to search every active document",
+      "loading": "Loading…",
+      "selectDocument": "Select an active document",
+      "noDocuments": "This knowledge base has no selectable active documents.",
+      "totalAll": "{n} selectable documents",
+      "serverHint": "{total} selectable documents, showing {shown}; type a keyword to search on the server.",
+      "searching": "Searching all active documents…",
+      "searchByContent": "Search by content",
+      "contentPlaceholder": "Enter a clause keyword to search every chunk",
+      "selectClause": "Select a clause chunk",
+      "selectDocFirst": "Select a document first",
+      "noChunks": "This document has no selectable clauses."
+    },
     "family": {
       "title": "Version family",
       "suggestions": "Suggestions",
