@@ -144,13 +144,13 @@
                 <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" class="gpu-layers" />
                 <t-switch v-model="form.use_gpu" />
                 <span class="gpu-label">使用 GPU</span>
+                <t-button theme="primary" type="submit" class="gpu-submit" :loading="busy" :disabled="!catalogData?.models.length">启动</t-button>
               </span>
             </label>
           </div>
           <p class="hint">
             层数对应 llama-server 的 <code>-ngl</code>：留空表示把整模型卸载到显卡（99）；显卡装不下时填一个较小值做部分卸载；0 等于纯 CPU。
           </p>
-          <div class="form-actions"><t-button theme="primary" type="submit" :loading="busy" :disabled="!catalogData?.models.length">启动</t-button></div>
         </form>
         <t-alert v-if="formError" theme="error" class="notice">{{ formError }}</t-alert>
       </section>
@@ -577,6 +577,6 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .gpu-label { white-space: nowrap; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); }
 @media (max-width: 700px) { .field-gpu { grid-column: auto; } }
 .add-form .hint { margin: 12px 0 0; }
-.form-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+.gpu-row .gpu-submit { flex: 0 0 auto; margin-left: 8px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
 </style>

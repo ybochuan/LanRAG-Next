@@ -9297,6 +9297,20 @@ export default {
     }
   },
   workbench: {
+    "list": {
+      "filterTitle": "Заголовок",
+      "searchPlaceholder": "Поиск по заголовку",
+      "filterState": "Статус",
+      "allStates": "Все статусы",
+      "colDocument": "Документ",
+      "colLifecycle": "Жизненный цикл",
+      "colFamily": "Семейство версий",
+      "colEffectiveUntil": "Действует до",
+      "empty": "Нет подходящих документов.",
+      "count": "Всего {n} · прокрутите список",
+      "loading": "Чтение данных жизненного цикла…",
+      "unassigned": "Без семейства"
+    },
     "title": "Рабочее место документов",
     "subtitle": "Управление жизненным циклом, версиями и связями документов.",
     "tabs": {

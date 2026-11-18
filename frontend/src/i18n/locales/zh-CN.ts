@@ -9296,6 +9296,20 @@ export default {
     }
   },
   workbench: {
+    "list": {
+      "filterTitle": "文档标题",
+      "searchPlaceholder": "搜索标题",
+      "filterState": "状态",
+      "allStates": "全部状态",
+      "colDocument": "文档",
+      "colLifecycle": "生命周期",
+      "colFamily": "版本族",
+      "colEffectiveUntil": "有效至",
+      "empty": "当前没有匹配的文档。",
+      "count": "共 {n} 项 · 列表可滚动查看全部",
+      "loading": "正在读取生命周期事实…",
+      "unassigned": "未归族"
+    },
     "title": "文档工作台",
     "subtitle": "集中管理生命周期、版本和文档关系。",
     "tabs": {

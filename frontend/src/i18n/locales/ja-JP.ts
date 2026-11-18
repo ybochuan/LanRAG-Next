@@ -9297,6 +9297,20 @@ export default {
     }
   },
   workbench: {
+    "list": {
+      "filterTitle": "ドキュメントタイトル",
+      "searchPlaceholder": "タイトルを検索",
+      "filterState": "ステータス",
+      "allStates": "すべてのステータス",
+      "colDocument": "ドキュメント",
+      "colLifecycle": "ライフサイクル",
+      "colFamily": "バージョンファミリー",
+      "colEffectiveUntil": "有効期限",
+      "empty": "一致するドキュメントはありません。",
+      "count": "全 {n} 件 · リストをスクロールして表示",
+      "loading": "ライフサイクル情報を読み込み中…",
+      "unassigned": "未分類"
+    },
     "title": "ドキュメントワークベンチ",
     "subtitle": "ライフサイクル、バージョン、ドキュメント関係を管理します。",
     "tabs": {

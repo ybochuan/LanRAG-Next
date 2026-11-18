@@ -9293,6 +9293,20 @@ export default {
     },
   },
   workbench: {
+    "list": {
+      "filterTitle": "文件標題",
+      "searchPlaceholder": "搜尋標題",
+      "filterState": "狀態",
+      "allStates": "全部狀態",
+      "colDocument": "文件",
+      "colLifecycle": "生命週期",
+      "colFamily": "版本族",
+      "colEffectiveUntil": "有效至",
+      "empty": "目前沒有符合的文件。",
+      "count": "共 {n} 項 · 列表可捲動檢視全部",
+      "loading": "正在讀取生命週期事實…",
+      "unassigned": "未歸族"
+    },
     "title": "文件工作台",
     "subtitle": "集中管理生命週期、版本和文件關係。",
     "tabs": {

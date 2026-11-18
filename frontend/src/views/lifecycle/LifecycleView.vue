@@ -22,29 +22,29 @@
    </template>
    <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
-    <label for="lifecycle-title-search">文档标题</label>
-    <t-input id="lifecycle-title-search" v-model="titleQuery" :maxlength="160" placeholder="搜索标题" clearable class="filter-input" />
-    <label for="lifecycle-state-filter">状态</label>
+    <label for="lifecycle-title-search">{{ $t('workbench.list.filterTitle') }}</label>
+    <t-input id="lifecycle-title-search" v-model="titleQuery" :maxlength="160" :placeholder="$t('workbench.list.searchPlaceholder')" clearable class="filter-input" />
+    <label for="lifecycle-state-filter">{{ $t('workbench.list.filterState') }}</label>
     <t-select id="lifecycle-state-filter" v-model="filter" :options="stateOptions" class="filter-select" />
    </div>
-   <div v-if="busy && tab==='documents'" class="loading" role="status">正在读取生命周期事实…</div>
+   <div v-if="busy && tab==='documents'" class="loading" role="status">{{ $t('workbench.list.loading') }}</div>
    <template v-else-if="data || tab==='reviews'">
     <template v-if="data">
     <section v-if="tab==='documents'" id="panel-documents" class="document-panel" role="tabpanel" aria-labelledby="tab-documents">
      <div class="table-wrap">
       <table>
-       <thead><tr><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按文档排序${sortMark('title')}`" @click="sortDocuments('title')">文档{{ sortMark('title') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按生命周期排序${sortMark('state')}`" @click="sortDocuments('state')">生命周期{{ sortMark('state') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按版本族排序${sortMark('family')}`" @click="sortDocuments('family')">版本族{{ sortMark('family') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" :aria-label="`按有效至排序${sortMark('effective_until')}`" @click="sortDocuments('effective_until')">有效至{{ sortMark('effective_until') }}</t-button></th></tr></thead>
+       <thead><tr><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('title')">{{ $t('workbench.list.colDocument') }}{{ sortMark('title') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('state')">{{ $t('workbench.list.colLifecycle') }}{{ sortMark('state') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('family')">{{ $t('workbench.list.colFamily') }}{{ sortMark('family') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('effective_until')">{{ $t('workbench.list.colEffectiveUntil') }}{{ sortMark('effective_until') }}</t-button></th></tr></thead>
        <tbody>
         <tr v-for="doc in sortedDocuments" :key="doc.document_id">
          <td><t-button variant="text" class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</t-button></td>
          <td><t-tag variant="light" size="small" :theme="stateTagTheme(doc.state)">{{ stateLabels[doc.state] || doc.state }}</t-tag></td>
-         <td>{{ doc.business_family?.label || '未归族' }}</td><td>{{ date(doc.annotations.effective_until) }}</td>
+         <td>{{ doc.business_family?.label || $t('workbench.list.unassigned') }}</td><td>{{ date(doc.annotations.effective_until) }}</td>
         </tr>
-        <tr v-if="!allDocuments.length"><td colspan="4" class="empty">当前没有匹配的文档。</td></tr>
+        <tr v-if="!allDocuments.length"><td colspan="4" class="empty">{{ $t('workbench.list.empty') }}</td></tr>
        </tbody>
       </table>
      </div>
-     <p class="source-note">共 {{ allDocuments.length }} 项 · 列表可滚动查看全部</p>
+     <p class="source-note">{{ $t('workbench.list.count', { n: allDocuments.length }) }}</p>
     </section>
     </template>
     <section v-if="tab==='reviews'" id="panel-reviews" class="panel" role="tabpanel" aria-labelledby="tab-reviews"><div class="section-heading"><div><h2>待复核</h2><p>到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。</p></div></div><p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p><p v-if="reviewBusy" role="status">正在加载提醒…</p><div v-if="reviewItems.length && !reviewBusy" class="review-sort"><span>按复核到期</span><t-radio-group v-model="reviewSort" variant="default" size="small"><t-radio-button value="asc">正序</t-radio-button><t-radio-button value="desc">倒序</t-radio-button></t-radio-group></div><div v-else-if="reviewItems.length" class="review-list"><div v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" role="button" tabindex="0" @click="openDocument(alert.document_id, alert.title)" @keydown.enter="openDocument(alert.document_id, alert.title)"><span><strong>{{ alert.title || alert.document_id }}</strong><small>复核到期 {{ date(alert.review_due) }}</small><small v-if="alert.delivered_at">本地投递已接受 {{ date(alert.delivered_at) }}</small></span><t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state) }}</t-tag></div></div><p v-else-if="!reviewError" class="empty">当前没有待复核提醒。</p><p v-if="reviewsTruncated" class="notice">最多展示 1000 条提醒；当前列表可能尚未包含全部待办。</p><p class="source-note">投递状态取自通知队列；「已投递」表示本地回调已接受该提醒，不代表人工已读。</p></section>
@@ -57,7 +57,7 @@
     <header>
      <div><span class="eyebrow">文档详情</span><h2 id="document-title">{{ selectedTitle || selectedID }}</h2>
       <div v-if="detail" class="drawer-meta"><span class="state-badge" :class="detail.snapshot.current.state">{{ label(detail.snapshot.current.state) }}</span>
-       <span>{{ detail.business_family?.label || '未归族' }}</span></div>
+       <span>{{ detail.business_family?.label || $t('workbench.list.unassigned') }}</span></div>
      </div>
      <t-button variant="text" shape="square" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
     </header>
@@ -116,6 +116,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { documentActivity, documentTitle, type BusinessAction } from '@/api/business'
 import type { FamilyActivity } from '@/api/families'
 import { actionLabels, httpStatus, statusLabels } from '../business/model'
@@ -128,7 +129,7 @@ import { annotationsForSave, errorMessage, requestFence, reviewDeliveryClass, re
 // TDesign select options; the workbench renders WeKnora-native selects, so the
 // option arrays live here instead of hand-written <option> children.
 const kbOptions=computed(()=>knowledgeBases.value.map(item=>({label:item.name,value:item.id})))
-const stateOptions=computed(()=>[{label:'全部状态',value:''},...states.map(state=>({label:stateLabels[state],value:state}))])
+const stateOptions=computed(()=>[{label:t('workbench.list.allStates'),value:''},...states.map(state=>({label:stateLabels[state],value:state}))])
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
@@ -148,6 +149,7 @@ const detailTabs=[
  {key:'graph',labelKey:'workbench.detail.graph'},{key:'audit',labelKey:'workbench.detail.audit'},{key:'suggestions',labelKey:'workbench.detail.suggestions'},{key:'revisions',labelKey:'workbench.detail.revisions'},
 ] as const
 const route=useRoute(), router=useRouter()
+const { t }=useI18n()
 const workspaceView=computed(()=>{
  const view=route.query.view
  return view==='families'||view==='lineage'||view==='associations'||view==='feedback-governance'||view==='revisions' ? view : ''

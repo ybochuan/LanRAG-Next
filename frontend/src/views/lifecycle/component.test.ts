@@ -27,6 +27,7 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
     },
     './SupplementEditor.vue': {},
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
+    'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     './model': model,
   }
   const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery};`)(

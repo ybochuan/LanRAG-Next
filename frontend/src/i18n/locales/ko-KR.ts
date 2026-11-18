@@ -9297,6 +9297,20 @@ export default {
     }
   },
   workbench: {
+    "list": {
+      "filterTitle": "문서 제목",
+      "searchPlaceholder": "제목 검색",
+      "filterState": "상태",
+      "allStates": "전체 상태",
+      "colDocument": "문서",
+      "colLifecycle": "수명 주기",
+      "colFamily": "버전 패밀리",
+      "colEffectiveUntil": "유효 기한",
+      "empty": "일치하는 문서가 없습니다.",
+      "count": "총 {n}건 · 목록을 스크롤하여 확인하세요",
+      "loading": "수명 주기 정보를 읽는 중…",
+      "unassigned": "미분류"
+    },
     "title": "문서 작업대",
     "subtitle": "수명 주기, 버전 및 문서 관계를 관리합니다.",
     "tabs": {

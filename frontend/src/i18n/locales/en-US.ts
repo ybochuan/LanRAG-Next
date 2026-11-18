@@ -9303,6 +9303,20 @@ export default {
     }
   },
   workbench: {
+    "list": {
+      "filterTitle": "Document title",
+      "searchPlaceholder": "Search title",
+      "filterState": "Status",
+      "allStates": "All statuses",
+      "colDocument": "Document",
+      "colLifecycle": "Lifecycle",
+      "colFamily": "Version family",
+      "colEffectiveUntil": "Effective until",
+      "empty": "No matching documents.",
+      "count": "{n} items · scroll the list to see them all",
+      "loading": "Reading lifecycle facts…",
+      "unassigned": "Unassigned"
+    },
     "title": "Document workbench",
     "subtitle": "Manage lifecycle, versions and document relations.",
     "tabs": {
