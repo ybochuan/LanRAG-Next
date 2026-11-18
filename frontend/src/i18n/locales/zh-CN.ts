@@ -9296,6 +9296,32 @@ export default {
     }
   },
   workbench: {
+    "reviews": {
+      "title": "待复核",
+      "desc": "到期提醒不会自动改变文档状态。调整复核日期后，由后台扫描更新提醒。",
+      "loading": "正在加载提醒…",
+      "sortLabel": "按复核到期",
+      "asc": "正序",
+      "desc2": "倒序",
+      "due": "复核到期 {date}",
+      "delivered": "本地投递已接受 {date}",
+      "empty": "当前没有待复核提醒。",
+      "truncated": "最多展示 1000 条提醒；当前列表可能尚未包含全部待办。",
+      "note": "投递状态取自通知队列；「已投递」表示本地回调已接受该提醒，不代表人工已读。"
+    },
+    "rules": {
+      "eyebrow": "仅应用于后续初始化的文档",
+      "title": "知识库默认规则",
+      "desc": "已存在文档的日期保持原值。0 表示不设置该项默认日期；未设置失效日期即永久有效。",
+      "source": "当前来源：{source} · 本库版本 {revision}",
+      "delay": "延迟生效天数",
+      "valid": "有效天数",
+      "review": "复核间隔天数",
+      "saved": "规则已保存，将用于后续初始化的文档。",
+      "save": "保存规则",
+      "saving": "正在保存…",
+      "readonly": "当前账号仅有查看权限。"
+    },
     "list": {
       "filterTitle": "文档标题",
       "searchPlaceholder": "搜索标题",

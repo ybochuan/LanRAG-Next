@@ -9293,6 +9293,32 @@ export default {
     },
   },
   workbench: {
+    "reviews": {
+      "title": "待複核",
+      "desc": "到期提醒不會自動改變文件狀態。調整複核日期後，由後台掃描更新提醒。",
+      "loading": "正在載入提醒…",
+      "sortLabel": "依複核到期",
+      "asc": "正序",
+      "desc2": "倒序",
+      "due": "複核到期 {date}",
+      "delivered": "本機投遞已接受 {date}",
+      "empty": "目前沒有待複核提醒。",
+      "truncated": "最多顯示 1000 筆提醒；目前清單可能尚未包含全部待辦。",
+      "note": "投遞狀態取自通知佇列；「已投遞」表示本機回呼已接受該提醒，不代表人工已讀。"
+    },
+    "rules": {
+      "eyebrow": "僅套用於後續初始化的文件",
+      "title": "知識庫預設規則",
+      "desc": "已存在文件的日期維持原值。0 表示不設定該項預設日期；未設定失效日期即永久有效。",
+      "source": "目前來源：{source} · 本庫版本 {revision}",
+      "delay": "延遲生效天數",
+      "valid": "有效天數",
+      "review": "複核間隔天數",
+      "saved": "規則已儲存，將用於後續初始化的文件。",
+      "save": "儲存規則",
+      "saving": "正在儲存…",
+      "readonly": "目前帳號僅有檢視權限。"
+    },
     "list": {
       "filterTitle": "文件標題",
       "searchPlaceholder": "搜尋標題",

@@ -9303,6 +9303,32 @@ export default {
     }
   },
   workbench: {
+    "reviews": {
+      "title": "Reviews",
+      "desc": "Reminders do not change a document's state. After you adjust a review date, the background scan refreshes the reminder.",
+      "loading": "Loading reminders…",
+      "sortLabel": "By review due",
+      "asc": "Ascending",
+      "desc2": "Descending",
+      "due": "Review due {date}",
+      "delivered": "Local delivery accepted {date}",
+      "empty": "No reminders due.",
+      "truncated": "Showing at most 1000 reminders; the list may not contain every open item.",
+      "note": "Delivery state comes from the notification queue; \"delivered\" means the local callback accepted the reminder, not that a person read it."
+    },
+    "rules": {
+      "eyebrow": "Applies to documents initialised later",
+      "title": "Knowledge base default rules",
+      "desc": "Existing documents keep their dates. 0 means no default for that field; without an expiry date the document never expires.",
+      "source": "Source: {source} · KB revision {revision}",
+      "delay": "Effective delay (days)",
+      "valid": "Valid for (days)",
+      "review": "Review interval (days)",
+      "saved": "Rules saved; they apply to documents initialised later.",
+      "save": "Save rules",
+      "saving": "Saving…",
+      "readonly": "This account has view-only access."
+    },
     "list": {
       "filterTitle": "Document title",
       "searchPlaceholder": "Search title",

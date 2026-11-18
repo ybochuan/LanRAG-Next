@@ -129,7 +129,7 @@ test('the review panel shows the notification delivery state', () => {
   assert.ok(template.includes(":theme=\"alert.delivery_state==='delivered'?'success':'default'\""), 'the delivery tag must be toned by delivery state')
   assert.ok(template.includes('alert.delivered_at'), 'the panel must show when the local callback accepted the reminder')
   assert.ok(!template.includes('待复核 →'), 'the fixed pill must not hide the real delivery state')
-  assert.ok(template.includes('不代表人工已读'), 'the panel must not present a delivered reminder as human-read')
+  assert.ok(template.includes("workbench.reviews.note"), 'the panel must not present a delivered reminder as human-read')
 })
 test('the workspace tab label set matches the router view contract', () => {
   const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
