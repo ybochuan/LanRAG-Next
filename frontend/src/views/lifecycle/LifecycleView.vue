@@ -503,11 +503,15 @@ p {
 .tabs {
   /* TDesign tabs: items butt together with 16px side padding. */
   display:flex;
+  align-items:stretch;
   gap:0;
   border-bottom:1px solid var(--td-component-stroke);
   margin:24px 0;
 }
 .tabs button {
+  align-self:stretch;
+  height:auto;
+  line-height:20px;
   padding:12px 16px;
   background:transparent;
   color:var(--td-text-color-secondary);

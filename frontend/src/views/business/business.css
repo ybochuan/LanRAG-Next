@@ -280,9 +280,15 @@
   margin:16px 0 20px;
   min-height:0;
   gap:0;
+  /* Stretch, not center: centred items put each underline at its own bottom
+     edge, so the active tab's rule sits at a different height. */
+  align-items:stretch;
   border-bottom:1px solid var(--td-component-stroke)
 }
 .business-page .sub-tabs button{
+  align-self:stretch;
+  height:auto;
+  line-height:20px;
   padding:10px 16px;
   border:0;
   border-bottom:2px solid transparent;
