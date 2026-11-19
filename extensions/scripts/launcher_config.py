@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local launcher configuration/authentication. Never source arbitrary shell files."""
 import argparse
+from contextlib import closing
 import getpass
 import json
 import os
@@ -194,6 +195,32 @@ def service_defaults(saved):
     }
 
 
+def native_scope(native, tenant, kb_ids):
+    if not native.is_file():
+        return "", ""
+    with closing(sqlite3.connect(native.as_uri() + "?mode=ro", uri=True)) as source:
+        tables = {row[0] for row in source.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
+        if not {"tenants", "knowledge_bases"} <= tables:
+            return "", ""
+        tenants = {str(row[0]) for row in source.execute("SELECT id FROM tenants")}
+        if not tenants:
+            return "", ""
+        if not tenant:
+            if len(tenants) != 1:
+                raise RuntimeError("select AGENTRAG_TENANT_ID for this multi-tenant database")
+            tenant = next(iter(tenants))
+        if tenant not in tenants:
+            raise RuntimeError("configured AgentRAG tenant does not exist in the native database")
+        live = [row[0] for row in source.execute(
+            "SELECT id FROM knowledge_bases WHERE tenant_id=? AND deleted_at IS NULL ORDER BY id", (tenant,))]
+        if not live:
+            return tenant, ""
+        requested = [item.strip() for item in kb_ids.split(",") if item.strip()]
+        if not set(requested) <= set(live):
+            raise RuntimeError("configured AgentRAG KB scope is stale; specify the intended AGENTRAG_KB_IDS")
+        return tenant, ",".join(requested or live)
+
+
 def prepare(output):
     saved = load()
     def setting(key, default=""):
@@ -207,42 +234,35 @@ def prepare(output):
         db = ROOT / "data/agentrag_ext.db"
     if db.resolve() == native:
         raise RuntimeError("native and extension database paths must differ")
-    tenant = setting("AGENTRAG_TENANT_ID")
-    kb_ids = setting("AGENTRAG_KB_IDS")
-    if native.is_file() and (not tenant or not kb_ids):
-        with sqlite3.connect(native.as_uri() + "?mode=ro", uri=True) as source:
-            if not tenant:
-                tenants = source.execute("SELECT id FROM tenants").fetchall()
-                if len(tenants) != 1:
-                    raise RuntimeError("select AGENTRAG_TENANT_ID for this multi-tenant database")
-                tenant = str(tenants[0][0])
-            if not kb_ids:
-                kb_ids = ",".join(row[0] for row in source.execute("SELECT id FROM knowledge_bases WHERE tenant_id=? AND deleted_at IS NULL ORDER BY id", (tenant,)))
-    if not tenant or not kb_ids:
-        raise RuntimeError("an existing native tenant and KB are required; configure them in the native UI first")
+    tenant, kb_ids = native_scope(native, setting("AGENTRAG_TENANT_ID"), setting("AGENTRAG_KB_IDS"))
+    same_tenant = bool(tenant) and saved.get("AGENTRAG_TENANT_ID") == tenant
+    same_scope = same_tenant and bool(kb_ids) and saved.get("AGENTRAG_KB_IDS") == kb_ids
+    api_key = os.environ.get("AGENTRAG_WEKNORA_API_KEY") or (saved.get("AGENTRAG_WEKNORA_API_KEY") if same_scope else "")
     port = str(setting("CORE_PORT", "8080"))
     if not port.isdigit() or not 1 <= int(port) <= 65535 or port == "8090":
         raise RuntimeError("invalid CORE_PORT")
     endpoint = normalize_mineru(setting("MINERU_ENDPOINT"))
     values = {
-        "AGENTRAG_MODE": "worker", "AGENTRAG_EXT_DB": str(db),
+        "AGENTRAG_MODE": "worker" if kb_ids else "probe", "AGENTRAG_EXT_DB": str(db),
         "AGENTRAG_TENANT_ID": str(tenant), "AGENTRAG_KB_IDS": kb_ids,
         "AGENTRAG_WEKNORA_URL": "http://127.0.0.1:" + port,
-        "AGENTRAG_WEKNORA_API_KEY": setting("AGENTRAG_WEKNORA_API_KEY") or "bootstrap-" + secrets.token_urlsafe(32),
+        "AGENTRAG_WEKNORA_API_KEY": (api_key or "bootstrap-" + secrets.token_urlsafe(32)) if kb_ids else "",
         "AGENTRAG_RECONCILE_INTERVAL": setting("AGENTRAG_RECONCILE_INTERVAL", "5s"),
         "MINERU_ENDPOINT": endpoint,
         "AGENTRAG_PARSER_UPSTREAM_URL": setting("AGENTRAG_PARSER_UPSTREAM_URL", endpoint),
         "AGENTRAG_PARSER_UPSTREAM_KEY": setting("AGENTRAG_PARSER_UPSTREAM_KEY"),
         "AGENTRAG_PARSER_PROXY_KEY": setting("AGENTRAG_PARSER_PROXY_KEY") or secrets.token_urlsafe(32),
         "AGENTRAG_PARSER_ARTIFACT_ROOT": str(path(setting("AGENTRAG_PARSER_ARTIFACT_ROOT", "data/parser_artifacts"))),
-        "AGENTRAG_PARSER_SCOPES": json.dumps([{"tenant_id": int(tenant), "knowledge_base_id": kb} for kb in kb_ids.split(",")]),
+        "AGENTRAG_PARSER_SCOPES": json.dumps([{"tenant_id": int(tenant), "knowledge_base_id": kb} for kb in kb_ids.split(",") if kb]),
         "ENV_FILE": str(env_file), "DB_PATH": str(native),
-        "CORE_PORT": port, "WEKNORA_WEB_DIR": str(ROOT / "web"),
+        "CORE_PORT": port, "WEKNORA_WEB_DIR": str(path(setting("WEKNORA_WEB_DIR", "web"))),
         "AGENTRAG_PARSER_PROXY_ADDR": "http://127.0.0.1:8090",
         "SSRF_DISABLE": setting("SSRF_DISABLE", "true"),
         "AGENTRAG_MANAGEMENT_KEY": setting("AGENTRAG_MANAGEMENT_KEY") or secrets.token_urlsafe(32),
     }
     values.update(service_defaults(saved))
+    if same_tenant and saved.get("MCP_ADMIN_KEY"):
+        values["MCP_ADMIN_KEY"] = saved["MCP_ADMIN_KEY"]
     save(values)
     emit_env(output)
 
@@ -274,6 +294,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def authenticate(result):
     values = load()
+    if not values.get("AGENTRAG_TENANT_ID") or not values.get("AGENTRAG_KB_IDS"):
+        raise RuntimeError("create a native knowledge base before issuing its AgentRAG credential")
     base = values["AGENTRAG_WEKNORA_URL"] + "/api/v1"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     def call(method, route, headers, body=None):
@@ -283,21 +305,13 @@ def authenticate(result):
             return json.load(response)
     def verified(key):
         for kb in values["AGENTRAG_KB_IDS"].split(","):
-            if not kb.strip():
-                continue
-            try:
-                call("GET", "/knowledge-bases/" + kb, {"X-API-Key": key})
-            except urllib.error.HTTPError as missing:
-                # A fresh environment has no knowledge base yet; the machine
-                # credential is still valid and becomes scoped on first import.
-                if missing.code != 404:
-                    raise
+            call("GET", "/knowledge-bases/" + kb, {"X-API-Key": key})
     try:
         verified(values["AGENTRAG_WEKNORA_API_KEY"])
         Path(result).write_text("unchanged")
         return
     except urllib.error.HTTPError as error:
-        if error.code not in (401, 403):
+        if error.code not in (401, 403, 404):
             raise RuntimeError("native API credential/scope validation failed") from None
     email = os.environ.get("AGENTRAG_LOGIN_EMAIL", "")
     password = os.environ.get("AGENTRAG_LOGIN_PASSWORD", "")
@@ -372,6 +386,13 @@ def plan():
     }, indent=2, sort_keys=True))
 
 
+def scope_ready():
+    values = load()
+    _, kb_ids = native_scope(Path(values["DB_PATH"]), values["AGENTRAG_TENANT_ID"], values["AGENTRAG_KB_IDS"])
+    if not kb_ids:
+        sys.exit(3)
+
+
 def issue_mcp_key():
     """Issue (once) the dedicated full-access key used for MCP registration.
 
@@ -419,11 +440,11 @@ def issue_mcp_key():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "env", "auth", "plan", "token", "mcp-key"])
+    parser.add_argument("action", choices=["prepare", "env", "auth", "plan", "scope-ready", "token", "mcp-key"])
     parser.add_argument("output", nargs="?")
     args = parser.parse_args()
     actions = {"prepare": prepare, "env": emit_env, "auth": authenticate,
-               "plan": lambda _unused: plan(), "token": lambda _unused: show_token(),
+               "plan": lambda _unused: plan(), "scope-ready": lambda _unused: scope_ready(), "token": lambda _unused: show_token(),
                "mcp-key": lambda _unused: issue_mcp_key()}
     try:
         actions[args.action](args.output)

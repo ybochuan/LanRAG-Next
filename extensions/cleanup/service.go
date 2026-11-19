@@ -26,7 +26,8 @@ var (
 	// ErrConflict means the task revision or native deletion evidence changed.
 	ErrConflict = errors.New("cleanup task conflict")
 	// ErrUnavailable means the cleanup service is not configured.
-	ErrUnavailable = errors.New("cleanup service unavailable")
+	ErrUnavailable     = errors.New("cleanup service unavailable")
+	errFamilyReference = fmt.Errorf("business family still references document: %w", ErrConflict)
 )
 
 // Status values for one cleanup task.
@@ -274,7 +275,7 @@ func (s *Service) Sweep(ctx context.Context) error {
 				continue
 			}
 			if old.Title != row.title || old.NativeDeletedAt != row.deletedAt {
-				if _, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET title_snapshot=?,native_deleted_at=?,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, row.title, row.deletedAt, now.Format(time.RFC3339Nano), strconv.FormatUint(s.tenant, 10), row.kb, row.id); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET title_snapshot=?,revision=revision+(native_deleted_at<>?),native_deleted_at=?,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, row.title, row.deletedAt, row.deletedAt, now.Format(time.RFC3339Nano), strconv.FormatUint(s.tenant, 10), row.kb, row.id); err != nil {
 					return err
 				}
 			}
@@ -379,24 +380,28 @@ func (s *Service) promoteDue(ctx context.Context, now time.Time) error {
 	}
 	if s.autoConfirm {
 		for _, t := range due {
-			if err := s.cleanTask(ctx, Scope{TenantID: t.TenantID, KnowledgeBaseID: t.KnowledgeBaseID}, t.DocumentID); err != nil {
-				_ = s.markFailed(ctx, Scope{TenantID: t.TenantID, KnowledgeBaseID: t.KnowledgeBaseID}, t.DocumentID, err.Error())
+			scope := Scope{TenantID: t.TenantID, KnowledgeBaseID: t.KnowledgeBaseID}
+			if err := s.cleanTask(ctx, scope, t, "", ""); err != nil {
+				_ = s.markFailed(ctx, scope, t, err)
 			}
 		}
 		return nil
 	}
-	groups := map[string]int{}
-	for _, t := range due {
-		groups[t.KnowledgeBaseID]++
-	}
-	if len(groups) == 0 {
+	if len(due) == 0 {
 		return nil
 	}
+	groups := map[string]int{}
 	err = s.db.Write(ctx, func(tx *sql.Tx) error {
 		for _, t := range due {
-			if _, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,notice_due=1,last_notified_at=?,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND status=?`, StatusAwaiting, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), strconv.FormatUint(s.tenant, 10), t.KnowledgeBaseID, t.DocumentID, StatusPending); err != nil {
+			res, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,revision=revision+1,notice_due=1,last_notified_at=?,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND status=? AND revision=?`, StatusAwaiting, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), strconv.FormatUint(s.tenant, 10), t.KnowledgeBaseID, t.DocumentID, StatusPending, t.Revision)
+			if err != nil {
 				return err
 			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			groups[t.KnowledgeBaseID] += int(n)
 		}
 		return nil
 	})
@@ -404,6 +409,9 @@ func (s *Service) promoteDue(ctx context.Context, now time.Time) error {
 		return err
 	}
 	for kb, n := range groups {
+		if n == 0 {
+			continue
+		}
 		if err := s.sendNotice(ctx, Scope{TenantID: s.tenant, KnowledgeBaseID: kb}, "due", n); err != nil {
 			return err
 		}
@@ -577,34 +585,50 @@ func (s *Service) Confirm(ctx context.Context, scope Scope, id, actor, operation
 	if t.Revision != expected || t.Status != StatusPending && t.Status != StatusAwaiting && t.Status != StatusFailed {
 		return Task{}, ErrConflict
 	}
-	if err := s.cleanTask(ctx, scope, id); err != nil {
-		_ = s.markFailed(ctx, scope, id, err.Error())
+	if err := s.cleanTask(ctx, scope, t, actor, operation); err != nil {
+		_ = s.markFailed(ctx, scope, t, err)
 		return Task{}, err
 	}
-	_ = s.audit(ctx, scope, id, "cleanup", actor, map[string]any{"operation_id": operation})
 	return s.task(ctx, scope, id)
 }
 
-func (s *Service) cleanTask(ctx context.Context, scope Scope, id string) error {
+func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, operation string) error {
+	id := task.DocumentID
 	var deletedAt string
 	err := s.db.ViewNative(ctx, s.nativePath, func(tx *sql.Tx) error {
 		return tx.QueryRowContext(ctx, `SELECT COALESCE(deleted_at,'') FROM weknora.knowledges WHERE tenant_id=? AND knowledge_base_id=? AND id=?`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id).Scan(&deletedAt)
 	})
-	if err != nil || deletedAt == "" {
-		if err == nil {
-			_ = s.markCancelled(ctx, scope, id, "document_restored")
-			return ErrConflict
-		}
+	if err != nil {
 		return err
+	}
+	if deletedAt == "" {
+		if err := s.markCancelled(ctx, scope, task); err != nil {
+			return err
+		}
+		return ErrConflict
+	}
+	if deletedAt != task.NativeDeletedAt {
+		return ErrConflict
 	}
 	now := s.now().UTC()
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,cleaned_at=?,last_error='',revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND revision=? AND status=? AND native_deleted_at=?`, StatusCleaned, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id, task.Revision, task.Status, deletedAt)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrConflict
+		}
 		var family int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ext_business_document_family_members WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id).Scan(&family); err != nil {
 			return err
 		}
 		if family > 0 {
-			return ErrConflict
+			return errFamilyReference
 		}
 		stmts := []string{
 			"DELETE FROM ext_review_alerts WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
@@ -621,29 +645,25 @@ func (s *Service) cleanTask(ctx context.Context, scope Scope, id string) error {
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,cleaned_at=?,last_error='',revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, StatusCleaned, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id); err != nil {
-			return err
-		}
-		return s.auditTx(ctx, tx, scope, id, "cleaned", "", map[string]any{"cleaned_at": now})
+		return s.auditTx(ctx, tx, scope, id, "cleaned", actor, map[string]any{"cleaned_at": now, "operation_id": operation})
 	})
 }
 
-func (s *Service) markFailed(ctx context.Context, scope Scope, id, reason string) error {
+func (s *Service) markFailed(ctx context.Context, scope Scope, task Task, cause error) error {
+	if cause == ErrConflict {
+		return nil
+	}
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,last_error=?,attempts=attempts+1,revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND status<>?`, StatusFailed, reason, s.now().UTC().Format(time.RFC3339Nano), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id, StatusCleaned)
+		_, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,last_error=?,attempts=attempts+1,revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND revision=? AND status=? AND native_deleted_at=?`, StatusFailed, cause.Error(), s.now().UTC().Format(time.RFC3339Nano), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, task.DocumentID, task.Revision, task.Status, task.NativeDeletedAt)
 		return err
 	})
 }
 
-func (s *Service) markCancelled(ctx context.Context, scope Scope, id, reason string) error {
+func (s *Service) markCancelled(ctx context.Context, scope Scope, task Task) error {
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,last_error=?,revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, StatusCancelled, reason, s.now().UTC().Format(time.RFC3339Nano), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id)
+		_, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,last_error=?,revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND revision=? AND status=? AND native_deleted_at=?`, StatusCancelled, "document_restored", s.now().UTC().Format(time.RFC3339Nano), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, task.DocumentID, task.Revision, task.Status, task.NativeDeletedAt)
 		return err
 	})
-}
-
-func (s *Service) audit(ctx context.Context, scope Scope, id, action, actor string, detail map[string]any) error {
-	return s.db.Write(ctx, func(tx *sql.Tx) error { return s.auditTx(ctx, tx, scope, id, action, actor, detail) })
 }
 
 func (s *Service) auditTx(ctx context.Context, tx *sql.Tx, scope Scope, id, action, actor string, detail map[string]any) error {

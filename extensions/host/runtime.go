@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/attachmentcleanup"
+	"github.com/ybochuan/LanRAG-Next/extensions/attachmentworkbench"
 	"github.com/ybochuan/LanRAG-Next/extensions/bridge"
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
 	"github.com/ybochuan/LanRAG-Next/extensions/cleanup"
@@ -111,6 +112,8 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	var businessService *business.Service
 	var upstream *weknora.Client
 	var attachmentCleanup *attachmentcleanup.Service
+	var workbenchAttachments *attachmentworkbench.Service
+	var workbenchImporter *attachment.Importer
 	var cleanupService *cleanup.Service
 	var retentionService *retention.Service
 	var scopes []ingest.Scope
@@ -197,6 +200,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		}
 		if parserCfg.Attachments != nil {
 			parserCfg.Attachments.WithSemantics(db)
+			workbenchImporter = parserCfg.Attachments
 		}
 		native, err = parser.NewPersistentNativeHandler(parserCfg, db)
 		if err != nil {
@@ -227,10 +231,18 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			return err
 		}
 		policy.WithAttachments(attachmentSource)
+		policy.WithAttachmentRelations(businessService)
+		if workbenchImporter == nil {
+			workbenchImporter = attachment.NewImporter(attachmentSource, cfg.KnowledgeBaseIDs).WithSemantics(db)
+		}
+		workbenchAttachments = attachmentworkbench.New(db, attachmentSource, workbenchImporter).WithRelations(businessService)
 		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs, NativeDBPath: cfg.NativeDBPath}
 		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
 		if cfg.NativeDBPath != "" {
 			attachmentCleanup = attachmentcleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, attachmentSource.DeleteAttachment, cfg.RetryDelay)
+			attachmentCleanup.WithReclaimer(func(ctx context.Context, kb, doc, hash string) (string, error) {
+				return attachmentSource.ReclaimDeletedAttachment(ctx, cfg.ManagementKey, kb, doc, hash)
+			})
 			services.BeforeAttachmentDelete = &bridge.AttachmentDeleteHandler{Key: cfg.ManagementKey, Cleanup: attachmentCleanup}
 			cleanupService = cleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, cfg.CleanupRetention, cfg.CleanupAuto).WithReady(upstream.Health)
 			cleanupNotifier = newCleanupNotifier(cfg.UpstreamURL, cfg.ManagementKey)
@@ -258,7 +270,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	server := bridge.NewServerWithServices(services)
 	{
 		original := server.Handler
-		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService).WithCleanup(cleanupService)
+		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService).WithCleanup(cleanupService).WithAttachments(workbenchAttachments)
 		if upstream != nil {
 			manager.WithNativeSQLite(cfg.NativeDBPath, upstream.DocumentTitles)
 			manager.WithRenditions(lineage.NewRenditions(sourceRegistry, upstream.OriginalSHA256))
@@ -273,7 +285,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 				proofs.ServeHTTP(w, r)
 				return
 			}
-			if r.URL.Path == "/management/lifecycle" {
+			if r.URL.Path == "/management/lifecycle" || r.URL.Path == "/management/attachment-upload" {
 				manager.ServeHTTP(w, r)
 				return
 			}
@@ -287,6 +299,22 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	launch := func(fn func(context.Context) error) {
 		tasks.Add(1)
 		go func() { defer tasks.Done(); backgroundResult <- fn(runCtx) }()
+	}
+	if workbenchAttachments != nil {
+		launch(func(ctx context.Context) error {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				if err := workbenchAttachments.SyncTitles(ctx); err != nil && ctx.Err() == nil {
+					report("attachment_title_sync_failed")
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+				}
+			}
+		})
 	}
 	if alertNotifier != nil {
 		launch(func(ctx context.Context) error { alertNotifier.Run(ctx, report); return nil })

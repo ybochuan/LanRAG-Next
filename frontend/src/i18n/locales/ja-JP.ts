@@ -9452,6 +9452,7 @@ export default {
     },
     "detail": {
       "life": "ライフサイクル",
+      "attachments": "添付ファイル",
       "family": "バージョンファミリー",
       "relations": "関連",
       "graph": "関係グラフ",

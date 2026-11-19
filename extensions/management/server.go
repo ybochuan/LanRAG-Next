@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/attachmentworkbench"
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
 	"github.com/ybochuan/LanRAG-Next/extensions/cleanup"
 	"github.com/ybochuan/LanRAG-Next/extensions/dependencies"
@@ -23,15 +24,16 @@ import (
 
 // Server serves only server-authorized scopes; its credential never reaches a browser.
 type Server struct {
-	db         *store.DB
-	key        string
-	scopes     map[lifecycle.PolicyScope]bool
-	sources    *lineage.Registry
-	business   *business.Service
-	cleanup    *cleanup.Service
-	renditions *lineage.Renditions
-	nativeDB   string
-	titles     func(context.Context, string, []string) (map[string]string, error)
+	db          *store.DB
+	key         string
+	scopes      map[lifecycle.PolicyScope]bool
+	sources     *lineage.Registry
+	business    *business.Service
+	cleanup     *cleanup.Service
+	attachments *attachmentworkbench.Service
+	renditions  *lineage.Renditions
+	nativeDB    string
+	titles      func(context.Context, string, []string) (map[string]string, error)
 }
 
 // WithNativeSQLite supplies the read-only join and its scoped API fallback.
@@ -45,6 +47,8 @@ func (s *Server) WithBusiness(b *business.Service) *Server { s.business = b; ret
 
 // WithCleanup shares the worker's cleanup queue with workbench actions.
 func (s *Server) WithCleanup(c *cleanup.Service) *Server { s.cleanup = c; return s }
+
+func (s *Server) WithAttachments(a *attachmentworkbench.Service) *Server { s.attachments = a; return s }
 
 // WithSources enables explicit declarations using the real native snapshot reader.
 func (s *Server) WithSources(r *lineage.Registry) *Server { s.sources = r; return s }
@@ -119,6 +123,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "unsupported_version")
 		return
 	}
+	if r.URL.Path == "/management/attachment-upload" {
+		s.attachmentUpload(w, r)
+		return
+	}
 	var req Request
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	dec.DisallowUnknownFields()
@@ -152,7 +160,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	data, err := s.execute(r.Context(), req)
 	if err != nil {
 		status, code := 400, "invalid_configuration"
-		if errors.Is(err, lifecycle.ErrConfigurationConflict) || errors.Is(err, lineage.ErrConflict) || errors.Is(err, business.ErrConflict) {
+		if errors.Is(err, lifecycle.ErrConfigurationConflict) || errors.Is(err, lineage.ErrConflict) || errors.Is(err, business.ErrConflict) || errors.Is(err, cleanup.ErrConflict) || errors.Is(err, store.ErrAttachmentConflict) {
 			status, code = 409, "revision_conflict"
 		}
 		if errors.Is(err, errScopeNotConfigured) {

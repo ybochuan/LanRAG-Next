@@ -28,6 +28,7 @@ type Target struct {
 	ParentDocumentID string `json:"parent_document_id,omitempty"`
 	ImportID         string `json:"import_id,omitempty"`
 	IsAttachment     bool   `json:"is_attachment,omitempty"`
+	Title            string `json:"title,omitempty"`
 }
 
 // Service persists intent in the extension DB and only reads the native DB.
@@ -38,6 +39,7 @@ type Service struct {
 	kbs        map[string]bool
 	scopeJSON  string
 	delete     func(context.Context, string, string, string) error
+	reclaim    func(context.Context, string, string, string) (string, error)
 	retry      time.Duration
 	now        func() time.Time
 }
@@ -56,6 +58,14 @@ func New(db *store.DB, nativePath string, tenant uint64, kbs []string, deleteChi
 // A child scheduled by this worker must still match its receipt when the
 // native queue actually reaches the authorized deletion checkpoint.
 func (s *Service) Prepare(ctx context.Context, tenant uint64, targets []Target) error {
+	return s.prepare(ctx, tenant, targets, false)
+}
+
+func (s *Service) Validate(ctx context.Context, tenant uint64, targets []Target) error {
+	return s.prepare(ctx, tenant, targets, true)
+}
+
+func (s *Service) prepare(ctx context.Context, tenant uint64, targets []Target, checkOnly bool) error {
 	if tenant == 0 || tenant != s.tenant || len(targets) == 0 {
 		return ErrScope
 	}
@@ -64,7 +74,25 @@ func (s *Service) Prepare(ctx context.Context, tenant uint64, targets []Target) 
 			return ErrScope
 		}
 	}
+	byKB := map[string][]string{}
+	for _, target := range targets {
+		byKB[target.KnowledgeBaseID] = append(byKB[target.KnowledgeBaseID], target.DocumentID)
+	}
+	check := func(tx *sql.Tx) error {
+		for kb, ids := range byKB {
+			if err := validateSharedDelete(ctx, tx, tenant, kb, ids); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if checkOnly {
+		return s.db.View(ctx, check)
+	}
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
+		if err := check(tx); err != nil {
+			return err
+		}
 		owner := fmt.Sprint(tenant)
 		stamp := s.now().UTC().Format(time.RFC3339Nano)
 		for _, target := range targets {
@@ -89,6 +117,13 @@ func (s *Service) Prepare(ctx context.Context, tenant uint64, targets []Target) 
 				ON CONFLICT(tenant_id,knowledge_base_id,document_id) DO NOTHING`, owner, target.KnowledgeBaseID, target.DocumentID, stamp); err != nil {
 				return err
 			}
+			if s.reclaim != nil && target.FileHash != "" {
+				if _, err = tx.ExecContext(ctx, `INSERT INTO ext_attachment_reclaims(tenant_id,knowledge_base_id,document_id,parent_document_id,file_hash,title)
+					VALUES(?,?,?,?,?,?) ON CONFLICT(tenant_id,knowledge_base_id,document_id) DO NOTHING`,
+					owner, target.KnowledgeBaseID, target.DocumentID, target.ParentDocumentID, target.FileHash, target.Title); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})
@@ -108,7 +143,7 @@ func (s *Service) due(ctx context.Context) ([]job, error) {
 			FROM ext_attachment_links a
 			JOIN ext_attachment_delete_intents d ON d.tenant_id=a.tenant_id AND d.knowledge_base_id=a.knowledge_base_id AND d.document_id=a.parent_document_id
 			WHERE a.tenant_id=? AND a.knowledge_base_id IN (SELECT value FROM json_each(?))
-			AND a.attachment_id IS NOT NULL AND a.removed_at IS NULL AND a.cleanup_next_at<=?
+			AND a.attachment_id IS NOT NULL AND a.removed_at IS NULL AND a.detached_at IS NULL AND a.cleanup_next_at<=?
 			ORDER BY a.cleanup_next_at,a.import_id LIMIT 32`, fmt.Sprint(s.tenant), s.scopeJSON, s.now().UnixMilli())
 		if err != nil {
 			return err
@@ -154,7 +189,7 @@ func (s *Service) Sweep(ctx context.Context) error {
 		}
 		err = errors.Join(err, s.process(ctx, j))
 	}
-	return err
+	return errors.Join(err, s.sweepReclaims(ctx))
 }
 
 func (s *Service) process(ctx context.Context, j job) error {

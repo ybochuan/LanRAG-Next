@@ -1870,6 +1870,9 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("workspace context unavailable"))
 		return
 	}
+	if !validateAttachmentDelete(c, effCtx, []*types.Knowledge{knowledge}) {
+		return
+	}
 
 	logger.Infof(ctx, "Enqueuing knowledge delete, ID: %s", secutils.SanitizeForLog(id))
 	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, knowledge.KnowledgeBaseID, []string{id})
@@ -1973,6 +1976,9 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		}
 	}
 
+	if !validateAttachmentDelete(c, ctx, knowledgeList) {
+		return
+	}
 	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, ids)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
@@ -1991,6 +1997,18 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 			"deleted_count": len(ids),
 		},
 	})
+}
+
+func validateAttachmentDelete(c *gin.Context, ctx context.Context, docs []*types.Knowledge) bool {
+	if err := extensionbridge.ValidateAttachmentDelete(ctx, docs); err != nil {
+		if goerrors.Is(err, extensionbridge.ErrAttachmentDeleteConflict) {
+			_ = c.Error(errors.NewConflictError("unlink active attachment references before deleting"))
+		} else {
+			_ = c.Error(errors.NewServiceUnavailableError("attachment cleanup is not ready; retry document deletion"))
+		}
+		return false
+	}
+	return true
 }
 
 // ClearKnowledgeBaseContents godoc
@@ -2051,6 +2069,9 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
+	if !validateAttachmentDelete(c, ctx, knowledgeList) {
+		return
+	}
 	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, knowledgeIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
@@ -2116,7 +2137,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	c.Header("Content-Transfer-Encoding", "binary")
 	c.Header("Expires", "0")
 	if err := filetransport.Serve(c.Writer, c.Request, file, filetransport.Options{
-		Filename: filename, Download: true, ContentType: "application/octet-stream", CacheControl: "private, no-store",
+		Filename: titledKnowledgeDownloadName(knowledge.Title, filename), Download: true, ContentType: "application/octet-stream", CacheControl: "private, no-store",
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to send file: %v", err)
 	}
@@ -2414,7 +2435,9 @@ func latestActivity(times ...time.Time) time.Time {
 // Omitted fields are left unchanged; an explicit empty description clears the summary.
 type UpdateKnowledgeRequest struct {
 	// New title; omit to keep it.
-	Title *string `json:"title" extensions:"x-agent"`
+	Title            *string `json:"title" extensions:"x-agent"`
+	ExpectedTitle    *string `json:"expected_title"`
+	ExpectedFileHash *string `json:"expected_file_hash"`
 	// New summary; omit to keep it, empty clears it.
 	Description    *string         `json:"description" extensions:"x-agent"`
 	CustomMetadata json.RawMessage `json:"custom_metadata"`
@@ -2466,7 +2489,25 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		knowledge.DescriptionSpecified = true
 	}
 
-	if err := h.kgService.UpdateKnowledge(effCtx, &knowledge); err != nil {
+	if req.ExpectedTitle != nil || req.ExpectedFileHash != nil {
+		if req.Title == nil || req.ExpectedTitle == nil || req.ExpectedFileHash == nil ||
+			strings.TrimSpace(*req.Title) == "" || len(*req.Title) > 1024 ||
+			req.Description != nil || req.CustomMetadata != nil {
+			c.Error(errors.NewBadRequestError("invalid conditional title update"))
+			return
+		}
+		editor, ok := h.kgService.(interface {
+			CompareKnowledgeTitle(context.Context, string, string, string, string) error
+		})
+		if !ok {
+			c.Error(errors.NewServiceUnavailableError("conditional title updates are unavailable"))
+			return
+		}
+		err = editor.CompareKnowledgeTitle(effCtx, id, *req.ExpectedFileHash, *req.ExpectedTitle, strings.TrimSpace(*req.Title))
+	} else {
+		err = h.kgService.UpdateKnowledge(effCtx, &knowledge)
+	}
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		var appErr *errors.AppError
 		if goerrors.As(err, &appErr) {

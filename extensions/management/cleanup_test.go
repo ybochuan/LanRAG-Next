@@ -46,4 +46,8 @@ func TestCleanupManagementActions(t *testing.T) {
 	if err := json.Unmarshal(hold.Body.Bytes(), &holdOut); err != nil || hold.Code != 200 || holdOut.Data.Status != cleanup.StatusHeld {
 		t.Fatalf("hold=%d %s", hold.Code, hold.Body.String())
 	}
+	staleConfirm := call(s, `{"action":"business_cleanup_confirm","tenant_id":7,"knowledge_base_id":"kb","can_write":true,"actor_id":"7:user","operation_id":"op-confirm","expected_revision":1,"business":{"id":"43db0b16-c44f-4764-9827-87d4a626b9ec"}}`, s.key)
+	if staleConfirm.Code != 409 {
+		t.Fatalf("stale confirm=%d %s", staleConfirm.Code, staleConfirm.Body.String())
+	}
 }

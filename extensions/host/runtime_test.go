@@ -187,7 +187,10 @@ func TestRuntimeStartsScopedWorkersRetriesAndClosesDatabase(t *testing.T) {
 			result = map[string]any{"success": true, "total": 1, "page": 1, "page_size": 50, "data": []any{map[string]any{"id": doc, "tenant_id": 7, "knowledge_base_id": kb, "parse_status": "completed", "updated_at": "2026-10-30T00:00:00Z"}}}
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/tags"):
 			result = map[string]any{"success": true, "data": map[string]any{"total": 2, "page": 1, "page_size": 50, "data": []any{tag(kb+"-business", "business:A"), tag(kb+"-active", "gov:state:active")}}}
-		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/knowledge/"):
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/knowledge/") && strings.HasSuffix(r.URL.Path, "/tags/ids"):
+			if r.URL.Path == "/api/v1/knowledge/doc-b/tags/ids" {
+				kb, doc = "kb-b", "doc-b"
+			}
 			var values []any
 			for _, id := range tags[doc] {
 				name := "business:A"
@@ -196,7 +199,7 @@ func TestRuntimeStartsScopedWorkersRetriesAndClosesDatabase(t *testing.T) {
 				}
 				values = append(values, tag(id, name))
 			}
-			result = map[string]any{"success": true, "data": map[string]any{"id": doc, "tenant_id": 7, "knowledge_base_id": kb, "tags": values}}
+			result = map[string]any{"success": true, "data": map[string]any{"knowledge_id": doc, "tenant_id": 7, "knowledge_base_id": kb, "tags": values}}
 		case r.Method == "PUT" && r.URL.Path == "/api/v1/knowledge/tags":
 			var body struct {
 				KB   string   `json:"kb_id"`

@@ -20,7 +20,7 @@ type Decision struct {
 var errInvalidDecision = errors.New("invalid before_retrieve policy response")
 
 func decodeDecision(data, request []byte) (d Decision, err error) {
-	if len(data) > 1<<20 {
+	if len(data) > maxRetrieveBytes {
 		return d, errInvalidDecision
 	}
 	// All six canonical fields are required, unique and non-null. Values are
@@ -66,7 +66,7 @@ func decodeDecision(data, request []byte) (d Decision, err error) {
 		KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
 		KnowledgeIDs     []string `json:"knowledge_ids"`
 	}
-	if json.Unmarshal(request, &sent) != nil || sent.RequestID == "" || sent.TenantID == 0 || len(sent.KnowledgeBaseIDs) == 0 || len(sent.KnowledgeBaseIDs) > 1000 || len(sent.KnowledgeIDs) > 10000 || sent.KnowledgeIDs == nil || d.RequestID != sent.RequestID || d.TenantID != sent.TenantID {
+	if json.Unmarshal(request, &sent) != nil || sent.RequestID == "" || sent.TenantID == 0 || len(sent.KnowledgeBaseIDs) == 0 || len(sent.KnowledgeBaseIDs) > 1000 || len(sent.KnowledgeIDs) > MaxRetrieveDocuments || sent.KnowledgeIDs == nil || d.RequestID != sent.RequestID || d.TenantID != sent.TenantID {
 		return Decision{}, errInvalidDecision
 	}
 	kbSet, ok := uniqueSet(sent.KnowledgeBaseIDs)

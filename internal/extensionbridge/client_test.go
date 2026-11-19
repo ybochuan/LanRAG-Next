@@ -125,4 +125,15 @@ func TestBeforeRetrieveUnavailableTimeoutAndCancellation(t *testing.T) {
 			t.Fatal("unencodable payload permitted")
 		}
 	})
+	t.Run("oversized_payload", func(t *testing.T) {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Error("oversized scope reached the Host")
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+		t.Cleanup(s.Close)
+		routeTo(t, s.URL)
+		if _, err := BeforeRetrieve(t.Context(), strings.Repeat("x", maxRetrieveBytes)); !errors.Is(err, ErrRetrieveScopeTooLarge) {
+			t.Fatalf("oversized request returned %v", err)
+		}
+	})
 }

@@ -837,6 +837,28 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 	return file, knowledge.FileName, nil
 }
 
+// CompareKnowledgeTitle is a title-only native write for clients with a current snapshot.
+func (s *knowledgeService) CompareKnowledgeTitle(ctx context.Context, id, hash, previous, title string) error {
+	record, _, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, id)
+	if err != nil {
+		return err
+	}
+	writer, ok := s.repo.(interface {
+		CompareKnowledgeTitle(context.Context, uint64, string, string, string, string, string) (bool, error)
+	})
+	if !ok {
+		return werrors.NewServiceUnavailableError("conditional title updates are unavailable")
+	}
+	updated, err := writer.CompareKnowledgeTitle(ctx, record.TenantID, record.KnowledgeBaseID, record.ID, hash, previous, title)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return werrors.NewConflictError("document title or version changed")
+	}
+	return nil
+}
+
 func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	if knowledge == nil {
 		return werrors.NewBadRequestError("knowledge cannot be nil")

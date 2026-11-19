@@ -9452,6 +9452,7 @@ export default {
     },
     "detail": {
       "life": "수명 주기",
+      "attachments": "첨부 파일",
       "family": "버전 패밀리",
       "relations": "관계",
       "graph": "관계 그래프",

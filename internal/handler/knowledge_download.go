@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -37,6 +38,7 @@ type BatchDownloadKnowledgeRequest struct {
 type knowledgeDownloadEntry struct {
 	ID         string
 	FolderPath string
+	Title      string
 }
 
 // BatchDownloadKnowledge godoc
@@ -104,7 +106,7 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 		if !item.IsManual() && item.FilePath == "" {
 			continue
 		}
-		entries = append(entries, knowledgeDownloadEntry{ID: id, FolderPath: item.FolderPath})
+		entries = append(entries, knowledgeDownloadEntry{ID: id, FolderPath: item.FolderPath, Title: item.Title})
 		selected = append(selected, item)
 	}
 	if len(entries) == 0 {
@@ -223,7 +225,7 @@ func writeKnowledgeDownloadArchive(
 				gin.H{"knowledge_id": entry.ID},
 			)
 		}
-		name := uniqueKnowledgeDownloadZipPath(entry.FolderPath, filename, usedNames)
+		name := uniqueKnowledgeDownloadZipPath(entry.FolderPath, titledKnowledgeDownloadName(entry.Title, filename), usedNames)
 		// 原样存储可避免 PDF、Office 等已压缩文件再次压缩的 CPU 开销。
 		zipEntry, err := writer.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
 		if err != nil {
@@ -309,6 +311,26 @@ func sanitizeDownloadFileName(filename string) string {
 		stem = "document"
 	}
 	return escapeWindowsReservedName(stem) + ext
+}
+
+// titledKnowledgeDownloadName keeps the original format while using the current title.
+func titledKnowledgeDownloadName(title, filename string) string {
+	title = strings.TrimSpace(norm.NFC.String(title))
+	if title == "" || strings.EqualFold(title, filename) {
+		return sanitizeDownloadFileName(filename)
+	}
+	ext := path.Ext(filename)
+	if len(ext) > 20 {
+		ext = ""
+	}
+	if ext != "" && strings.HasSuffix(strings.ToLower(title), strings.ToLower(ext)) {
+		title = title[:len(title)-len(ext)]
+	}
+	title = strings.Trim(sanitizeDownloadRunes(title), " .")
+	if title == "" {
+		return sanitizeDownloadFileName(filename)
+	}
+	return sanitizeDownloadFileName(title + ext)
 }
 
 func sanitizeDownloadFolderPath(folderPath string) string {

@@ -9458,6 +9458,7 @@ export default {
     },
     "detail": {
       "life": "Lifecycle",
+      "attachments": "Attachments",
       "family": "Version family",
       "relations": "Relations",
       "graph": "Relation graph",

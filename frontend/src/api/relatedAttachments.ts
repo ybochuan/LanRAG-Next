@@ -1,5 +1,6 @@
 import { downKnowledgeDetails } from '@/api/knowledge-base'
 import type { RelatedAttachment } from '@/utils/relatedAttachments'
+import { downloadResponseName } from '@/utils/request'
 
 /** Use native authenticated downloads; credentials never enter an href. */
 export async function downloadRelatedAttachment(item: RelatedAttachment): Promise<void> {
@@ -8,7 +9,7 @@ export async function downloadRelatedAttachment(item: RelatedAttachment): Promis
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = item.file_name
+  anchor.download = downloadResponseName(blob, item.file_name)
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()

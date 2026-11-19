@@ -1,8 +1,10 @@
+from contextlib import closing
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,6 +21,37 @@ class LauncherConfigTest(unittest.TestCase):
         reachable = patch.object(launcher, "reachable_origin", return_value=False)
         reachable.start()
         self.addCleanup(reachable.stop)
+
+    def test_bootstrap_rebinds_the_scope_after_creating_the_first_library(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            native = root / "native.db"
+            settings = {"DB_PATH": str(native)}
+            with patch.object(launcher, "ROOT", root), patch.object(launcher, "STATE", root / "private.json"), patch.dict(os.environ, settings, clear=True):
+                launcher.prepare(root / "private.env")
+                cfg = launcher.load()
+                self.assertEqual(cfg["AGENTRAG_MODE"], "probe")
+                self.assertEqual(cfg["AGENTRAG_PARSER_SCOPES"], "[]")
+                self.assertEqual(cfg["AGENTRAG_WEKNORA_API_KEY"], "")
+                with self.assertRaises(SystemExit) as not_ready:
+                    launcher.scope_ready()
+                self.assertEqual(not_ready.exception.code, 3)
+                with closing(sqlite3.connect(native)) as source, source:
+                    source.executescript("CREATE TABLE tenants(id INTEGER); CREATE TABLE knowledge_bases(id TEXT, tenant_id INTEGER, deleted_at TEXT); INSERT INTO tenants VALUES(7)")
+                launcher.save({**cfg, "AGENTRAG_TENANT_ID": "7", "AGENTRAG_KB_IDS": "deleted-kb", "AGENTRAG_WEKNORA_API_KEY": "old-scope", "MCP_ADMIN_KEY": "existing-admin"})
+                launcher.prepare(root / "private.env")
+                cfg = launcher.load()
+                self.assertEqual(cfg["AGENTRAG_MODE"], "probe")
+                self.assertEqual(cfg["MCP_ADMIN_KEY"], "existing-admin")
+                with closing(sqlite3.connect(native)) as source, source:
+                    source.execute("INSERT INTO knowledge_bases VALUES('first-kb',7,NULL)")
+                launcher.scope_ready()
+                launcher.prepare(root / "private.env")
+                cfg = launcher.load()
+                self.assertEqual(cfg["AGENTRAG_MODE"], "worker")
+                self.assertEqual(cfg["AGENTRAG_KB_IDS"], "first-kb")
+                self.assertTrue(cfg["AGENTRAG_WEKNORA_API_KEY"].startswith("bootstrap-"))
+                self.assertEqual(json.loads(cfg["AGENTRAG_PARSER_SCOPES"]), [{"tenant_id": 7, "knowledge_base_id": "first-kb"}])
 
     def test_paths_and_native_db_separation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -54,11 +87,17 @@ class LauncherConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             saved = {"AGENTRAG_TENANT_ID":"7", "AGENTRAG_KB_IDS":"kb-a", "ENV_FILE":str(root / "custom.env"), "DB_PATH":str(root / "custom.db"), "CORE_PORT":"18080", "MINERU_ENDPOINT":"http://127.0.0.1:18000", "AGENTRAG_PARSER_UPSTREAM_URL":"http://127.0.0.1:28000", "AGENTRAG_RECONCILE_INTERVAL":"17s", "SSRF_DISABLE":"false"}
+            with closing(sqlite3.connect(saved["DB_PATH"])) as native, native:
+                native.executescript("CREATE TABLE tenants(id INTEGER); CREATE TABLE knowledge_bases(id TEXT, tenant_id INTEGER, deleted_at TEXT); INSERT INTO tenants VALUES(7); INSERT INTO knowledge_bases VALUES('kb-a',7,NULL)")
             with patch.object(launcher,"ROOT",root), patch.object(launcher,"STATE",root / "private.json"), patch.dict(os.environ,{},clear=True):
                 launcher.save(saved)
                 launcher.prepare(root / "private.env")
                 restored = launcher.load()
-                for key,value in saved.items(): self.assertEqual(restored[key],value,key)
+                for key, value in saved.items():
+                    if key in ("ENV_FILE", "DB_PATH"):
+                        self.assertEqual(Path(restored[key]), Path(value), key)
+                    else:
+                        self.assertEqual(restored[key], value, key)
 
     def test_dotenv_export_spaces_quotes_and_complex_refusal(self):
         with tempfile.TemporaryDirectory() as directory:

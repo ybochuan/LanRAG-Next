@@ -3,17 +3,29 @@ package retrieval
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ybochuan/LanRAG-Next/extensions/contract"
-	"github.com/ybochuan/LanRAG-Next/extensions/store"
-	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 	"net/url"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/contract"
+	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/store"
+	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
+
+type AttachmentRelations interface {
+	AttachmentTemplates(context.Context, provenance.Scope, string) ([]string, error)
+}
+
+func (p *Policy) WithAttachmentRelations(relations AttachmentRelations) *Policy {
+	p.attachmentRelations = relations
+	return p
+}
 
 // AttachmentSource reads current relationship metadata from the native API.
 type AttachmentSource interface {
@@ -157,6 +169,11 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 			}
 		}
 	}
+	if p.attachmentRelations != nil {
+		if err := p.appendTemplateMatches(ctx, r, matches, seen, &ids); err != nil {
+			return nil, err
+		}
+	}
 	if len(ids) == 0 {
 		return result, nil
 	}
@@ -174,6 +191,13 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 	if e != nil {
 		return nil, e
 	}
+	var confirmed []store.AttachmentConfirmation
+	if p.db != nil {
+		confirmed, e = p.db.AttachmentConfirmations(ctx, r.TenantID, ids)
+		if e != nil {
+			return nil, e
+		}
+	}
 	parentHashes, parentTitles, parentMetaOK := p.attachmentParentMeta(ctx, matches, r.KnowledgeBaseIDs)
 	if !parentMetaOK {
 		semantics = map[string]store.AttachmentSemantic{}
@@ -190,7 +214,7 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 			if semantic, ok := semantics[d.ID]; ok && semantic.KnowledgeBaseID == d.KnowledgeBaseID {
 				// A changed parent file hash means the semantic mapping belongs to
 				// an older version and must not leak into the new version.
-				if parentHash := parentHashes[d.ParentDocumentID]; parentHash == "" || semantic.ParentFileHash == parentHash {
+				if parentHash := parentHashes[d.ParentDocumentID]; parentHash != "" && semantic.ParentFileHash == parentHash {
 					item.DisplayName = semantic.DisplayName
 					item.OriginalFilename = semantic.OriginalFilename
 					item.AttachmentSequence = semantic.AttachmentSequence
@@ -205,6 +229,25 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 			}
 			if item.ParentTitle == "" {
 				item.ParentTitle = parentTitles[d.ParentDocumentID]
+			}
+			if d.Title != "" && !strings.EqualFold(d.Title, d.FileName) {
+				item.DisplayName = d.Title
+			}
+			for _, decision := range confirmed {
+				if decision.AttachmentID == d.ID && decision.KnowledgeBaseID == d.KnowledgeBaseID &&
+					decision.ParentID == d.ParentDocumentID && decision.ParentHash == parentHashes[d.ParentDocumentID] &&
+					decision.AttachmentHash == d.FileHash {
+					item.MappingStatus = "manual"
+					item.ReferenceTitle = decision.Title
+					item.ReferenceLocation = decision.Location
+					item.ReferenceExcerpt = decision.Excerpt
+					item.AttachmentSequence = decision.Sequence
+					item.MappingConfidence = 0
+					break
+				}
+			}
+			if !d.IsAttachment && item.MappingStatus == "" {
+				item.MappingStatus = "template"
 			}
 			result[hit] = append(result[hit], item)
 		}
@@ -229,6 +272,57 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 		})
 	}
 	return result, nil
+}
+
+func (p *Policy) appendTemplateMatches(ctx context.Context, r contract.BeforeRetrieveRequest, matches map[string][]weknora.AttachmentDocument, seen map[string]bool, ids *[]string) error {
+	keys, _ := json.Marshal(r.KnowledgeIDs)
+	kbs, _ := json.Marshal(r.KnowledgeBaseIDs)
+	type parentScope struct{ kb, id string }
+	var parents []parentScope
+	if err := p.db.View(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT target_knowledge_base_id,target_document_id FROM ext_document_relations
+			WHERE tenant_id=? AND edge_type='template_for' AND status='active'
+			AND target_document_id IN (SELECT value FROM json_each(?)) AND target_knowledge_base_id IN (SELECT value FROM json_each(?))
+			ORDER BY target_knowledge_base_id,target_document_id`,
+			fmt.Sprint(r.TenantID), string(keys), string(kbs))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var parent parentScope
+			if err := rows.Scan(&parent.kb, &parent.id); err != nil {
+				return err
+			}
+			parents = append(parents, parent)
+		}
+		return rows.Err()
+	}); err != nil {
+		return err
+	}
+	for _, parent := range parents {
+		templates, err := p.attachmentRelations.AttachmentTemplates(ctx, provenance.Scope{TenantID: r.TenantID, KnowledgeBaseID: parent.kb}, parent.id)
+		if err != nil {
+			return err
+		}
+		templates = templates[:min(len(templates), 32)]
+		docs, err := p.attachments.AttachmentDocuments(ctx, []string{parent.kb}, templates)
+		if err != nil {
+			return err
+		}
+		for _, doc := range docs {
+			if doc.IsAttachment || doc.KnowledgeBaseID != parent.kb || doc.TenantID != r.TenantID {
+				continue
+			}
+			doc.ParentDocumentID = parent.id
+			matches[parent.id] = append(matches[parent.id], doc)
+			if !seen[doc.ID] {
+				seen[doc.ID] = true
+				*ids = append(*ids, doc.ID)
+			}
+		}
+	}
+	return nil
 }
 
 func (p *Policy) attachmentSemantics(ctx context.Context, ids []string) (map[string]store.AttachmentSemantic, error) {

@@ -26,6 +26,7 @@ func (h *AttachmentDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		RequestID string                     `json:"request_id"`
 		TenantID  uint64                     `json:"tenant_id"`
 		Targets   []attachmentcleanup.Target `json:"targets"`
+		CheckOnly bool                       `json:"check_only,omitempty"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 	dec := json.NewDecoder(r.Body)
@@ -34,7 +35,11 @@ func (h *AttachmentDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid_attachment_delete")
 		return
 	}
-	switch err := h.Cleanup.Prepare(r.Context(), req.TenantID, req.Targets); {
+	action := h.Cleanup.Prepare
+	if req.CheckOnly {
+		action = h.Cleanup.Validate
+	}
+	switch err := action(r.Context(), req.TenantID, req.Targets); {
 	case errors.Is(err, attachmentcleanup.ErrScope):
 		writeError(w, http.StatusForbidden, "attachment_delete_scope_denied")
 	case errors.Is(err, attachmentcleanup.ErrConflict):

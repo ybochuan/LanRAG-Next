@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,97 @@ import (
 
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
+
+func TestOriginalReclaimWaitsForTombstoneAndRetriesAcrossRestart(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+	extPath, nativePath := filepath.Join(dir, "ext.db"), filepath.Join(dir, "native.db")
+	original := filepath.Join(dir, "annex.docx")
+	if err := os.WriteFile(original, []byte("test attachment"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.OpenDurable(ctx, extPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { db.Close() }()
+	native, err := sql.Open("sqlite", nativePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	statements := []string{
+		"CREATE TABLE knowledges(id TEXT PRIMARY KEY, tenant_id INTEGER, knowledge_base_id TEXT, file_hash TEXT, metadata TEXT, parse_status TEXT, deleted_at TEXT)",
+		"INSERT INTO knowledges VALUES('annex',7,'kb','file-revision','{}','completed',NULL)",
+	}
+	for _, statement := range statements {
+		if _, err := native.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now, attempts := time.Now().UTC(), 0
+	reclaimer := func(_ context.Context, kb, id, hash string) (string, error) {
+		if kb != "kb" || id != "annex" || hash != "file-revision" {
+			t.Fatal("unexpected scoped file reclaim")
+		}
+		attempts++
+		if attempts == 1 {
+			return "", errors.New("fixture storage unavailable")
+		}
+		if err := os.Remove(original); err != nil {
+			return "", err
+		}
+		return "removed", nil
+	}
+	makeWorker := func() *Service {
+		s := New(db, nativePath, 7, []string{"kb"}, nil, time.Second).WithReclaimer(reclaimer)
+		s.now = func() time.Time { return now }
+		return s
+	}
+	s := makeWorker()
+	if err := s.Prepare(ctx, 7, []Target{{DocumentID: "annex", KnowledgeBaseID: "kb", FileHash: "file-revision"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sweep(ctx); err != nil || attempts != 0 {
+		t.Fatalf("reclaimed a live object: attempts=%d error=%v", attempts, err)
+	}
+	if _, err := native.Exec("UPDATE knowledges SET deleted_at='2026-11-19' WHERE id='annex'"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if err := s.Sweep(ctx); err == nil || attempts != 1 {
+		t.Fatalf("missing failed recovery attempt: attempts=%d error=%v", attempts, err)
+	}
+	if _, err := os.Stat(original); err != nil {
+		t.Fatal("unavailable storage lost its original")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.OpenDurable(ctx, extPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if err := makeWorker().Sweep(ctx); err != nil || attempts != 2 {
+		t.Fatalf("restart did not complete reclaim: attempts=%d error=%v", attempts, err)
+	}
+	if _, err := os.Stat(original); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("test original was not removed")
+	}
+	if err := db.View(ctx, func(tx *sql.Tx) error {
+		var state string
+		if err := tx.QueryRow("SELECT status FROM ext_attachment_reclaims WHERE document_id='annex'").Scan(&state); err != nil {
+			return err
+		}
+		if state != "removed" {
+			t.Fatalf("unexpected final reclaim state %q", state)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCleanupWaitsForNativeDeletionAndResumesAfterRestart(t *testing.T) {
 	ctx := t.Context()

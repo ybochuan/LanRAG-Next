@@ -7,7 +7,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -39,6 +42,7 @@ type ManagementError struct{ Status int }
 func (e *ManagementError) Error() string { return "lifecycle management unavailable" }
 
 var managementHTTPClient = &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+var attachmentManagementHTTPClient = &http.Client{Timeout: 45 * time.Second, Transport: managementHTTPClient.Transport, CheckRedirect: managementHTTPClient.CheckRedirect}
 
 // ManageLifecycle forwards to the fixed loopback host and verifies response scope.
 func ManageLifecycle(ctx context.Context, payload ManagementRequest) (json.RawMessage, error) {
@@ -58,7 +62,37 @@ func ManageLifecycle(ctx context.Context, payload ManagementRequest) (json.RawMe
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("X-AgentRAG-Bridge-Version", "1")
-	response, err := managementHTTPClient.Do(req)
+	client := managementHTTPClient
+	if strings.HasPrefix(payload.Action, "business_attachment_") {
+		client = attachmentManagementHTTPClient
+	}
+	return managementResponse(client, req, payload)
+}
+
+// UploadWorkbenchAttachment streams an authorized request to the local attachment importer.
+func UploadWorkbenchAttachment(ctx context.Context, payload ManagementRequest, version, filename string, data io.Reader) (json.RawMessage, error) {
+	key := os.Getenv("AGENTRAG_MANAGEMENT_KEY")
+	if len(key) < 32 || !payload.CanWrite {
+		return nil, &ManagementError{Status: 503}
+	}
+	if payload.DocumentID == "" || len(version) != 32 || filename == "" || len(filename) > 512 {
+		return nil, &ManagementError{Status: 400}
+	}
+	query := url.Values{"tenant_id": {strconv.FormatUint(payload.TenantID, 10)}, "knowledge_base_id": {payload.KnowledgeBaseID},
+		"document_id": {payload.DocumentID}, "parent_version": {version}, "file_name": {filename}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:8090/management/attachment-upload?"+query.Encode(), data)
+	if err != nil {
+		return nil, &ManagementError{Status: 503}
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("X-AgentRAG-Bridge-Version", "1")
+	req.Header.Set("Content-Type", "application/octet-stream")
+	return managementResponse(attachmentManagementHTTPClient, req, payload)
+}
+
+func managementResponse(client *http.Client, req *http.Request, payload ManagementRequest) (json.RawMessage, error) {
+	unavailable := &ManagementError{Status: 503}
+	response, err := client.Do(req)
 	if err != nil {
 		return nil, unavailable
 	}

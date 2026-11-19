@@ -9448,6 +9448,7 @@ export default {
     },
     "detail": {
       "life": "生命週期",
+      "attachments": "附件",
       "family": "版本族",
       "relations": "關聯關係",
       "graph": "關係圖",

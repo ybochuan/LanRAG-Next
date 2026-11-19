@@ -3,6 +3,7 @@ package cleanup
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,71 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
+
+func TestConfirmCannotOverrideConcurrentHold(t *testing.T) {
+	db, nativePath, now, notices := fixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	scope := Scope{TenantID: testTenant, KnowledgeBaseID: testKB}
+	s := newService(db, nativePath, now, notices)
+	if err := s.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.task(ctx, scope, testDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkedNative, resume := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-resume:
+		default:
+			close(resume)
+		}
+	}()
+	confirm := New(db, nativePath, testTenant, []string{testKB}, 30*24*time.Hour, false).
+		WithNow(func() time.Time {
+			select {
+			case <-checkedNative:
+			default:
+				close(checkedNative)
+			}
+			select {
+			case <-resume:
+			case <-ctx.Done():
+			}
+			return now
+		})
+	done := make(chan error, 1)
+	go func() {
+		_, err := confirm.Confirm(ctx, scope, testDoc, "actor:1", "confirm", task.Revision)
+		done <- err
+	}()
+	select {
+	case <-checkedNative:
+	case <-ctx.Done():
+		t.Fatal("confirmation did not reach the write boundary")
+	}
+	if _, err := s.Hold(ctx, scope, testDoc, 90, "audit", "actor:2", "hold", task.Revision); err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrConflict) {
+			t.Fatalf("stale confirmation returned %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("confirmation did not return")
+	}
+	held, err := s.task(ctx, scope, testDoc)
+	if err != nil || held.Status != StatusHeld || held.Revision != task.Revision+1 {
+		t.Fatalf("held=%+v err=%v", held, err)
+	}
+	if _, err := lifecycle.NewStore(db).Current(ctx, lifecycle.Scope{TenantID: testTenant, KnowledgeBaseID: testKB, DocumentID: testDoc}); err != nil {
+		t.Fatalf("held document lost its lifecycle projection: %v", err)
+	}
+}
 
 const (
 	testTenant = 7

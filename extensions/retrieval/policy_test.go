@@ -10,6 +10,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -99,6 +100,9 @@ func TestPolicyOnlyAllowsKnownActiveWithinScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := contract.BeforeRetrieveRequest{Context: contract.Context{RequestID: "r", SessionID: "s", Mode: "rag", TenantID: 7, KnowledgeBaseIDs: []string{"kb-a"}, KnowledgeIDs: []string{"active", "stale", "archived", "superseded", "failed", "pending", "scheduled", "missing", "foreign"}}}
+	for i := len(req.KnowledgeIDs); i < 201; i++ {
+		req.KnowledgeIDs = append(req.KnowledgeIDs, "missing-"+strconv.Itoa(i))
+	}
 	got, err := p.ExcludedDocumentIDs(ctx, req)
 	if err != nil || !reflect.DeepEqual(got, req.KnowledgeIDs[1:]) {
 		t.Fatalf("%v %v", got, err)

@@ -131,6 +131,9 @@ func (c *Client) uploadAttachment(ctx context.Context, kb, parent, name string, 
 	if err := writer.WriteField("metadata", string(metadata)); err != nil {
 		return "", false, errors.New("attachment metadata encoding failed")
 	}
+	if err := writer.WriteField("fileName", AttachmentFolder+"/"+name); err != nil {
+		return "", false, errors.New("attachment folder encoding failed")
+	}
 	file, err := writer.CreateFormFile("file", name)
 	if err != nil {
 		return "", false, errors.New("attachment filename encoding failed")

@@ -122,11 +122,16 @@ function isPublicAuthRequest(url?: string): boolean {
   return PUBLIC_AUTH_PATHS.some(p => url.includes(p));
 }
 
+const downloadHeaders = new WeakMap<Blob, string>();
+
 instance.interceptors.response.use(
   (response) => {
     // 根据业务状态码处理逻辑
     const { status, data } = response;
     if (status >= 200 && status < 300) {
+      if (typeof Blob !== 'undefined' && data instanceof Blob && response.headers['content-disposition']) {
+        downloadHeaders.set(data, String(response.headers['content-disposition']));
+      }
       return withHttpStatus(data, status);
     } else {
       return Promise.reject(withHttpStatus(data, status));
@@ -239,6 +244,19 @@ export async function getDown(url: string): Promise<Blob> {
     responseType: "blob",
   }) as unknown as Blob;
   return res
+}
+
+export function downloadResponseName(file: Blob, fallback: string): string {
+  const disposition = downloadHeaders.get(file) || '';
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (encoded) {
+    try {
+      const name = decodeURIComponent(encoded.trim());
+      if (name && !/[\/\\\u0000-\u001f]/.test(name)) return name;
+    } catch { /* fall back to the ordinary filename */ }
+  }
+  const ordinary = /filename="([^"]+)"/i.exec(disposition)?.[1];
+  return ordinary && !/[\/\\\u0000-\u001f]/.test(ordinary) ? ordinary : fallback;
 }
 
 export function postUpload(

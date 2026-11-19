@@ -120,3 +120,53 @@ func TestSweepPrunesOldEvidenceButKeepsRunHeads(t *testing.T) {
 		t.Fatal("retention run not recorded")
 	}
 }
+
+func TestSweepAdvancesPastPrunedRunsAndVersions(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	db := fixture(t, now)
+	ctx := context.Background()
+	old := now.AddDate(0, 0, -40).Format(time.RFC3339Nano)
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO ext_provenance_runs VALUES ('7',?,'a-pruned',2,'sealed',?,'{}')`, testKB, hash("9")); err != nil {
+			return err
+		}
+		for i, id := range []string{"historical-a", "historical-b"} {
+			if _, err := tx.Exec(`INSERT INTO ext_lineage_node VALUES (?,'7',?,'document_version','doc',?)`, id, testKB, old); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO ext_document_version VALUES (?,'7',?,'fam','doc',?,?,'life-1','','fixture',?)`, id, testKB, hash("8"), i+3, old); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO ext_source_snapshot_evidence VALUES ('7',?,?,'{}',?)`, testKB, id, hash("7")); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO ext_guidance_calls VALUES ('7',?,'old-run','call','user','session',1,'[]')`, testKB); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO ext_guidance_step_inputs VALUES ('7',?,'old-run','step-old','call',?)`, testKB, hash("6"))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := New(db, testTenant, []string{testKB}, 30*24*time.Hour).WithNow(func() time.Time { return now })
+	s.batch = 1
+	results, err := s.Sweep(ctx, "test")
+	if err != nil || len(results) != 1 {
+		t.Fatalf("results=%+v err=%v", results, err)
+	}
+	if r := results[0]; r.AuditDeleted != 1 || r.StepsDeleted != 1 || r.EvidenceDeleted != 2 {
+		t.Fatalf("sweep missed evidence: %+v", r)
+	}
+	if err := db.View(ctx, func(tx *sql.Tx) error {
+		var calls, roots int
+		err := tx.QueryRow(`SELECT (SELECT count(*) FROM ext_guidance_calls),
+			(SELECT count(*) FROM ext_source_snapshot_evidence WHERE version_node_id IN ('version-old','version-fresh'))`).Scan(&calls, &roots)
+		if err == nil && (calls != 1 || roots != 2) {
+			t.Fatalf("guidance budget or protected versions lost: calls=%d versions=%d", calls, roots)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -44,6 +44,10 @@ func (i *Importer) WithSemantics(db *store.DB) *Importer {
 
 // Process imports one level only and records ownership for confirmed uploads.
 func (i *Importer) Process(ctx context.Context, tenant uint64, kb, parent, name string, data []byte) ([]Receipt, error) {
+	return i.process(ctx, tenant, kb, parent, name, data, "", nil)
+}
+
+func (i *Importer) process(ctx context.Context, tenant uint64, kb, parent, name string, data []byte, expectedHash string, selected map[string]bool) ([]Receipt, error) {
 	if i == nil || i.client == nil || tenant != i.client.TenantID() || !i.allowed[kb] || !weknora.ValidID(parent) {
 		return nil, errors.New("attachment scope denied")
 	}
@@ -59,6 +63,9 @@ func (i *Importer) Process(ctx context.Context, tenant uint64, kb, parent, name 
 	if child {
 		return []Receipt{}, nil
 	}
+	if expectedHash != "" && parentFileHash != expectedHash {
+		return nil, store.ErrAttachmentConflict
+	}
 	files, err := i.registry.Extract(name, data)
 	if err != nil {
 		return nil, err
@@ -67,13 +74,56 @@ func (i *Importer) Process(ctx context.Context, tenant uint64, kb, parent, name 
 	if managedSource && parentFileHash != fmt.Sprintf("%x", md5.Sum(data)) {
 		return nil, errors.New("attachment source revision mismatch")
 	}
+	automatic := map[string]Semantic{}
+	if i.db != nil {
+		for index, semantic := range Analyze(name, data, parentTitle, files) {
+			fingerprint := sha256Hex(files[index].Data)
+			if _, found := automatic[fingerprint]; !found {
+				automatic[fingerprint] = semantic
+			}
+		}
+	}
+	if selected != nil {
+		matched := map[string]bool{}
+		chosen := []File{}
+		for _, file := range files {
+			hash := sha256Hex(file.Data)
+			if selected[hash] && !matched[hash] {
+				chosen = append(chosen, file)
+				matched[hash] = true
+			}
+		}
+		if len(matched) != len(selected) {
+			return nil, store.ErrAttachmentConflict
+		}
+		files = chosen
+	}
+	if i.db != nil && len(files) > 0 {
+		state, err := i.db.AttachmentImportState(ctx, tenant, kb, parent, parentFileHash)
+		if err != nil {
+			return nil, err
+		}
+		remaining := files[:0]
+		for _, file := range files {
+			if state[sha256Hex(file.Data)] == "removed" {
+				if selected != nil {
+					return nil, store.ErrAttachmentConflict
+				}
+				continue
+			}
+			remaining = append(remaining, file)
+		}
+		files = remaining
+	}
 	result := make([]Receipt, 0, len(files))
 	observedIDs := make([]string, 0, len(files))
 	bindings := make([]store.AttachmentBinding, 0, len(files))
+	var uploadErr error
 	for _, file := range files {
 		id, importID, err := i.upload(ctx, tenant, kb, parent, parentFileHash, file)
 		if err != nil {
-			return result, err
+			uploadErr = err
+			break
 		}
 		result = append(result, Receipt{file.Name, id})
 		observedIDs = append(observedIDs, id)
@@ -81,25 +131,30 @@ func (i *Importer) Process(ctx context.Context, tenant uint64, kb, parent, name 
 			bindings = append(bindings, store.AttachmentBinding{ImportID: importID, AttachmentID: id})
 		}
 	}
-	if managedSource {
+	if managedSource && (uploadErr == nil || len(bindings) > 0) {
 		isChild, _, currentHash, err := i.client.AttachmentParent(ctx, kb, parent)
 		if err != nil || isChild || currentHash != parentFileHash {
 			return result, errors.New("attachment parent changed during import")
 		}
-		if err = i.db.ReconcileAttachmentManifest(ctx, tenant, kb, parent, parentFileHash, bindings, observedIDs); err != nil {
+		if selected == nil && uploadErr == nil {
+			err = i.db.ReconcileAttachmentManifest(ctx, tenant, kb, parent, parentFileHash, bindings, observedIDs)
+		} else {
+			err = i.db.BindAttachments(ctx, tenant, kb, parent, parentFileHash, bindings)
+		}
+		if err != nil {
 			return result, err
 		}
 	}
-	if i.db != nil && len(files) > 0 {
-		semantics := Analyze(name, data, parentTitle, files)
-		records := make([]store.AttachmentSemantic, 0, len(semantics))
-		for index, semantic := range semantics {
+	if i.db != nil && len(result) > 0 {
+		records := make([]store.AttachmentSemantic, 0, len(result))
+		for index, receipt := range result {
+			semantic := automatic[sha256Hex(files[index].Data)]
 			hash := parentFileHash
 			if hash == "" {
 				hash = semantic.ParentFileHash
 			}
 			records = append(records, store.AttachmentSemantic{
-				AttachmentID:       result[index].DocumentID,
+				AttachmentID:       receipt.DocumentID,
 				TenantID:           tenant,
 				KnowledgeBaseID:    kb,
 				ParentDocumentID:   parent,
@@ -122,7 +177,7 @@ func (i *Importer) Process(ctx context.Context, tenant uint64, kb, parent, name 
 			log.Printf("attachment semantics: %v", err)
 		}
 	}
-	return result, nil
+	return result, uploadErr
 }
 
 func (i *Importer) upload(ctx context.Context, tenant uint64, kb, parent, parentHash string, file File) (string, string, error) {

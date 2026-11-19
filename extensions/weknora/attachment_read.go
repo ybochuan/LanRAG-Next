@@ -17,12 +17,16 @@ const RevisionPublicationChannelPrefix = "agentrag-revision-"
 // RevisionPublicationTitlePrefix was the receipt marker used before draft channels.
 const RevisionPublicationTitlePrefix = "AgentRAG revision "
 
+// AttachmentFolder is the native KB path used for newly managed attachments.
+const AttachmentFolder = "附件"
+
 // AttachmentDocument is the minimal native metadata used by attachment policy.
 type AttachmentDocument struct {
 	ID               string
 	TenantID         uint64
 	KnowledgeBaseID  string
 	FileName         string
+	FolderPath       string
 	Title            string
 	Description      string
 	Channel          string
@@ -37,6 +41,7 @@ type AttachmentDocument struct {
 type nativeAttachmentDocument struct {
 	attachmentDocument
 	FileName    string `json:"file_name"`
+	FolderPath  string `json:"folder_path"`
 	Channel     string `json:"channel"`
 	Description string `json:"description"`
 }
@@ -50,7 +55,7 @@ func (c *Client) decodeAttachmentDocument(d nativeAttachmentDocument, kbs map[st
 		return AttachmentDocument{}, errors.New("invalid attachment metadata")
 	}
 	out := AttachmentDocument{
-		ID: d.ID, TenantID: d.TenantID, KnowledgeBaseID: d.KBID, FileName: d.FileName, Title: d.Title, Description: d.Description, Channel: d.Channel,
+		ID: d.ID, TenantID: d.TenantID, KnowledgeBaseID: d.KBID, FileName: d.FileName, FolderPath: d.FolderPath, Title: d.Title, Description: d.Description, Channel: d.Channel,
 		FileHash: d.FileHash, ParseStatus: d.ParseStatus, EnableStatus: d.EnableStatus,
 		IsAttachment: flag == "true", ParentDocumentID: d.value("parent_document_id"), ImportID: d.value("attachment_import_id"),
 		ExtractedSHA256: d.value("attachment_sha256"),

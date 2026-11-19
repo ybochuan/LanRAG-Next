@@ -74,6 +74,7 @@ import {
 } from '@/utils/polling';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
+import { downloadResponseName } from '@/api/knowledge-base';
 import {
   buildUploadFileName,
   canMoveFolderTo,
@@ -887,6 +888,7 @@ const folderTreeLoading = ref(false);
 // The folder being browsed; ROOT_FOLDER_PATH ('') is the knowledge base top
 // level, a real node of the tree rather than a separate mode.
 const selectedFolderPath = ref<string>(ROOT_FOLDER_PATH);
+const showAllDocuments = ref(false);
 watch([kbId, selectedFolderPath], resetStatusPolling, { flush: 'sync' });
 const folderTreeCollapsed = ref(readStoredFlag(FOLDER_TREE_COLLAPSED_KEY));
 const hasFolders = computed(() => (folderTree.value?.folders?.length ?? 0) > 0);
@@ -965,7 +967,7 @@ const filterParams = computed(() => {
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
     ...getDocumentSortParams(selectedDocumentSort.value),
-    folder_path: selectedFolderPath.value,
+    folder_path: showAllDocuments.value ? undefined : selectedFolderPath.value,
     // Filtering searches descendants; browsing shows this folder's documents.
     folder_recursive: isFiltering.value,
   };
@@ -1049,7 +1051,8 @@ const loadFolderTree = async (kbIdValue: string) => {
 };
 
 const handleFolderSelect = (path: string) => {
-  if (selectedFolderPath.value === path) return;
+  if (selectedFolderPath.value === path && !showAllDocuments.value) return;
+  showAllDocuments.value = false;
   selectedFolderPath.value = path;
 };
 
@@ -1357,7 +1360,7 @@ watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
 
 // 切换目录只改变列表范围，行为与其他筛选一致。浏览态与筛选态之间的切换由各筛选项
 // 自身的 watcher 触发刷新，这里不重复请求。
-watch(selectedFolderPath, () => {
+watch([selectedFolderPath, showAllDocuments], () => {
   if (!kbId.value || isFAQ.value) return;
   clearSelection();
   resetPage();
@@ -2535,7 +2538,7 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
     const file = await downKnowledgeDetails(item.id);
     const objectUrl = URL.createObjectURL(file);
     const link = document.createElement('a');
-    const fileName = resolveKnowledgeDownloadFileName(item);
+    const fileName = downloadResponseName(file, resolveKnowledgeDownloadFileName(item));
     link.style.display = 'none';
     link.href = objectUrl;
     link.download = fileName;
@@ -2725,6 +2728,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     {{ kbInfo?.name }}
                   </button>
                   <span v-else class="doc-folder-path__crumb is-current" :title="kbInfo?.name" aria-current="page">{{ kbInfo?.name }}</span>
+                  <t-button v-if="hasFolders && selectedFolderPath === ''" size="small" variant="text"
+                    :theme="showAllDocuments ? 'primary' : 'default'" :aria-pressed="showAllDocuments"
+                    @click="showAllDocuments = !showAllDocuments">{{ showAllDocuments ? '返回根目录' : '全部文档' }}</t-button>
                   <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
                     <t-icon name="chevron-right" class="doc-folder-path__sep" />
                     <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current" :title="crumb.name" aria-current="page">{{ crumb.name }}</span>
@@ -2990,7 +2996,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
         :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
-        @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
+        @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState" @title-change="resetPage(); loadKnowledgeFiles(kbId)">
       </DocContent>
     </div>
   </template>

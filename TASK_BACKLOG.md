@@ -1,5 +1,11 @@
 # AgentRAG Task Backlog
 
+## 发布前收口（2026-11-19）
+
+- P1 清理确认与自动清理按修订、状态及原生删除时间核对任务后再写，清理审计与删除同事务。旧确认返回冲突并保留主管理员或其他成员已经提交的保留决定。30 天证据批次从仍有待处理证据的 run 和版本选取，保留当前／根版本、条款关系和解析产物正在引用的证据，以及仍用于会话预算的指导用量。
+- P1 启动器支持空库阶段及首库创建后的工作模式绑定。通过同一提交的归档构建 Core、Host 和前端发布包，部署入口可指定该发布目录。初始化审计命令及恢复边界见 [启动与运维指南](docs/operations/AgentRAG-启动与运维指南.md#初始化后发布)。真实 WSL 两库、Linux 发布包及浏览器联验仍需确认。
+- P2 整库问答沿用 Bridge v1 的显式候选上限和请求大小限制。旧 200 份限制已移除，超限作为可区分的检索错误返回，仍由 Host 逐项决定活跃文档。受管路径的 200／201 份边界在 Core 定向回归覆盖范围内，待具备 CGO 的环境执行该包。Agentic 问答人工质量评估按用户要求延后。
+
 ## 文档族语义整改（2026-11-09）
 
 | 任务／状态 | 期望结果＋文件 | 依据 | 验证及何时重新审视 |
@@ -53,6 +59,7 @@
 | ATTACH-07A／已交付并生产验证（2026-11-08） | DOCX/Office附件真实标题识别、正文附件引用映射、`ext_attachment_semantics` v14、Bridge DTO可选语义字段、`RelatedAttachments.vue`语义卡片与排序；`extensions/parser/attachment/semantic.go`、`importer.go`、`extensions/store/attachment_semantics.go`、`extensions/retrieval/attachments.go`、`frontend/src/components/RelatedAttachments.vue`、`frontend/src/utils/relatedAttachments.ts`及`extensions/cmd/attachment-backfill/`。 | 用户2026-11-07选择ATTACH-07A最小闭环：先做DOCX/Office标题、正文引用映射、扩展库存储、接口、聊天卡片和现有附件回填；管理端与PDF/PPTX后续。 | 扩展`go build`/`go test ./...`/`go vet`/模块边界全通过；前端type-check、排序单测5/5、全量`npm test` 2406项2401通过/4个既有环境失败（3个POSIX shell依赖Git for Windows usr/bin、1个cache TTL时序）/1 skip、build退出0。生产ext DB已备份并迁移schema14、语义表17行（confirmed11/candidate5/unmatched1）；新Host `/bridge/after-retrieve` 对0fa411f8返回4条带`display_name/reference_title/parent_title`的附件，678a8d05仍0（6个deleting/disabled）；`web`已同步并重启；登录态聊天UI已目视验收：新回答显示「相关附件（7） 可下载」、语义标题、原文件、对应正文、来源与下载按钮，candidate 项显示「待确认」。 |
 | ATTACH-08A／自动归属已接线并隔离验收 | schema15、上传意图及回执恢复、附件→主件的系统关系、文档关联列表、同库图投影及读取核对。复用 `parser/attachment`、`store/attachment_links.go`、`business/feedback.go`、`lineage/graph.go`、`retrieval` 与现有前端入口。另提供 `attachment-backfill -audit-ownership`。 | 用户确认 ATTACH-07A 并要求开始文档关联改造。旧标签和语义映射只作兼容读取。 | 丢响应、重启、版本不符、缺失父件、图中方向和版本隔离通过。隔离 Core/Host 上传两附录、JWT 关联列表、原生分块、重提取同 ID、RAG/Agent 下载和过期/断 Host 拒绝均验证。扩展全量测试、构建、vet、模块门禁、受影响四包 Linux race、前端 type-check/build 均退出0，前端 2405 通过、1 跳过。只读盘点前后两库哈希相同。2026-11-13 补充：关系图对无版本族活跃附件用归属记录合成文档节点；生命周期快照读取时动态继承父件生效/失效日期（不复制子件注解，父件日期变化即时反映，父件到期后的重评估可使附件进入`stale`），文档关联列表展示该继承日期。正式部署前先盘点旧附件。 |
 | ATTACH-08B／删除联动已接线并隔离验收 | `executeKnowledgeDelete` 薄接线、schema16、上传围栏、原生软删除证明、子件清理续跑与文档关联状态。实现位于 `extensions/attachmentcleanup/`、`store/migrations/016_attachment_cleanup.sql`、`bridge/attachment_delete.go` 和 `weknora/attachment_delete.go`。 | 用户要求继续所提议的下一步；保留原生异步接口和删除算法。只自动清理有确认回执的同库受管附件。 | `attachment_e2e.py --cleanup` 退出0，真实候选 Core/Host 通过离线拒绝、重启恢复、单删、批删、清空库以及零活跃分块与向量索引记录核对。批量意图回滚、未提交上传围栏和错误归属保留已测试。正式部署、旧附件归属核验、主件替换及其他原生删除入口另审。 |
+| 附件工作台／待发布验收（2026-11-19） | 扩展 schema 36、原生 TDesign 附件工作台、同库目录、版本绑定的人工确认、原生标题与下载命名、共享模板及删除保护、托管原件回收重试。 | 用户批准实施附件管理 v1.0。 | 真 DOCX 在原生 API 夹具中提取 6 份附录、19 个引用选项，选中导入、人工确认、幂等改名和同版移除重跑通过。最终全量测试及浏览器联验待放行。整库删除和数据源替换为独立入口，派生文件逐项回收核验待补。生产未切换。 |
 
 相关证据：`docs/evidence/attachment-downloads-2026-11-03.md`、`docs/evidence/attachment-semantics-2026-11-07.md`、`tmp/attach-08-e2e.log`、`tmp/attach-08b-e2e.log`。
 

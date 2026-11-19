@@ -13,6 +13,8 @@
           <div v-if="referenceText(item)" class="related-attachments__meta">对应正文：{{ referenceText(item) }}</div>
           <div v-if="item.parent_title" class="related-attachments__meta">来源：{{ item.parent_title }}</div>
           <t-tag v-if="item.mapping_status === 'candidate'" size="small" variant="light" theme="warning">待确认</t-tag>
+          <t-tag v-else-if="item.mapping_status === 'manual'" size="small" variant="light" theme="success">已人工确认</t-tag>
+          <t-tag v-else-if="item.mapping_status === 'template'" size="small" variant="light">共享模板</t-tag>
         </div>
         <t-button size="small" variant="text" :loading="!!loading[item.knowledge_id]" @click="download(item)">下载</t-button>
       </div>
@@ -23,7 +25,7 @@
         <div class="related-attachments__row">
           <t-icon name="file-attachment" />
           <div class="related-attachments__body">
-            <t-link :href="item.download_url" :disabled="!!loading[item.knowledge_id]" @click.prevent="download(item)">{{ item.file_name }}</t-link>
+            <t-link :href="item.download_url" :disabled="!!loading[item.knowledge_id]" @click.prevent="download(item)">{{ displayName(item) }}</t-link>
             <div v-if="item.original_filename" class="related-attachments__meta">原文件：{{ item.original_filename }}</div>
             <div class="related-attachments__meta">具体用途待识别</div>
           </div>
@@ -40,8 +42,9 @@ import { relatedAttachments, type RelatedAttachment } from '@/utils/relatedAttac
 import { downloadRelatedAttachment } from '@/api/relatedAttachments'
 const props = defineProps<{ session: any }>()
 const items = computed(() => relatedAttachments(props.session))
-const mappedItems = computed(() => items.value.filter(item => item.mapping_status === 'confirmed' || item.mapping_status === 'candidate'))
-const otherItems = computed(() => items.value.filter(item => item.mapping_status !== 'confirmed' && item.mapping_status !== 'candidate'))
+const mappedStates = new Set(['confirmed', 'candidate', 'manual', 'template'])
+const mappedItems = computed(() => items.value.filter(item => mappedStates.has(item.mapping_status || '')))
+const otherItems = computed(() => items.value.filter(item => !mappedStates.has(item.mapping_status || '')))
 const loading = reactive<Record<string, boolean>>({})
 function displayName(item: RelatedAttachment) {
   return item.display_name?.trim() || item.file_name

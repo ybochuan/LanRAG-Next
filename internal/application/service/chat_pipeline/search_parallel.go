@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/extensionbridge"
@@ -107,8 +108,15 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	// documents here so the policy can subtract non-active ones instead of
 	// refusing the whole request.
 	candidates := chatManage.KnowledgeIDs
+	var scopeErr error
 	if len(candidates) == 0 {
-		candidates = p.enumerateAuthorizedDocuments(ctx, chatManage)
+		candidates, scopeErr = p.enumerateAuthorizedDocuments(ctx, chatManage)
+	}
+	if len(candidates) > extensionbridge.MaxRetrieveDocuments {
+		scopeErr = extensionbridge.ErrRetrieveScopeTooLarge
+	}
+	if scopeErr != nil {
+		return &PluginError{Err: scopeErr, Description: "Unable to enumerate Bridge retrieval scope", ErrorType: "bridge_before_retrieve_failed"}
 	}
 	decision, err := extensionbridge.BeforeRetrieve(ctx, map[string]any{
 		"request_id":         requestID,
@@ -215,28 +223,21 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 }
 
 // enumerateAuthorizedDocuments expands plain whole-KB targets into the
-// explicit document IDs the Bridge policy takes as its candidate set. It never
-// guesses a broader scope: a tag-scoped or document-scoped target, a service
-// error, or a KB larger than the bound returns nil, which leaves the request
-// with an empty candidate list and therefore deny_all - the same fail-closed
-// behaviour as before this change.
-func (p *PluginSearchParallel) enumerateAuthorizedDocuments(ctx context.Context, cm *types.ChatManage) []string {
-	const maxEnumeratedDocuments = 200
+// explicit document IDs the Bridge policy takes as its candidate set. Targets
+// with an unresolved document or tag scope cannot be expanded to whole KBs.
+func (p *PluginSearchParallel) enumerateAuthorizedDocuments(ctx context.Context, cm *types.ChatManage) ([]string, error) {
 	if p.knowledgeService == nil || len(cm.SearchTargets) == 0 {
-		return nil
+		return nil, errors.New("no authorized retrieval scope")
 	}
 	seen := map[string]bool{}
-	var ids []string
+	ids := []string{}
 	for _, target := range cm.SearchTargets {
-		if target == nil || target.Type != types.SearchTargetTypeKnowledgeBase {
-			return nil
-		}
-		if len(target.KnowledgeIDs) > 0 || len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
-			return nil
+		if target == nil || target.Type != types.SearchTargetTypeKnowledgeBase || len(target.KnowledgeIDs) > 0 || len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			return nil, errors.New("no authorized document IDs for the requested retrieval scope")
 		}
 		docs, err := p.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, target.KnowledgeBaseID)
 		if err != nil {
-			return nil
+			return nil, errors.New("failed to enumerate authorized documents for retrieval")
 		}
 		for _, doc := range docs {
 			if doc == nil || doc.ID == "" || doc.EnableStatus != "enabled" || doc.ParseStatus != types.ParseStatusCompleted || seen[doc.ID] {
@@ -244,13 +245,13 @@ func (p *PluginSearchParallel) enumerateAuthorizedDocuments(ctx context.Context,
 			}
 			seen[doc.ID] = true
 			ids = append(ids, doc.ID)
-		}
-		if len(ids) > maxEnumeratedDocuments {
-			return nil
+			if len(ids) > extensionbridge.MaxRetrieveDocuments {
+				return nil, extensionbridge.ErrRetrieveScopeTooLarge
+			}
 		}
 	}
 	pipelineInfo(ctx, "SearchParallel", "enumerated_documents", map[string]interface{}{"count": len(ids), "targets": len(cm.SearchTargets)})
-	return ids
+	return ids, nil
 }
 
 // Apply the same exclusion to chunk and entity results before any later stage.

@@ -16,6 +16,7 @@ param(
     [switch]$Strict,
     [switch]$Stop,
     [string]$WslDistro = 'Ubuntu',
+    [string]$ReleaseDir = '',
     [Parameter(Position = 0)][string]$Command = ''
 )
 
@@ -505,7 +506,10 @@ Write-Host "     (Ctrl+C stops Core and the Host; Windows services stay up unles
 # script; the exit code is the contract.
 $handoff = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-& wsl.exe -d $WslDistro -- bash "$WslRoot/start-all.sh"
+$launchArgs = @('-d', $WslDistro, '--')
+if ($ReleaseDir) { $launchArgs += @('env', "AGENTRAG_RELEASE_DIR=$ReleaseDir") }
+$launchArgs += @('bash', "$WslRoot/start-all.sh")
+& wsl.exe @launchArgs
 $code = $LASTEXITCODE
 $ErrorActionPreference = $handoff
 if ($code -ne 0) { Write-Host "[err] WSL launcher exited with $code" -ForegroundColor Red }

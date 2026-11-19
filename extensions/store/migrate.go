@@ -109,8 +109,11 @@ var cleanupTasksMigration string
 //go:embed migrations/035_evidence_retention.sql
 var evidenceRetentionMigration string
 
+//go:embed migrations/036_attachment_workbench.sql
+var attachmentWorkbenchMigration string
+
 // LatestSchemaVersion is the last published migration supported by this Host.
-const LatestSchemaVersion = 35
+const LatestSchemaVersion = 36
 
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
@@ -413,6 +416,14 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(35)"); err != nil {
+				return err
+			}
+		}
+		if version < 36 {
+			if _, err := tx.ExecContext(ctx, attachmentWorkbenchMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(36)"); err != nil {
 				return err
 			}
 		}

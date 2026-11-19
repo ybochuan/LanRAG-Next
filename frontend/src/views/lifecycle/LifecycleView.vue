@@ -60,7 +60,7 @@
        <thead><tr><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('title')">{{ $t('workbench.list.colDocument') }}{{ sortMark('title') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('state')">{{ $t('workbench.list.colLifecycle') }}{{ sortMark('state') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('family')">{{ $t('workbench.list.colFamily') }}{{ sortMark('family') }}</t-button></th><th><t-button variant="text" size="small" class="sort-button" @click="sortDocuments('effective_until')">{{ $t('workbench.list.colEffectiveUntil') }}{{ sortMark('effective_until') }}</t-button></th></tr></thead>
        <tbody>
         <tr v-for="doc in sortedDocuments" :key="doc.document_id">
-         <td><t-button variant="text" class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</t-button><t-tag v-if="doc.mapping_status" variant="light" size="small" :theme="doc.mapping_status==='confirmed'?'success':'warning'" class="annex-tag">{{ doc.mapping_status==='confirmed'?'附件':'待确认' }}</t-tag><span v-if="doc.native_title" class="annex-original">原文件：{{ doc.annex_original || doc.native_title }}</span></td>
+         <td><t-button variant="text" class="document-link" @click="openDocument(doc.document_id,doc.title)">{{ doc.title || doc.document_id }}</t-button><t-tag v-if="doc.mapping_status" variant="light" size="small" :theme="doc.mapping_status==='candidate'?'warning':'default'" class="annex-tag">{{ doc.mapping_status==='candidate'?'待确认':doc.mapping_status==='unmatched'?'未匹配':'已自动匹配' }}</t-tag><span v-if="doc.annex_original" class="annex-original">原文件：{{ doc.annex_original }}</span></td>
          <td><t-tag variant="light" size="small" :theme="stateTagTheme(doc.state)">{{ stateLabels[doc.state] || doc.state }}</t-tag></td>
          <td>{{ doc.business_family?.label || $t('workbench.list.unassigned') }}</td><td>{{ date(doc.annotations.effective_until) }}</td>
         </tr>
@@ -85,8 +85,8 @@
      </div>
      <t-button variant="text" shape="square" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
     </header>
-    <nav class="tabs detail-tabs" aria-label="文档详情标签">
-     <button v-for="item in detailTabs" :key="item.key" type="button" :disabled="detailLocked" :aria-pressed="detailTab===item.key" :class="{selected:detailTab===item.key}" @click="detailTab=item.key">{{ $t(item.labelKey) }}</button>
+    <nav class="detail-tabs" aria-label="文档详情标签">
+     <t-button v-for="item in detailTabs" :key="item.key" size="small" variant="text" :theme="detailTab===item.key?'primary':'default'" :disabled="detailLocked" :aria-pressed="detailTab===item.key" @click="detailTab=item.key">{{ $t(item.labelKey) }}</t-button>
     </nav>
     <div v-if="detailBusy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在加载文档…</span></div>
     <t-alert v-if="detailError" theme="error" class="notice" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">重新载入</t-button></t-alert>
@@ -106,6 +106,7 @@
      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
       :current-family="detail.business_family?.id" :initial-view="detailTab==='suggestions'?'suggestions':'members'" :can-write="detailCanWrite"
       @open="openWorkspaceDocument" @changed="refreshDocumentMembership" @locked="childLocked=$event" />
+     <AttachmentWorkbench v-else-if="detailTab==='attachments'" :key="selectedKB+':'+selectedID" :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" @locked="childLocked=$event" @changed="loadOverview" />
      <template v-else-if="detailTab==='relations'">
       <SupplementEditor :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" :parent-busy="childLocked" :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="supplementSaved" />
       <BusinessView :key="selectedKB+':'+selectedID+':'+supplementRevision" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="associations" @open="openRelatedDocument" @locked="childLocked=$event" />
@@ -148,6 +149,7 @@ import { listKnowledgeBases } from '@/api/knowledge-base'
 import * as api from '@/api/lifecycle'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import SupplementEditor from './SupplementEditor.vue'
+import AttachmentWorkbench from './AttachmentWorkbench.vue'
 import { useAuthStore } from '@/stores/auth'
 import { annotationsForSave, errorMessage, requestFence, reviewDeliveryClass, reviewDeliveryLabel, ruleSourceLabel, stateLabels, states, toLocalInput, validRules } from './model'
 // TDesign select options; the workbench renders WeKnora-native selects, so the
@@ -169,7 +171,7 @@ const workspaceTabs=[
  {key:'lineage',labelKey:'workbench.workspace.lineage'},
 ] as const
 const detailTabs=[
- {key:'life',labelKey:'workbench.detail.life'},{key:'family',labelKey:'workbench.detail.family'},{key:'relations',labelKey:'workbench.detail.relations'},
+ {key:'life',labelKey:'workbench.detail.life'},{key:'family',labelKey:'workbench.detail.family'},{key:'attachments',labelKey:'workbench.detail.attachments'},{key:'relations',labelKey:'workbench.detail.relations'},
  {key:'graph',labelKey:'workbench.detail.graph'},{key:'audit',labelKey:'workbench.detail.audit'},{key:'suggestions',labelKey:'workbench.detail.suggestions'},{key:'revisions',labelKey:'workbench.detail.revisions'},
 ] as const
 const route=useRoute(), router=useRouter()
@@ -370,7 +372,7 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
 .annex-tag { margin-left:6px; }
 .annex-original { display:block; color:var(--td-text-color-secondary); font-size:var(--td-font-size-body-small); margin-top:2px; }
 .drawer-meta { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
-.detail-tabs { flex-wrap:wrap; margin:16px 0 20px; }
+.detail-tabs { display:flex; gap:4px; flex-wrap:wrap; margin:16px 0 20px; }
 /* One heading scale for every section in the drawer, whatever component hosts
    it; the document title in the header keeps its own size. */
 .document-drawer h2:not(#document-title),

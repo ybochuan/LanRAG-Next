@@ -82,7 +82,8 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 		switch action {
 		case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
 			"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
-			"business_family_workspace", "business_family_replacements", "business_family_suggestions", "business_cleanup_list":
+			"business_family_workspace", "business_family_replacements", "business_family_suggestions", "business_cleanup_list",
+			"business_attachment_list", "business_attachment_preview":
 			read = true
 		}
 		if read == mutation {
@@ -116,7 +117,7 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 	if action == "overview" {
 		req.Title = c.Query("title")
 	}
-	if action == "business_related" {
+	if action == "business_related" || strings.HasPrefix(action, "business_attachment_") {
 		req.DocumentID = c.Query("document_id")
 	}
 	if strings.HasPrefix(action, "business_") && !mutation {
@@ -140,6 +141,16 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 		}
 	}
 	if mutation {
+		if action == "business_attachment_upload" {
+			data, err := extensionbridge.UploadWorkbenchAttachment(ctx, req, c.Query("parent_version"), c.Query("file_name"),
+				http.MaxBytesReader(c.Writer, c.Request.Body, 20<<20))
+			if err != nil {
+				lifecycleError(c, extensionbridge.ManagementStatus(err))
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+			return
+		}
 		var body struct {
 			ExpectedRevision       *int64          `json:"expected_revision"`
 			Annotations            json.RawMessage `json:"annotations"`

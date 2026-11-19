@@ -18,12 +18,13 @@ import (
 // Policy permits only known active lifecycle facts in its configured scopes.
 // Missing facts are excluded until reconciliation confirms the source document.
 type Policy struct {
-	db          *store.DB
-	tenant      uint64
-	kbs         map[string]bool
-	sources     SourceRefresher
-	attachments AttachmentSource
-	now         func() time.Time
+	db                  *store.DB
+	tenant              uint64
+	kbs                 map[string]bool
+	sources             SourceRefresher
+	attachments         AttachmentSource
+	attachmentRelations AttachmentRelations
+	now                 func() time.Time
 }
 
 // SourceRefresher reacquires scoped native evidence; no cached permit is accepted.

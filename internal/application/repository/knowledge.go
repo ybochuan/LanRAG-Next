@@ -610,6 +610,47 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	return err
 }
 
+// CompareKnowledgeTitle writes only the title after checking the snapshot used by the editor.
+func (r *knowledgeRepository) CompareKnowledgeTitle(ctx context.Context, tenant uint64, kb, id, hash, previous, title string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ?", tenant, kb, id).
+		Where("COALESCE(file_hash, '') = ? AND title = ? AND parse_status <> ?", hash, previous, types.ParseStatusDeleting).
+		Update("title", title)
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *knowledgeRepository) DeletedKnowledgeOriginal(ctx context.Context, tenant uint64, kb, id, hash string) (*types.Knowledge, error) {
+	var row types.Knowledge
+	err := r.db.WithContext(ctx).Unscoped().Where("tenant_id=? AND knowledge_base_id=? AND id=? AND type=? AND file_hash=? AND deleted_at IS NOT NULL",
+		tenant, kb, id, "file", hash).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &row, err
+}
+
+func (r *knowledgeRepository) OriginalStorageState(ctx context.Context, row *types.Knowledge) (string, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("file_path=? AND id<>?", row.FilePath, row.ID).Count(&count).Error; err != nil {
+		return "", err
+	}
+	if count > 0 {
+		return "shared", nil
+	}
+	if handle, ok := types.ParseResourcePath(row.FilePath); ok {
+		if err := r.db.WithContext(ctx).Unscoped().Model(&types.StoredResource{}).
+			Where("tenant_id=? AND handle=? AND state=? AND deleted_at IS NOT NULL", row.TenantID, handle, types.ResourceStateDeleted).
+			Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count > 0 {
+			return "removed", nil
+		}
+	}
+	return "", nil
+}
+
 // UpdateKnowledgeColumns writes multiple columns in a single UPDATE so callers
 // that flip related fields together (parse_status + error_message after
 // dead-letter, for example) cannot leave the row half-updated when the second

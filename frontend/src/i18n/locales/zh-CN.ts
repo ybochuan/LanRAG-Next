@@ -9451,6 +9451,7 @@ export default {
     },
     "detail": {
       "life": "生命周期",
+      "attachments": "附件",
       "family": "版本族",
       "relations": "关联关系",
       "graph": "关系图",

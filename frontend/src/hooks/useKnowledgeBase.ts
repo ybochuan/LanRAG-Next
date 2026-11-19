@@ -19,6 +19,9 @@ export default function (knowledgeBaseId?: string) {
   let moreIndex = ref(-1);
   const details = reactive({
     title: "",
+    native_title: "",
+    original_file_name: "",
+    file_hash: "",
     time: "",
     md: [] as any[],
     id: "",
@@ -57,9 +60,11 @@ export default function (knowledgeBaseId?: string) {
 
         const { data, total: totalResult } = result;
     const cardList_ = data.map((item: any) => {
-      const rawName = item.file_name || item.title || item.source || t('knowledgeBase.untitledDocument')
-      const dotIndex = rawName.lastIndexOf('.')
-      const displayName = dotIndex > 0 ? rawName.substring(0, dotIndex) : rawName
+      const rawName = item.title || item.file_name || item.source || t('knowledgeBase.untitledDocument')
+      const extension = item.file_name?.match(/\.[^.]+$/)?.[0]
+      const displayName = extension && rawName.toLowerCase().endsWith(extension.toLowerCase())
+        ? rawName.slice(0, -extension.length) || rawName
+        : rawName
       const fileTypeSource = item.file_type || (item.type === 'manual' ? 'MANUAL' : '')
       return {
         ...item,
@@ -96,6 +101,9 @@ export default function (knowledgeBaseId?: string) {
     chunkRequestGeneration++;
     Object.assign(details, {
       title: "",
+      native_title: "",
+      original_file_name: "",
+      file_hash: "",
       time: "",
       md: [],
       id: "",
@@ -117,7 +125,10 @@ export default function (knowledgeBaseId?: string) {
         if (result.success && result.data) {
           const { data } = result;
           Object.assign(details, {
-            title: data.file_name || data.title || data.source || t('knowledgeBase.untitledDocument'),
+            title: data.title || data.file_name || data.source || t('knowledgeBase.untitledDocument'),
+            native_title: data.title || '',
+            original_file_name: data.file_name || '',
+            file_hash: data.file_hash || '',
             time: formatStringDate(new Date(data.updated_at)),
             id: data.id,
             type: data.type || 'file',

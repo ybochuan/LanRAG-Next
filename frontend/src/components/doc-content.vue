@@ -9,9 +9,9 @@ import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
 import {
-  downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
+  downKnowledgeDetails, downloadResponseName, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
-  updateKnowledgeSummary, regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
+  updateKnowledgeSummary, updateKnowledgeTitle, regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
   KNOWLEDGE_CHUNK_PAGE_SIZE,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
@@ -243,7 +243,37 @@ mermaid.initialize({
   }
 });
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange", "titleChange"]);
+const titleDialog = ref(false);
+const titleDraft = ref('');
+const titleSaving = ref(false);
+const titleSnapshot = ref<{ id: string; title: string; hash: string }>();
+const editDocumentTitle = () => {
+  titleSnapshot.value = { id: props.details.id, title: props.details.native_title || '', hash: props.details.file_hash || '' };
+  titleDraft.value = getDisplayTitle();
+  titleDialog.value = true;
+};
+const saveDocumentTitle = async () => {
+  const snapshot = titleSnapshot.value;
+  const title = titleDraft.value.trim();
+  if (!title || !snapshot || snapshot.id !== props.details.id || titleSaving.value) return;
+  titleSaving.value = true;
+  try {
+    const result = await updateKnowledgeTitle(snapshot.id, title, snapshot.title, snapshot.hash);
+    if (!result?.success || result.data?.title !== title) throw new Error('title write not confirmed');
+    if (props.details.id === snapshot.id) {
+      props.details.title = title;
+      props.details.native_title = title;
+    }
+    titleDialog.value = false;
+    emit('titleChange');
+    MessagePlugin.success(t('common.saveSuccess'));
+  } catch (error) {
+    MessagePlugin.error(error?.$httpStatus === 409 || error?.status === 409 ? '标题或文件版本已变化，请重新打开文档。' : t('common.saveFailed'));
+  } finally {
+    titleSaving.value = false;
+  }
+};
 const assistant = useAssistantStore();
 const readingAssistantActions = computed(() => {
   const source = JSON.stringify({ knowledge_base_id: props.kbId, knowledge_id: props.details?.id });
@@ -965,9 +995,10 @@ const handleClose = () => {
 const getDisplayTitle = () => {
   if (!props.details.title) return '';
   if (props.details.type === 'file') {
-    // 文件类型去掉扩展名
-    const lastDotIndex = props.details.title.lastIndexOf(".");
-    return lastDotIndex > 0 ? props.details.title.substring(0, lastDotIndex) : props.details.title;
+    const extension = props.details.original_file_name?.match(/\.[^.]+$/)?.[0];
+    if (extension && props.details.title.toLowerCase().endsWith(extension.toLowerCase())) {
+      return props.details.title.slice(0, -extension.length) || props.details.title;
+    }
   }
   // URL和手动创建直接返回标题
   return props.details.title;
@@ -1565,7 +1596,7 @@ const downloadFile = () => {
         const link = document.createElement("a");
         link.style.display = "none";
         link.setAttribute("href", url.value);
-        link.setAttribute("download", resolveKnowledgeDownloadFileName(props.details));
+        link.setAttribute("download", downloadResponseName(result, resolveKnowledgeDownloadFileName(props.details)));
         document.body.appendChild(link);
         link.click();
         nextTick(() => {
@@ -1653,10 +1684,25 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
         </div>
       </t-drawer>
 
+      <t-dialog v-model:visible="titleDialog" header="修改文档标题"
+        :confirm-btn="{ content: $t('common.save'), disabled: !titleDraft.trim(), loading: titleSaving }" @confirm="saveDocumentTitle">
+        <t-input v-model="titleDraft" :maxlength="240" aria-label="文档标题" @enter="saveDocumentTitle" />
+      </t-dialog>
       <div ref="docMarkdownRoot" class="doc-markdown-root doc-drawer-body setting-drawer__body">
         <section v-if="details.id" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.detailSectionMeta') }}</h4>
           <div class="doc-detail-rows">
+            <div class="doc-detail-row">
+              <span class="doc-detail-label">文档标题</span>
+              <span class="doc-detail-value">
+                {{ getDisplayTitle() }}
+                <t-button v-if="canEditContent" variant="text" theme="primary" size="small" @click="editDocumentTitle">改名</t-button>
+              </span>
+            </div>
+            <div v-if="details.original_file_name" class="doc-detail-row">
+              <span class="doc-detail-label">原文件名</span>
+              <span class="doc-detail-value">{{ details.original_file_name }}</span>
+            </div>
             <div v-if="details.time" class="doc-detail-row">
               <span class="doc-detail-label">{{ getTimeLabel() }}</span>
               <span class="doc-detail-value">{{ details.time }}</span>

@@ -5,6 +5,7 @@ import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/
 import { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
 
 export { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
+export { downloadResponseName } from '../../utils/request';
 
 export type KnowledgeBaseActivity = AuditLog;
 
@@ -781,6 +782,18 @@ export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Rec
 
 export function updateKnowledgeSummary(knowledgeId: string, description: string) {
   return put(`/api/v1/knowledge/${knowledgeId}`, { description });
+}
+
+export function updateKnowledgeTitle(knowledgeId: string, title: string, originalTitle: string, fileHash: string) {
+  return put(`/api/v1/knowledge/${encodeURIComponent(knowledgeId)}`, {
+    title, expected_title: originalTitle, expected_file_hash: fileHash,
+  }).then(result => {
+    if (result.success) {
+      invalidateCache('doc-titles');
+      invalidateCache('document-picker-active');
+    }
+    return result;
+  });
 }
 
 export function regenerateKnowledgeSummary(knowledgeId: string) {

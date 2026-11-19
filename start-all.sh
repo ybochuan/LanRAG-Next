@@ -151,8 +151,24 @@ case "$ACTION" in
     *) echo "usage: $0 [start|status|doctor|logs|token|mcp-key|stop]" >&2; exit 2 ;;
 esac
 
-for command in python3 curl go setsid ip; do command -v "$command" >/dev/null || { echo "[ERROR] Missing $command" >&2; exit 1; }; done
-CORE_BINARY="${CORE_BINARY:-$ROOT/WeKnora-lite}"
+for command in python3 curl setsid ip; do command -v "$command" >/dev/null || { echo "[ERROR] Missing $command" >&2; exit 1; }; done
+HOST_BINARY=
+release_revision=
+if [[ -n "${AGENTRAG_RELEASE_DIR:-}" ]]; then
+    release_dir="$(cd -- "$AGENTRAG_RELEASE_DIR" && pwd)"
+    if [[ ! -x "$release_dir/WeKnora-lite" || ! -x "$release_dir/extension-host" || ! -f "$release_dir/web/index.html" || ! -s "$release_dir/REVISION" ]]; then
+        echo '[ERROR] Release directory is missing Core, Host, web or REVISION' >&2
+        exit 1
+    fi
+    CORE_BINARY="$release_dir/WeKnora-lite"
+    HOST_BINARY="$release_dir/extension-host"
+    release_revision="$(cat "$release_dir/REVISION")"
+    [[ "$release_revision" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || { echo '[ERROR] Invalid release revision' >&2; exit 1; }
+    echo "[RELEASE] $release_revision"
+else
+    command -v go >/dev/null || { echo '[ERROR] Missing go' >&2; exit 1; }
+    CORE_BINARY="${CORE_BINARY:-$ROOT/WeKnora-lite}"
+fi
 [[ -x "$CORE_BINARY" ]] || { echo '[ERROR] Build WeKnora-lite first (see extensions/README.md).' >&2; exit 1; }
 mkdir -p "$ROOT/data"
 RUN_DIR="${AGENTRAG_RUN_DIR:-$(mktemp -d "$ROOT/data/launcher-run-XXXXXX")}"
@@ -203,7 +219,7 @@ cleanup() {
     [[ -z "$AUTH_PID" ]] || kill -TERM "$AUTH_PID" 2>/dev/null || true
     stop_child "$CORE_PID"
     stop_child "$HOST_PID"
-    rm -f "$RUN_DIR/pids"
+    rm -f "$RUN_DIR/pids" "$RUN_DIR/private.env"
     if ((STARTED == 1)); then
         echo "[STOP] Owned Core/Host stopped; logs: $RUN_DIR"
         echo '[STOP] Windows services (MinerU/models/supervisor) keep running; stop them with: start.cmd -Stop'
@@ -219,7 +235,15 @@ source "$RUN_DIR/private.env"
 
 # Idempotent rerun: if both owned services already answer, do not fight over ports.
 if probe "http://127.0.0.1:$CORE_PORT/health" && probe http://127.0.0.1:8090/health; then
+    if [[ -n "$release_revision" ]]; then
+        owned_run="$(latest_run_with_pids)"
+        if [[ -z "$owned_run" || ! -f "$owned_run/release-revision" || "$(cat "$owned_run/release-revision")" != "$release_revision" ]]; then
+            echo '[ERROR] An existing instance does not identify itself as the selected release' >&2
+            exit 1
+        fi
+    fi
     echo "[READY] AgentRAG already running (Core :$CORE_PORT, Host :8090); nothing to do"
+    rm -f "$RUN_DIR/private.env"
     rmdir "$RUN_DIR" 2>/dev/null || true
     exit 0
 fi
@@ -239,7 +263,6 @@ export LOCAL_STORAGE_BASE_DIR="${LOCAL_STORAGE_BASE_DIR:-$ROOT/data/files}"
 export NEO4J_ENABLE=false ENABLE_GRAPH_RAG=false
 export PORT="$CORE_PORT"
 export SERVER_PORT="$CORE_PORT" SERVER_HOST=127.0.0.1
-export AGENTRAG_MODE=worker
 wait_health() {
     local name="$1" url="$2" pid="$3" deadline=$((SECONDS + ${AGENTRAG_START_TIMEOUT:-60}))
     while (( SECONDS < deadline )); do
@@ -254,10 +277,43 @@ wait_health() {
     echo "[ERROR] $name readiness timed out" >&2; return 1
 }
 preflight_windows
-echo '[BUILD] Independent Extension Host (CGO_ENABLED=0)'
-(cd "$ROOT/extensions" && CGO_ENABLED=0 GOWORK=off go build -mod=readonly -o "$RUN_DIR/extension-host" ./cmd/extension-host)
+start_core() {
+    if [[ -n "$HOST_BINARY" ]]; then
+        WEKNORA_WEB_DIR="$release_dir/web" setsid "$CORE_BINARY" >> "$RUN_DIR/core.log" 2>&1 &
+    else
+        setsid "$CORE_BINARY" >> "$RUN_DIR/core.log" 2>&1 &
+    fi
+    CORE_PID=$!
+    wait_health Core "http://127.0.0.1:$CORE_PORT/health" "$CORE_PID"
+}
+if [[ "$AGENTRAG_MODE" == probe ]]; then
+    echo '[START] Native Core for first-run setup'
+    start_core
+    STARTED=1
+    printf '%s\n' "$CORE_PID" > "$RUN_DIR/pids"
+    echo "[SETUP] 打开 http://localhost:$CORE_PORT 注册或登录，创建首个知识库后等待 AgentRAG 就绪。"
+    while true; do
+        kill -0 "$CORE_PID" 2>/dev/null || { echo '[ERROR] Core exited during setup' >&2; exit 1; }
+        if python3 "$ROOT/extensions/scripts/launcher_config.py" scope-ready; then
+            break
+        elif [[ $? != 3 ]]; then
+            exit 1
+        fi
+        sleep 2
+    done
+    python3 "$ROOT/extensions/scripts/launcher_config.py" prepare "$RUN_DIR/private.env"
+    source "$RUN_DIR/private.env"
+    [[ "$AGENTRAG_MODE" == worker ]] || { echo '[ERROR] Native KB changed during setup' >&2; exit 1; }
+    stop_child "$CORE_PID"; CORE_PID=
+    rm -f "$RUN_DIR/pids"
+fi
+if [[ -z "$HOST_BINARY" ]]; then
+    HOST_BINARY="$RUN_DIR/extension-host"
+    echo '[BUILD] Independent Extension Host (CGO_ENABLED=0)'
+    (cd "$ROOT/extensions" && CGO_ENABLED=0 GOWORK=off go build -mod=readonly -o "$HOST_BINARY" ./cmd/extension-host)
+fi
 start_host() {
-    (cd "$ROOT/extensions" && exec setsid "$RUN_DIR/extension-host") >> "$RUN_DIR/host.log" 2>&1 &
+    (cd "$ROOT/extensions" && exec setsid "$HOST_BINARY") >> "$RUN_DIR/host.log" 2>&1 &
     HOST_PID=$!
     wait_health Host http://127.0.0.1:8090/health "$HOST_PID"
 }
@@ -265,9 +321,7 @@ echo '[START] Host first; waiting for local DB and services (Core-independent re
 start_host
 STARTED=1
 echo '[START] Core'
-setsid "$CORE_BINARY" > "$RUN_DIR/core.log" 2>&1 &
-CORE_PID=$!
-wait_health Core "http://127.0.0.1:$CORE_PORT/health" "$CORE_PID"
+start_core
 printf '%s %s\n' "$HOST_PID" "$CORE_PID" > "$RUN_DIR/pids"
 # Validate upstream permissions separately: local readiness cannot depend on Core.
 python3 "$ROOT/extensions/scripts/launcher_config.py" auth "$RUN_DIR/auth-result" &
@@ -280,9 +334,11 @@ if [[ "$(cat "$RUN_DIR/auth-result")" == updated ]]; then
     python3 "$ROOT/extensions/scripts/launcher_config.py" env "$RUN_DIR/private.env"
     source "$RUN_DIR/private.env"
     start_host
+    printf '%s %s\n' "$HOST_PID" "$CORE_PID" > "$RUN_DIR/pids"
 else
     echo '[AUTH] Existing scoped machine credential verified'
 fi
+rm -f "$RUN_DIR/private.env"
 
 # MCP registration is best-effort: an unregistered tool costs a feature, not the
 # system. The credential is a dedicated full-access key held in the 0600 state.
@@ -297,6 +353,9 @@ else
 fi
 
 echo "[READY] AgentRAG: http://localhost:$CORE_PORT (Ctrl+C stops this launcher’s processes)"
+if [[ -n "$release_revision" ]]; then
+    printf '%s\n' "$release_revision" > "$RUN_DIR/release-revision"
+fi
 echo "[LOGS] $RUN_DIR; native and extension databases are separate"
 # Exit if either owned service dies; EXIT trap shuts down its sibling.
 set +e

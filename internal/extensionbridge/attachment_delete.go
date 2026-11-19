@@ -21,11 +21,23 @@ type attachmentDeleteTarget struct {
 	ParentDocumentID string `json:"parent_document_id,omitempty"`
 	ImportID         string `json:"import_id,omitempty"`
 	IsAttachment     bool   `json:"is_attachment,omitempty"`
+	Title            string `json:"title,omitempty"`
+}
+
+// ErrAttachmentDeleteConflict indicates a live reference or conflicting attachment receipt.
+var ErrAttachmentDeleteConflict = errors.New("attachment delete conflict")
+
+func ValidateAttachmentDelete(ctx context.Context, documents []*types.Knowledge) error {
+	return prepareAttachmentDelete(ctx, documents, true)
 }
 
 // PrepareAttachmentDelete asks the local Host to persist the deletion intent
 // for files in the explicitly configured Lite worker scope.
 func PrepareAttachmentDelete(ctx context.Context, documents []*types.Knowledge) error {
+	return prepareAttachmentDelete(ctx, documents, false)
+}
+
+func prepareAttachmentDelete(ctx context.Context, documents []*types.Knowledge, checkOnly bool) error {
 	rawKBs := strings.TrimSpace(os.Getenv("AGENTRAG_KB_IDS"))
 	if rawKBs == "" || !strings.EqualFold(strings.TrimSpace(os.Getenv("DB_DRIVER")), "sqlite") {
 		return nil
@@ -46,7 +58,7 @@ func PrepareAttachmentDelete(ctx context.Context, documents []*types.Knowledge) 
 		}
 		meta := d.GetMetadata()
 		targets = append(targets, attachmentDeleteTarget{DocumentID: d.ID, KnowledgeBaseID: d.KnowledgeBaseID, FileHash: d.FileHash,
-			ParentDocumentID: meta["parent_document_id"], ImportID: meta["attachment_import_id"], IsAttachment: meta["is_attachment"] == "true"})
+			ParentDocumentID: meta["parent_document_id"], ImportID: meta["attachment_import_id"], IsAttachment: meta["is_attachment"] == "true", Title: d.Title})
 	}
 	if len(targets) == 0 {
 		return nil
@@ -60,7 +72,8 @@ func PrepareAttachmentDelete(ctx context.Context, documents []*types.Knowledge) 
 		RequestID string                   `json:"request_id"`
 		TenantID  uint64                   `json:"tenant_id"`
 		Targets   []attachmentDeleteTarget `json:"targets"`
-	}{requestID, tenant, targets})
+		CheckOnly bool                     `json:"check_only,omitempty"`
+	}{requestID, tenant, targets, checkOnly})
 	if err != nil || len(body) > 4<<20 {
 		return unavailable
 	}
@@ -76,6 +89,9 @@ func PrepareAttachmentDelete(ctx context.Context, documents []*types.Knowledge) 
 		return unavailable
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusConflict && response.Header.Get("X-AgentRAG-Bridge-Version") == "1" {
+		return ErrAttachmentDeleteConflict
+	}
 	if response.StatusCode != http.StatusNoContent || response.Header.Get("X-AgentRAG-Bridge-Version") != "1" ||
 		response.Header.Get("X-AgentRAG-Request-ID") != requestID {
 		return unavailable

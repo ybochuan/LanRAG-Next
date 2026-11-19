@@ -9452,6 +9452,7 @@ export default {
     },
     "detail": {
       "life": "Жизненный цикл",
+      "attachments": "Вложения",
       "family": "Семейство версий",
       "relations": "Связи",
       "graph": "Граф связей",

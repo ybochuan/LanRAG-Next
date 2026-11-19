@@ -480,6 +480,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	ctx, ids, knowledgeList := plan.ctx, plan.ids, plan.knowledge
 	if !plan.rowsDeleted {
 		if err := extensionbridge.PrepareAttachmentDelete(ctx, knowledgeList); err != nil {
+			if errors.Is(err, extensionbridge.ErrAttachmentDeleteConflict) {
+				return apperrors.NewConflictError("unlink active attachment references before deleting")
+			}
 			logger.Warnf(ctx, "[Bridge] attachment delete intent unavailable; native deletion deferred")
 			return apperrors.NewServiceUnavailableError("attachment cleanup is not ready; retry document deletion")
 		}
@@ -634,7 +637,7 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	for _, knowledge := range knowledgeList {
 		if knowledge.FilePath != "" {
 			fSvc := kbFileServices[knowledge.KnowledgeBaseID]
-			if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+			if _, err := s.reclaimKnowledgeOriginal(ctx, fSvc, knowledge); err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
 			}
 		}

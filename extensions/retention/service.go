@@ -136,10 +136,18 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// pruneBatch deletes at most batch child rows. Run heads and feedback bindings
-// are deliberately untouched so governance facts remain verifiable by identity.
+// pruneBatch processes at most batch runs and batch snapshot versions. Run
+// heads, feedback bindings and charged guidance calls keep their identities.
 func (s *Service) pruneBatch(ctx context.Context, tx *sql.Tx, tenant, kb, cutoff string, cutoffMillis int64, result *Result) (int, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT r.run_id FROM ext_provenance_runs r WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.state IN ('sealed','failed','unattributed') AND NOT EXISTS (SELECT 1 FROM ext_provenance_run_audit a WHERE a.tenant_id=r.tenant_id AND a.knowledge_base_id=r.knowledge_base_id AND a.run_id=r.run_id AND a.occurred_at>?) ORDER BY r.run_id LIMIT ?", tenant, kb, cutoff, s.batch)
+	rows, err := tx.QueryContext(ctx, `SELECT r.run_id FROM ext_provenance_runs r
+		WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.state IN ('sealed','aborted','unattributed')
+		AND NOT EXISTS (SELECT 1 FROM ext_provenance_run_audit a
+			WHERE (a.tenant_id,a.knowledge_base_id,a.run_id)=(r.tenant_id,r.knowledge_base_id,r.run_id) AND julianday(a.occurred_at)>julianday(?))
+		AND (EXISTS (SELECT 1 FROM ext_provenance_run_receipts p
+			WHERE (p.tenant_id,p.knowledge_base_id,p.run_id)=(r.tenant_id,r.knowledge_base_id,r.run_id))
+			OR EXISTS (SELECT 1 FROM ext_provenance_steps s
+			WHERE (s.tenant_id,s.knowledge_base_id,s.run_id)=(r.tenant_id,r.knowledge_base_id,r.run_id)))
+		ORDER BY r.run_id LIMIT ?`, tenant, kb, cutoff, s.batch)
 	if err != nil {
 		return 0, err
 	}
@@ -172,7 +180,7 @@ func (s *Service) pruneBatch(ctx context.Context, tx *sql.Tx, tenant, kb, cutoff
 			{"DELETE FROM ext_provenance_inputs WHERE tenant_id=? AND knowledge_base_id=? AND run_id IN (SELECT value FROM json_each(?))", &result.InputsDeleted},
 			{"DELETE FROM ext_provenance_input_intents WHERE tenant_id=? AND knowledge_base_id=? AND run_id IN (SELECT value FROM json_each(?))", &result.IntentsDeleted},
 			{"DELETE FROM ext_provenance_producers WHERE tenant_id=? AND knowledge_base_id=? AND run_id IN (SELECT value FROM json_each(?))", nil},
-			{"DELETE FROM ext_guidance_calls WHERE tenant_id=? AND knowledge_base_id=? AND run_id IN (SELECT value FROM json_each(?))", nil},
+			{"DELETE FROM ext_guidance_step_inputs WHERE tenant_id=? AND knowledge_base_id=? AND run_id IN (SELECT value FROM json_each(?))", nil},
 			{"DELETE FROM ext_provenance_steps WHERE tenant_id=? AND knowledge_base_id=? AND run_id IN (SELECT value FROM json_each(?))", &result.StepsDeleted},
 		}
 		for _, stmt := range stmts {
@@ -190,9 +198,21 @@ func (s *Service) pruneBatch(ctx context.Context, tx *sql.Tx, tenant, kb, cutoff
 			}
 		}
 	}
-	// Snapshot evidence follows version observation time. Current versions stay.
-	evidenceSQL := "DELETE FROM ext_source_snapshot_evidence WHERE tenant_id=? AND knowledge_base_id=? AND version_node_id IN (SELECT v.version_node_id FROM ext_document_version v WHERE v.tenant_id=? AND v.knowledge_base_id=? AND v.created_at<? AND NOT EXISTS (SELECT 1 FROM ext_document_version_family f WHERE f.tenant_id=v.tenant_id AND f.knowledge_base_id=v.knowledge_base_id AND (f.current_version_node_id=v.version_node_id OR f.root_version_node_id=v.version_node_id)) LIMIT ?)"
-	if res, err := tx.ExecContext(ctx, evidenceSQL, tenant, kb, tenant, kb, cutoff, s.batch); err != nil {
+	// Retain evidence still cited by version families, clause relations and rendition bindings.
+	evidenceSQL := `DELETE FROM ext_source_snapshot_evidence WHERE rowid IN (
+		SELECT e.rowid FROM ext_source_snapshot_evidence e JOIN ext_document_version v
+			ON (v.tenant_id,v.knowledge_base_id,v.version_node_id)=(e.tenant_id,e.knowledge_base_id,e.version_node_id)
+		WHERE e.tenant_id=? AND e.knowledge_base_id=? AND julianday(v.created_at)<julianday(?)
+		AND NOT EXISTS (SELECT 1 FROM ext_document_version_family f
+			WHERE (f.tenant_id,f.knowledge_base_id)=(e.tenant_id,e.knowledge_base_id)
+			AND e.version_node_id IN (f.current_version_node_id,f.root_version_node_id))
+		AND NOT EXISTS (SELECT 1 FROM ext_clause_relations c
+			WHERE (c.tenant_id,c.knowledge_base_id)=(e.tenant_id,e.knowledge_base_id)
+			AND e.version_node_id IN (c.source_version_id,c.target_version_id))
+		AND NOT EXISTS (SELECT 1 FROM ext_parser_rendition_bindings p
+			WHERE (p.tenant_id,p.knowledge_base_id,p.source_version_id)=(e.tenant_id,e.knowledge_base_id,e.version_node_id))
+		ORDER BY e.version_node_id LIMIT ?)`
+	if res, err := tx.ExecContext(ctx, evidenceSQL, tenant, kb, cutoff, s.batch); err != nil {
 		return deleted, err
 	} else if n, e := res.RowsAffected(); e == nil {
 		result.EvidenceDeleted += int(n)
