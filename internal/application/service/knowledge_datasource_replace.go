@@ -2,20 +2,26 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/google/uuid"
 )
 
 // knowledgeReplacement is local to a single creation pipeline; a successful
 // persist switches the live rows before that pipeline can enqueue a worker.
 type knowledgeReplacement struct {
-	previous  *types.Knowledge
-	metadata  map[string]string
-	tagIDs    []string
-	committed bool
-	keepFile  bool // a failed commit/read may still have published the new path
+	previous    *types.Knowledge
+	metadata    map[string]string
+	tagIDs      []string
+	committed   bool
+	keepFile    bool // a failed commit/read may still have published the new path
+	reservation string
+	resources   map[string]extensionbridge.AttachmentResourceInventory
 }
 
 func (s *knowledgeService) checkKnowledgeForCreation(ctx context.Context, tenantID uint64, kbID string,
@@ -40,13 +46,20 @@ func (s *knowledgeService) persistKnowledgeForCreation(ctx context.Context, know
 		return err
 	}
 	knowledge.Metadata = metadata
+	if err := extensionbridge.ReserveAttachmentDelete(ctx, []*types.Knowledge{replacement.previous}, replacement.resources, replacement.reservation); err != nil {
+		cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return errors.Join(err, extensionbridge.CancelAttachmentDelete(cancelCtx, []*types.Knowledge{replacement.previous}, replacement.reservation))
+	}
 	if err := s.repo.ReplaceKnowledge(ctx, replacement.previous, knowledge, replacement.tagIDs); err != nil {
 		// A commit can succeed while its acknowledgement is lost. Only discard
 		// the staged file when a read confirms the previous row is still live.
 		cleanupCtx := context.WithoutCancel(ctx)
 		old, oldErr := s.repo.GetKnowledgeByID(cleanupCtx, replacement.previous.TenantID, replacement.previous.ID)
 		if oldErr == nil && old != nil {
-			return err
+			cancelCtx, cancel := context.WithTimeout(cleanupCtx, 5*time.Second)
+			defer cancel()
+			return errors.Join(err, extensionbridge.CancelAttachmentDelete(cancelCtx, []*types.Knowledge{replacement.previous}, replacement.reservation))
 		}
 		current, readErr := s.repo.GetKnowledgeByID(cleanupCtx, knowledge.TenantID, knowledge.ID)
 		if readErr != nil || current == nil {
@@ -82,7 +95,11 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 	if err := s.validateKnowledgeTagIDs(plan.ctx, previous.TenantID, previous.KnowledgeBaseID, tagIDs); err != nil {
 		return nil, err
 	}
-	replacement := &knowledgeReplacement{previous: previous, metadata: metadata, tagIDs: tagIDs}
+	resources, err := attachmentResourceSnapshot(plan.ctx, s.resourceCatalog, plan.knowledge, plan.imageInfo)
+	if err != nil {
+		return nil, err
+	}
+	replacement := &knowledgeReplacement{previous: previous, metadata: metadata, tagIDs: tagIDs, reservation: uuid.NewString(), resources: resources}
 	var created *types.Knowledge
 	if len(item.Content) > 0 {
 		file, buildErr := bytesToFileHeader(item.Content, item.FileName)
@@ -111,9 +128,11 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 	if cleanupErr := s.executeKnowledgeDelete(plan, true); cleanupErr != nil {
 		logger.Warnf(plan.ctx, "Replacement committed; failed to clean retired knowledge %s: %v",
 			knowledgeID, cleanupErr)
-	} else if cleanupErr := s.repo.HardDeleteKnowledge(plan.ctx, previous.TenantID, knowledgeID); cleanupErr != nil {
-		logger.Warnf(plan.ctx, "Replacement committed; failed to remove retired knowledge %s: %v",
-			knowledgeID, cleanupErr)
+	} else if !attachmentReclaimsFile(previous) {
+		if cleanupErr := s.repo.HardDeleteKnowledge(plan.ctx, previous.TenantID, knowledgeID); cleanupErr != nil {
+			logger.Warnf(plan.ctx, "Replacement committed; failed to remove retired knowledge %s: %v",
+				knowledgeID, cleanupErr)
+		}
 	}
 	return created, err
 }

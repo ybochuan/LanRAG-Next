@@ -44,10 +44,10 @@ func (i *Importer) WithSemantics(db *store.DB) *Importer {
 
 // Process imports one level only and records ownership for confirmed uploads.
 func (i *Importer) Process(ctx context.Context, tenant uint64, kb, parent, name string, data []byte) ([]Receipt, error) {
-	return i.process(ctx, tenant, kb, parent, name, data, "", nil)
+	return i.process(ctx, tenant, kb, parent, name, data, "", nil, nil)
 }
 
-func (i *Importer) process(ctx context.Context, tenant uint64, kb, parent, name string, data []byte, expectedHash string, selected map[string]bool) ([]Receipt, error) {
+func (i *Importer) process(ctx context.Context, tenant uint64, kb, parent, name string, data []byte, expectedHash string, selected map[string]bool, outcomes *[]ImportOutcome) ([]Receipt, error) {
 	if i == nil || i.client == nil || tenant != i.client.TenantID() || !i.allowed[kb] || !weknora.ValidID(parent) {
 		return nil, errors.New("attachment scope denied")
 	}
@@ -66,10 +66,11 @@ func (i *Importer) process(ctx context.Context, tenant uint64, kb, parent, name 
 	if expectedHash != "" && parentFileHash != expectedHash {
 		return nil, store.ErrAttachmentConflict
 	}
-	files, err := i.registry.Extract(name, data)
+	manifest, err := i.registry.extract(name, data)
 	if err != nil {
 		return nil, err
 	}
+	files := manifest.files
 	managedSource := i.db != nil && i.registry.Supports(name, data)
 	if managedSource && parentFileHash != fmt.Sprintf("%x", md5.Sum(data)) {
 		return nil, errors.New("attachment source revision mismatch")
@@ -116,16 +117,36 @@ func (i *Importer) process(ctx context.Context, tenant uint64, kb, parent, name 
 		files = remaining
 	}
 	result := make([]Receipt, 0, len(files))
+	imported := make([]File, 0, len(files))
 	observedIDs := make([]string, 0, len(files))
 	bindings := make([]store.AttachmentBinding, 0, len(files))
 	var uploadErr error
 	for _, file := range files {
 		id, importID, err := i.upload(ctx, tenant, kb, parent, parentFileHash, file)
+		if outcomes != nil {
+			item := ImportOutcome{Fingerprint: sha256Hex(file.Data), FileName: file.Name, DocumentID: id}
+			if err != nil {
+				item.Error = "upload_failed"
+				switch {
+				case errors.Is(err, weknora.ErrAttachmentUploadRejected):
+					item.Error = "rejected"
+				case errors.Is(err, weknora.ErrAttachmentUploadPending):
+					item.Error = "pending"
+				case errors.Is(err, store.ErrAttachmentConflict):
+					item.Error = "revision_conflict"
+				}
+			}
+			*outcomes = append(*outcomes, item)
+		}
 		if err != nil {
+			if outcomes != nil {
+				continue
+			}
 			uploadErr = err
 			break
 		}
 		result = append(result, Receipt{file.Name, id})
+		imported = append(imported, file)
 		observedIDs = append(observedIDs, id)
 		if importID != "" {
 			bindings = append(bindings, store.AttachmentBinding{ImportID: importID, AttachmentID: id})
@@ -136,7 +157,7 @@ func (i *Importer) process(ctx context.Context, tenant uint64, kb, parent, name 
 		if err != nil || isChild || currentHash != parentFileHash {
 			return result, errors.New("attachment parent changed during import")
 		}
-		if selected == nil && uploadErr == nil {
+		if selected == nil && uploadErr == nil && len(manifest.issues) == 0 {
 			err = i.db.ReconcileAttachmentManifest(ctx, tenant, kb, parent, parentFileHash, bindings, observedIDs)
 		} else {
 			err = i.db.BindAttachments(ctx, tenant, kb, parent, parentFileHash, bindings)
@@ -148,7 +169,7 @@ func (i *Importer) process(ctx context.Context, tenant uint64, kb, parent, name 
 	if i.db != nil && len(result) > 0 {
 		records := make([]store.AttachmentSemantic, 0, len(result))
 		for index, receipt := range result {
-			semantic := automatic[sha256Hex(files[index].Data)]
+			semantic := automatic[sha256Hex(imported[index].Data)]
 			hash := parentFileHash
 			if hash == "" {
 				hash = semantic.ParentFileHash
@@ -190,8 +211,16 @@ func (i *Importer) upload(ctx context.Context, tenant uint64, kb, parent, parent
 		return "", "", err
 	}
 	id, managed, err := i.client.UploadManagedAttachment(ctx, kb, parent, file.Name, file.Data, importID, func() error {
-		return i.db.ClaimAttachmentUpload(ctx, importID)
+		if err := i.db.ClaimAttachmentUpload(ctx, importID); err != nil {
+			return fmt.Errorf("%w: %v", weknora.ErrAttachmentUploadPending, err)
+		}
+		return nil
 	})
+	if errors.Is(err, weknora.ErrAttachmentUploadRejected) {
+		if releaseErr := i.db.CancelRejectedAttachmentUpload(ctx, importID); releaseErr != nil {
+			return "", "", errors.Join(weknora.ErrAttachmentUploadPending, releaseErr)
+		}
+	}
 	if !managed {
 		importID = ""
 	}

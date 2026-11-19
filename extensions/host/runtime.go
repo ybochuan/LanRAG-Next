@@ -240,8 +240,8 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
 		if cfg.NativeDBPath != "" {
 			attachmentCleanup = attachmentcleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, attachmentSource.DeleteAttachment, cfg.RetryDelay)
-			attachmentCleanup.WithReclaimer(func(ctx context.Context, kb, doc, hash string) (string, error) {
-				return attachmentSource.ReclaimDeletedAttachment(ctx, cfg.ManagementKey, kb, doc, hash)
+			attachmentCleanup.WithResourceReclaimer(func(ctx context.Context, kb, doc, hash, resources string) (string, error) {
+				return attachmentSource.ReclaimDeletedAttachment(ctx, cfg.ManagementKey, kb, doc, hash, resources)
 			})
 			services.BeforeAttachmentDelete = &bridge.AttachmentDeleteHandler{Key: cfg.ManagementKey, Cleanup: attachmentCleanup}
 			cleanupService = cleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, cfg.CleanupRetention, cfg.CleanupAuto).WithReady(upstream.Health)

@@ -629,6 +629,13 @@ func (r *knowledgeRepository) DeletedKnowledgeOriginal(ctx context.Context, tena
 	return &row, err
 }
 
+// AttachmentStorageKnowledgeBase reads persisted storage routing for an admitted cleanup.
+func (r *knowledgeRepository) AttachmentStorageKnowledgeBase(ctx context.Context, tenant uint64, id string) (*types.KnowledgeBase, error) {
+	var kb types.KnowledgeBase
+	err := r.db.WithContext(ctx).Unscoped().Where("tenant_id=? AND id=?", tenant, id).Take(&kb).Error
+	return &kb, err
+}
+
 func (r *knowledgeRepository) OriginalStorageState(ctx context.Context, row *types.Knowledge) (string, error) {
 	var count int64
 	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).

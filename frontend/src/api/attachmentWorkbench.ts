@@ -21,6 +21,8 @@ export interface AttachmentItem {
   parse_status: string
   state: string
   title_state?: string
+  reclaim_error?: string
+  resources_verified?: boolean
   revision: number
   relation_id?: string
   relation_type: string
@@ -36,6 +38,18 @@ export interface AttachmentPreview {
   state: string
 }
 
+export interface AttachmentImportOutcome {
+  fingerprint: string
+  file_name: string
+  document_id?: string
+  error?: string
+}
+
+export interface AttachmentExtractionIssue {
+  file_name: string
+  reason: string
+}
+
 export interface AttachmentWorkbench {
   parent_id: string
   parent_version: string
@@ -43,6 +57,7 @@ export interface AttachmentWorkbench {
   items: AttachmentItem[]
   references?: (AttachmentReference & { id: string })[]
   preview?: AttachmentPreview[]
+  preview_issues?: AttachmentExtractionIssue[]
 }
 
 type Action = 'confirm' | 'detach' | 'restore' | 'import'
@@ -60,7 +75,7 @@ export function attachmentWorkbench(kb: string, doc: string, preview = false) {
 }
 
 export async function updateAttachment(kb: string, doc: string, action: Action, revision: number, business: object, operationID: string) {
-  const result = await unwrap<{ title_state?: string; partial?: boolean }>(put(`${base(kb)}${action}?${query(doc)}`, {
+  const result = await unwrap<{ title_state?: string; items?: AttachmentImportOutcome[] }>(put(`${base(kb)}${action}?${query(doc)}`, {
     expected_revision: revision,
     operation_id: operationID,
     business,

@@ -49,24 +49,27 @@ type Result struct {
 	Items          []Item                       `json:"items"`
 	References     []attachment.ParentReference `json:"references,omitempty"`
 	Preview        []attachment.PreviewFile     `json:"preview,omitempty"`
+	PreviewIssues  []attachment.ExtractionIssue `json:"preview_issues,omitempty"`
 }
 
 type Item struct {
-	StoreReference store.AttachmentReference `json:"reference"`
-	ID             string                    `json:"id"`
-	Version        string                    `json:"file_hash"`
-	Title          string                    `json:"title"`
-	NativeTitle    string                    `json:"native_title"`
-	Original       string                    `json:"file_name"`
-	Folder         string                    `json:"folder_path"`
-	Mapping        string                    `json:"mapping_status"`
-	State          string                    `json:"state"`
-	ParseStatus    string                    `json:"parse_status"`
-	TitleState     string                    `json:"title_state,omitempty"`
-	Revision       int64                     `json:"revision"`
-	RelationID     string                    `json:"relation_id,omitempty"`
-	RelationType   string                    `json:"relation_type"`
-	Managed        bool                      `json:"managed"`
+	StoreReference    store.AttachmentReference `json:"reference"`
+	ID                string                    `json:"id"`
+	Version           string                    `json:"file_hash"`
+	Title             string                    `json:"title"`
+	NativeTitle       string                    `json:"native_title"`
+	Original          string                    `json:"file_name"`
+	Folder            string                    `json:"folder_path"`
+	Mapping           string                    `json:"mapping_status"`
+	State             string                    `json:"state"`
+	ParseStatus       string                    `json:"parse_status"`
+	TitleState        string                    `json:"title_state,omitempty"`
+	ReclaimError      string                    `json:"reclaim_error,omitempty"`
+	ResourcesVerified bool                      `json:"resources_verified,omitempty"`
+	Revision          int64                     `json:"revision"`
+	RelationID        string                    `json:"relation_id,omitempty"`
+	RelationType      string                    `json:"relation_type"`
+	Managed           bool                      `json:"managed"`
 }
 
 // Command carries expected document and workbench revisions supplied by the UI.
@@ -74,6 +77,7 @@ type Command struct {
 	Parent          string   `json:"parent_id"`
 	ParentVersion   string   `json:"parent_version"`
 	Document        string   `json:"attachment_id"`
+	RelationID      string   `json:"relation_id,omitempty"`
 	DocumentVersion string   `json:"file_hash"`
 	PreviousTitle   string   `json:"expected_title"`
 	Title           string   `json:"title"`
@@ -202,7 +206,7 @@ func (s *Service) List(ctx context.Context, scope Scope, document string) (Resul
 
 func (s *Service) reclaimStatus(ctx context.Context, scope Scope, parent string, result []Item) ([]Item, error) {
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT document_id,file_hash,title,status FROM ext_attachment_reclaims
+		rows, err := tx.QueryContext(ctx, `SELECT document_id,file_hash,title,status,last_error,resources<>'' FROM ext_attachment_reclaims
 			WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=? ORDER BY rowid DESC LIMIT 100`,
 			fmt.Sprint(scope.Tenant), scope.KB, parent)
 		if err != nil {
@@ -211,13 +215,15 @@ func (s *Service) reclaimStatus(ctx context.Context, scope Scope, parent string,
 		defer rows.Close()
 		for rows.Next() {
 			item := Item{RelationType: "attachment_of"}
-			if err := rows.Scan(&item.ID, &item.Version, &item.Title, &item.State); err != nil {
+			if err := rows.Scan(&item.ID, &item.Version, &item.Title, &item.State, &item.ReclaimError, &item.ResourcesVerified); err != nil {
 				return err
 			}
 			found := false
 			for i := range result {
 				if result[i].ID == item.ID && result[i].Version == item.Version {
 					result[i].State = item.State
+					result[i].ReclaimError = item.ReclaimError
+					result[i].ResourcesVerified = item.ResourcesVerified
 					found = true
 					break
 				}
@@ -243,14 +249,12 @@ func (s *Service) relatedFiles(ctx context.Context, scope Scope, parent string, 
 		return result, err
 	}
 	ids := []string{}
-	kinds := map[string]string{}
+	relations := []business.Related{}
 	for _, row := range related {
 		if row.KnowledgeBaseID == scope.KB &&
 			(row.EdgeType == "template_for" && row.Direction == "incoming" || row.EdgeType == "cites" && row.Direction == "outgoing") {
-			if kinds[row.DocumentID] == "" {
-				ids = append(ids, row.DocumentID)
-			}
-			kinds[row.DocumentID] = row.EdgeType
+			ids = append(ids, row.DocumentID)
+			relations = append(relations, row)
 		}
 	}
 	if len(ids) == 0 {
@@ -260,33 +264,24 @@ func (s *Service) relatedFiles(ctx context.Context, scope Scope, parent string, 
 	if err != nil {
 		return result, err
 	}
-	err = s.db.View(ctx, func(tx *sql.Tx) error {
-		for _, id := range ids {
-			d := docs[id]
-			if d.ID == "" || d.IsAttachment || d.ParseStatus == "deleting" {
-				continue
-			}
-			source, target := id, parent
-			if kinds[id] == "cites" {
-				source, target = parent, id
-			}
-			item := Item{ID: id, Version: d.FileHash, Title: d.Title, NativeTitle: d.Title, Original: d.FileName, Folder: d.FolderPath,
-				RelationType: kinds[id], State: "current", ParseStatus: d.ParseStatus}
-			err := tx.QueryRowContext(ctx, `SELECT relation_id,revision FROM ext_document_relations
-				WHERE tenant_id=? AND knowledge_base_id=? AND target_knowledge_base_id=? AND document_id=? AND target_document_id=?
-				AND edge_type=? AND status='active' ORDER BY rowid DESC LIMIT 1`, fmt.Sprint(scope.Tenant), scope.KB, scope.KB, source, target, item.RelationType).
-				Scan(&item.RelationID, &item.Revision)
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			result = append(result, item)
+	for _, row := range relations {
+		d := docs[row.DocumentID]
+		if d.ID == "" || d.IsAttachment || d.ParseStatus == "deleting" || row.RelationID == "" {
+			continue
 		}
-		return nil
-	})
-	return result, err
+		item := Item{ID: d.ID, Version: d.FileHash, Title: d.Title, NativeTitle: d.Title, Original: d.FileName, Folder: d.FolderPath,
+			RelationType: row.EdgeType, RelationID: row.RelationID, Revision: row.Revision, State: "current", ParseStatus: d.ParseStatus}
+		if row.Reference != nil {
+			item.Mapping = "manual"
+			item.StoreReference = *row.Reference
+		}
+		item.TitleState, err = s.db.AttachmentTitleStatus(ctx, scope.Tenant, scope.KB, d.ID)
+		if err != nil {
+			return result, err
+		}
+		result = append(result, item)
+	}
+	return result, nil
 }
 
 func (s *Service) Preview(ctx context.Context, scope Scope, document string) (Result, error) {
@@ -294,11 +289,11 @@ func (s *Service) Preview(ctx context.Context, scope Scope, document string) (Re
 	if err != nil {
 		return result, err
 	}
-	result.Preview, result.References, err = s.importer.Preview(ctx, scope.Tenant, scope.KB, result.Parent, result.ParentVersion)
+	result.Preview, result.References, result.PreviewIssues, err = s.importer.Preview(ctx, scope.Tenant, scope.KB, result.Parent, result.ParentVersion)
 	return result, err
 }
 
-func (s *Service) Import(ctx context.Context, scope Scope, c Command) ([]attachment.Receipt, error) {
+func (s *Service) Import(ctx context.Context, scope Scope, c Command) ([]attachment.ImportOutcome, error) {
 	return s.importer.ImportSelected(ctx, scope.Tenant, scope.KB, c.Parent, c.ParentVersion, c.Fingerprints)
 }
 
@@ -323,10 +318,34 @@ func (s *Service) Edit(ctx context.Context, scope Scope, action, actor, operatio
 		return result, err
 	}
 	parent, child := docs[c.Parent], docs[c.Document]
-	if parent.ID == "" || child.ID == "" || parent.IsAttachment || !child.IsAttachment || child.ParentDocumentID != c.Parent ||
+	if parent.ID == "" || child.ID == "" || parent.IsAttachment ||
 		parent.FileHash == "" || parent.FileHash != c.ParentVersion || child.FileHash == "" || child.FileHash != c.DocumentVersion ||
 		parent.ParseStatus == "deleting" || child.ParseStatus == "deleting" {
 		return result, store.ErrAttachmentConflict
+	}
+	if c.RelationID == "" {
+		if !child.IsAttachment || child.ParentDocumentID != parent.ID {
+			return result, store.ErrAttachmentConflict
+		}
+	} else {
+		if action != "confirm" || s.relations == nil || child.IsAttachment || !weknora.ValidID(c.RelationID) {
+			return result, store.ErrAttachmentConflict
+		}
+		related, err := s.relations.QueryRelated(ctx, provenance.Scope{TenantID: scope.Tenant, KnowledgeBaseID: scope.KB}, parent.ID)
+		if err != nil {
+			return result, err
+		}
+		matched := false
+		for _, row := range related {
+			if row.RelationID == c.RelationID && row.KnowledgeBaseID == scope.KB && row.DocumentID == child.ID &&
+				row.EdgeType == "template_for" && row.Direction == "incoming" {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return result, store.ErrAttachmentConflict
+		}
 	}
 	var evidence store.AttachmentReference
 	if action == "confirm" && *c.ReferenceID != "" {
@@ -350,7 +369,7 @@ func (s *Service) Edit(ctx context.Context, scope Scope, action, actor, operatio
 	}
 	result, err = s.db.AttachmentReview(ctx, store.AttachmentReviewEdit{Tenant: scope.Tenant, KB: scope.KB,
 		Actor: actor, Operation: operation, Action: action, Parent: parent.ID, ParentHash: c.ParentVersion,
-		Document: child.ID, DocumentHash: c.DocumentVersion, ImportID: child.ImportID, PreviousTitle: c.PreviousTitle,
+		Document: child.ID, DocumentHash: c.DocumentVersion, ImportID: child.ImportID, RelationID: c.RelationID, PreviousTitle: c.PreviousTitle,
 		NextTitle: title, NativeTitle: child.Title, ExpectedRevision: revision, Reference: evidence})
 	if err == nil && result.TitleState == "pending" {
 		_ = s.syncTitles(ctx, scope.Tenant)

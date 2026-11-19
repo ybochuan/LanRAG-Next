@@ -45,11 +45,20 @@ func (s *Server) executeAttachment(ctx context.Context, r Request) (any, error) 
 	}
 	switch r.Action {
 	case "business_attachment_import":
-		receipts, err := s.attachments.Import(ctx, scope, c)
-		if err != nil && len(receipts) == 0 {
+		items, err := s.attachments.Import(ctx, scope, c)
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"receipts": receipts, "partial": err != nil}, nil
+		receipts := []attachment.Receipt{}
+		partial := false
+		for _, item := range items {
+			if item.Error != "" {
+				partial = true
+				continue
+			}
+			receipts = append(receipts, attachment.Receipt{FileName: item.FileName, DocumentID: item.DocumentID})
+		}
+		return map[string]any{"items": items, "receipts": receipts, "partial": partial}, nil
 	case "business_attachment_confirm", "business_attachment_detach", "business_attachment_restore":
 		if !weknora.ValidID(c.Document) {
 			return nil, business.ErrInvalid

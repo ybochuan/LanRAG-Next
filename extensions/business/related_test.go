@@ -3,11 +3,97 @@ package business
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/store"
 	"testing"
 	"time"
 )
+
+func TestTemplateEvidenceUsesTheVerifiedRelationRevision(t *testing.T) {
+	s, db, _ := fixture(t)
+	ctx := t.Context()
+	scope := provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}
+	seedVersions(t, db, scope)
+	_, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: "source-active", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.verify = func(_ context.Context, _ provenance.Scope, doc string) (string, error) { return "version-" + doc, nil }
+	c := cmd("relation_declare", "template-create")
+	c.Payload = Payload{DocumentID: "source", TargetDocumentID: "target", EdgeType: "template_for"}
+	relation, err := s.Execute(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit := store.AttachmentReviewEdit{Tenant: 7, KB: "kb", Actor: "7:owner", Operation: "template-reference", Action: "confirm", Parent: "target", ParentHash: "parent-hash", Document: "source", DocumentHash: "template-hash", RelationID: relation.ID, ExpectedRevision: relation.Revision, Reference: store.AttachmentReference{Title: "Application form", Location: "paragraph 12", Sequence: 2}}
+	for range 2 {
+		result, err := db.AttachmentReview(ctx, edit)
+		if err != nil || result.Revision != 2 {
+			t.Fatalf("confirm replay = %+v %v", result, err)
+		}
+	}
+	rows, err := s.QueryRelated(ctx, scope, "target")
+	if err != nil || len(rows) != 1 || rows[0].RelationID != relation.ID || rows[0].Revision != 2 || rows[0].Reference == nil || rows[0].Reference.Location != "paragraph 12" {
+		t.Fatalf("verified relation = %+v %v", rows, err)
+	}
+	if err = db.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO ext_lineage_node VALUES('version-other','7','kb','document_version','other','2026-11-02T00:00:00Z')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO ext_document_version_family VALUES('family-other','7','kb','other','','version-other','version-other',1,'2026-11-02T00:00:00Z','2026-11-02T00:00:00Z')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: "other-active", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "other", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	other := cmd("relation_declare", "other-template-create")
+	other.Payload = Payload{DocumentID: "source", TargetDocumentID: "other", EdgeType: "template_for"}
+	second, err := s.Execute(ctx, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondEdit := edit
+	secondEdit.RelationID, secondEdit.Parent, secondEdit.Operation, secondEdit.ExpectedRevision = second.ID, "other", "other-reference", 1
+	secondEdit.Reference.Location = "paragraph 99"
+	if _, err = db.AttachmentReview(ctx, secondEdit); err != nil {
+		t.Fatal(err)
+	}
+	firstRefs, err := s.AttachmentTemplates(ctx, scope, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRefs, err := s.AttachmentTemplates(ctx, scope, "other")
+	if err != nil || len(firstRefs) != 1 || len(secondRefs) != 1 || firstRefs[0].Reference == nil || secondRefs[0].Reference == nil || firstRefs[0].Reference.Location != "paragraph 12" || secondRefs[0].Reference.Location != "paragraph 99" {
+		t.Fatalf("per-parent references = %+v %+v %v", firstRefs, secondRefs, err)
+	}
+	c = cmd("relation_revoke", "template-stale-revoke")
+	c.ID = relation.ID
+	c.ExpectedRevision = 1
+	if _, err = s.Execute(ctx, c); !errors.Is(err, ErrConflict) {
+		t.Fatalf("outdated revoke = %v", err)
+	}
+	edit.Operation = "template-stale-save"
+	if _, err = db.AttachmentReview(ctx, edit); !errors.Is(err, store.ErrAttachmentConflict) {
+		t.Fatalf("outdated save = %v", err)
+	}
+	c.OperationID = "template-revoke"
+	c.ExpectedRevision = 2
+	if _, err = s.Execute(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	edit.Operation = "template-revoked-save"
+	edit.ExpectedRevision = 3
+	if _, err = db.AttachmentReview(ctx, edit); !errors.Is(err, store.ErrAttachmentConflict) {
+		t.Fatalf("revoked save = %v", err)
+	}
+	if rows, err = s.QueryRelated(ctx, scope, "target"); err != nil || len(rows) != 0 {
+		t.Fatalf("revoked rows = %v %v", rows, err)
+	}
+}
 
 func TestNavigationRelationsUseBusinessAuditWithoutGovernanceEdges(t *testing.T) {
 	s, db, _ := fixture(t)

@@ -23,10 +23,29 @@ type File struct {
 	Data []byte
 }
 
+// ExtractionIssue describes a skipped member without exposing its file bytes.
+type ExtractionIssue struct {
+	FileName string `json:"file_name"`
+	Reason   string `json:"reason"`
+}
+
+type extraction struct {
+	files  []File
+	issues []ExtractionIssue
+}
+
+func (r *extraction) skip(name, reason string) {
+	r.issues = append(r.issues, ExtractionIssue{FileName: baseName(name), Reason: reason})
+}
+
 // Extractor identifies a supported container and returns its independent files.
 type Extractor interface {
 	Supports(fileName string, header []byte) bool
 	Extract(data []byte) ([]File, error)
+}
+
+type detailedExtractor interface {
+	extract([]byte) (extraction, error)
 }
 
 // Registry runs matching extractors in registration order.
@@ -58,29 +77,42 @@ func (r *Registry) Supports(name string, data []byte) bool {
 
 // Extract filters supported results before any independent ingestion.
 func (r *Registry) Extract(name string, data []byte) ([]File, error) {
+	result, err := r.extract(name, data)
+	return result.files, err
+}
+
+func (r *Registry) extract(name string, data []byte) (extraction, error) {
 	if len(data) == 0 || len(data) > MaxSourceBytes {
-		return nil, errors.New("invalid attachment source size")
+		return extraction{}, errors.New("invalid attachment source size")
 	}
-	var result []File
+	var result extraction
 	total := 0
 	for _, e := range r.extractors {
 		if e == nil || !e.Supports(name, data[:min(len(data), 1024)]) {
 			continue
 		}
-		files, err := e.Extract(data)
-		if err != nil {
-			return nil, err
+		var parsed extraction
+		var err error
+		if detailed, ok := e.(detailedExtractor); ok {
+			parsed, err = detailed.extract(data)
+		} else {
+			parsed.files, err = e.Extract(data)
 		}
-		for _, f := range files {
+		if err != nil {
+			return extraction{}, err
+		}
+		result.issues = append(result.issues, parsed.issues...)
+		for _, f := range parsed.files {
 			f.Name = baseName(f.Name)
 			if !Allowed(f.Name, f.Data) {
+				result.skip(f.Name, "invalid_format")
 				continue
 			}
 			total += len(f.Data)
-			if len(result) >= MaxFiles || total > MaxBatchBytes {
-				return nil, errors.New("attachment batch exceeds limit")
+			if len(result.files) >= MaxFiles || total > MaxBatchBytes {
+				return extraction{}, errors.New("attachment batch exceeds limit")
 			}
-			result = append(result, f)
+			result.files = append(result.files, f)
 		}
 	}
 	return result, nil
@@ -112,7 +144,12 @@ func Allowed(name string, data []byte) bool {
 		return false
 	}
 	hasTypes, hasPart := false, false
+	var expanded uint64
 	for _, f := range z.File {
+		if f.UncompressedSize64 > MaxBatchBytes-expanded {
+			return false
+		}
+		expanded += f.UncompressedSize64
 		hasTypes = hasTypes || f.Name == "[Content_Types].xml"
 		hasPart = hasPart || f.Name == part
 	}

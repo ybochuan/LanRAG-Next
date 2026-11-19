@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -204,6 +205,9 @@ func (s *knowledgeService) planKnowledgeMove(
 		}
 		snapshot := *row
 		result = append(result, &snapshot)
+	}
+	if err := extensionbridge.ValidateAttachmentTransfer(ctx, result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

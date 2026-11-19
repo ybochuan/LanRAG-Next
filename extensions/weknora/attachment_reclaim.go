@@ -12,11 +12,15 @@ import (
 )
 
 // ReclaimDeletedAttachment asks Core to verify or retry the exact native original.
-func (c *Client) ReclaimDeletedAttachment(ctx context.Context, key, kb, doc, hash string) (string, error) {
+func (c *Client) ReclaimDeletedAttachment(ctx context.Context, key, kb, doc, hash string, resources ...string) (string, error) {
 	if len(key) < 32 || !ValidID(kb) || !ValidID(doc) || len(hash) != 32 {
 		return "", errors.New("invalid native file reclaim binding")
 	}
-	body, _ := json.Marshal(map[string]string{"knowledge_base_id": kb, "file_hash": hash})
+	sealed := ""
+	if len(resources) > 0 {
+		sealed = resources[0]
+	}
+	body, _ := json.Marshal(map[string]string{"knowledge_base_id": kb, "file_hash": hash, "resources": sealed})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/v1/knowledge/"+url.PathEscape(doc)+"/attachment-reclaim", bytes.NewReader(body))
 	if err != nil {
 		return "", err

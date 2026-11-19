@@ -17,10 +17,15 @@ import (
 // PDFExtractor uses the pinned pure-Go pdfcpu API without filesystem configuration.
 type PDFExtractor struct{}
 
+func (e PDFExtractor) Extract(data []byte) ([]File, error) {
+	result, err := e.extract(data)
+	return result.files, err
+}
+
 func (PDFExtractor) Supports(name string, header []byte) bool {
 	return strings.EqualFold(path.Ext(name), ".pdf") && bytes.Contains(header, []byte("%PDF-"))
 }
-func (PDFExtractor) Extract(data []byte) ([]File, error) {
+func (PDFExtractor) extract(data []byte) (extraction, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	conf := model.NewStatelessConfiguration()
@@ -30,47 +35,47 @@ func (PDFExtractor) Extract(data []byte) ([]File, error) {
 	conf.Limits.MaxDecodeBytes = MaxFileBytes
 	listed, err := api.Attachments(ctx, bytes.NewReader(data), conf)
 	if err != nil {
-		return nil, errors.New("PDF attachment listing failed")
+		return extraction{}, errors.New("PDF attachment listing failed")
 	}
-	names := []string{}
+	if len(listed) > MaxFiles {
+		return extraction{}, errors.New("attachment batch exceeds limit")
+	}
+	var result extraction
+	count, total := 0, 0
 	for _, a := range listed {
-		if allowedExtension(a.FileName) {
-			names = append(names, a.ID)
-		}
-	}
-	if len(names) == 0 {
-		return nil, nil
-	}
-	if len(names) > MaxFiles {
-		return nil, errors.New("attachment batch exceeds limit")
-	}
-	var result []File
-	total := 0
-	for _, id := range names {
-		// pdfcpu decodes before returning its Reader. Bound each attachment
-		// separately so one oversize stream cannot discard valid siblings.
-		raw, err := api.ExtractAttachmentsRaw(ctx, bytes.NewReader(data), "", []string{id}, conf)
-		if errors.Is(err, filter.ErrDecodeLimitExceeded) {
+		if !allowedExtension(a.FileName) {
+			result.skip(a.FileName, "unsupported_format")
 			continue
 		}
+		count++
+		if count > MaxFiles {
+			return extraction{}, errors.New("attachment batch exceeds limit")
+		}
+		// pdfcpu decodes before returning its Reader. Bound each attachment
+		// separately so one oversize stream cannot discard valid siblings.
+		raw, err := api.ExtractAttachmentsRaw(ctx, bytes.NewReader(data), "", []string{a.ID}, conf)
+		if errors.Is(err, filter.ErrDecodeLimitExceeded) {
+			result.skip(a.FileName, "size_limit")
+			continue
+		}
+		if err != nil || len(raw) != 1 {
+			result.skip(a.FileName, "read_failed")
+			continue
+		}
+		b, err := io.ReadAll(io.LimitReader(raw[0].Reader, MaxFileBytes))
 		if err != nil {
-			return nil, errors.New("PDF attachment extraction failed")
+			result.skip(a.FileName, "read_failed")
+			continue
 		}
-		for _, a := range raw {
-			b, err := io.ReadAll(io.LimitReader(a.Reader, MaxFileBytes))
-			if err != nil {
-				return nil, errors.New("PDF attachment read failed")
-			}
-			name := baseName(a.FileName)
-			if !Allowed(name, b) {
-				continue
-			}
-			total += len(b)
-			if total > MaxBatchBytes {
-				return nil, errors.New("attachment batch exceeds limit")
-			}
-			result = append(result, File{name, b})
+		if len(b) >= MaxFileBytes {
+			result.skip(a.FileName, "size_limit")
+			continue
 		}
+		total += len(b)
+		if total > MaxBatchBytes {
+			return extraction{}, errors.New("attachment batch exceeds limit")
+		}
+		result.files = append(result.files, File{baseName(a.FileName), b})
 	}
 	return result, nil
 }

@@ -72,6 +72,10 @@ func TestOfficeRegistryFiltersActualTypesAndStrictSize(t *testing.T) {
 					t.Fatal("invalid accepted attachment")
 				}
 			}
+			manifest, err := DefaultRegistry().extract(tc.name, office(t, tc.part, entries))
+			if err != nil || len(manifest.issues) != 3 {
+				t.Fatalf("skipped member diagnostics = %+v, %v", manifest.issues, err)
+			}
 		})
 	}
 }

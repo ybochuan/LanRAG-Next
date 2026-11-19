@@ -479,7 +479,11 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	}
 	ctx, ids, knowledgeList := plan.ctx, plan.ids, plan.knowledge
 	if !plan.rowsDeleted {
-		if err := extensionbridge.PrepareAttachmentDelete(ctx, knowledgeList); err != nil {
+		resources, err := attachmentResourceSnapshot(ctx, s.resourceCatalog, knowledgeList, plan.imageInfo)
+		if err != nil {
+			return err
+		}
+		if err := extensionbridge.PrepareAttachmentDelete(ctx, knowledgeList, resources); err != nil {
 			if errors.Is(err, extensionbridge.ErrAttachmentDeleteConflict) {
 				return apperrors.NewConflictError("unlink active attachment references before deleting")
 			}
@@ -522,11 +526,17 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	chunkImageInfos := plan.imageInfo
 	knowledgeToKB := make(map[string]string)
 	for _, k := range knowledgeList {
+		if attachmentReclaimsFile(k) {
+			continue
+		}
 		knowledgeToKB[k.ID] = k.KnowledgeBaseID
 	}
 	kbImageInfos := make(map[string][]string) // kbID → []imageInfo JSON
 	for _, ci := range chunkImageInfos {
 		kbID := knowledgeToKB[ci.KnowledgeID]
+		if kbID == "" {
+			continue
+		}
 		kbImageInfos[kbID] = append(kbImageInfos[kbID], ci.ImageInfo)
 	}
 	kbImageURLs := make(map[string][]string) // kbID → []imageURL (deduplicated)
@@ -535,6 +545,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	}
 	kbKnowledgeIDs := make(map[string][]string) // kbID → knowledge IDs releasing their claims
 	for _, k := range knowledgeList {
+		if attachmentReclaimsFile(k) {
+			continue
+		}
 		kbKnowledgeIDs[k.KnowledgeBaseID] = append(kbKnowledgeIDs[k.KnowledgeBaseID], k.ID)
 	}
 	for kbID, ids := range kbKnowledgeIDs {
@@ -627,6 +640,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	// gone avoids "file missing but row present" zombies that break reparse /
 	// re-delete when an earlier cleanup step failed (issue #2192). A failure below
 	// only orphans storage.
+	if err := extensionbridge.ConfirmAttachmentIndexes(ctx, knowledgeList); err != nil {
+		return err
+	}
 	if !plan.rowsDeleted {
 		if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
 			return err
@@ -635,6 +651,10 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 
 	storageAdjust := int64(0)
 	for _, knowledge := range knowledgeList {
+		if attachmentReclaimsFile(knowledge) {
+			storageAdjust -= knowledge.StorageSize
+			continue
+		}
 		if knowledge.FilePath != "" {
 			fSvc := kbFileServices[knowledge.KnowledgeBaseID]
 			if _, err := s.reclaimKnowledgeOriginal(ctx, fSvc, knowledge); err != nil {

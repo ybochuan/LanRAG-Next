@@ -19,6 +19,11 @@ var annexTitle = regexp.MustCompile(`^附件\s*([0-9]{1,2}(?:[-－—.][0-9]{1,2
 // Original package resources/styles are retained; each document body is replaced.
 type DocxAnnexExtractor struct{}
 
+func (e DocxAnnexExtractor) Extract(data []byte) ([]File, error) {
+	result, err := e.extract(data)
+	return result.files, err
+}
+
 func (DocxAnnexExtractor) Supports(name string, header []byte) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".docx") && bytes.HasPrefix(header, []byte("PK\x03\x04"))
 }
@@ -30,10 +35,10 @@ type bodyPart struct {
 	style              string
 }
 
-func (DocxAnnexExtractor) Extract(data []byte) ([]File, error) {
+func (DocxAnnexExtractor) extract(data []byte) (extraction, error) {
 	z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, errors.New("invalid DOCX container")
+		return extraction{}, errors.New("invalid DOCX container")
 	}
 	var source []byte
 	for _, f := range z.File {
@@ -43,14 +48,14 @@ func (DocxAnnexExtractor) Extract(data []byte) ([]File, error) {
 		}
 	}
 	if err != nil {
-		return nil, err
+		return extraction{}, err
 	}
 	if len(source) == 0 {
-		return nil, nil
+		return extraction{}, errors.New("DOCX document missing")
 	}
 	parts, bodyStart, bodyEnd, err := documentParts(source)
 	if err != nil {
-		return nil, err
+		return extraction{}, err
 	}
 	var starts []int
 	for i, p := range parts {
@@ -59,10 +64,10 @@ func (DocxAnnexExtractor) Extract(data []byte) ([]File, error) {
 		}
 	}
 	if len(starts) == 0 {
-		return nil, nil
+		return extraction{}, nil
 	}
 	if len(starts) > MaxFiles {
-		return nil, errors.New("annex count exceeds limit")
+		return extraction{}, errors.New("annex count exceeds limit")
 	}
 	var section []byte
 	for _, p := range parts {
@@ -70,9 +75,10 @@ func (DocxAnnexExtractor) Extract(data []byte) ([]File, error) {
 			section = source[p.start:p.end]
 		}
 	}
-	result := make([]File, 0, len(starts))
+	result := extraction{files: make([]File, 0, len(starts))}
 	total := 0
 	for n, start := range starts {
+		name := fmt.Sprintf("annex-%02d.docx", n+1)
 		end := len(parts)
 		if n+1 < len(starts) {
 			end = starts[n+1]
@@ -98,34 +104,35 @@ func (DocxAnnexExtractor) Extract(data []byte) ([]File, error) {
 			} else {
 				b, err = readMember(f, MaxBatchBytes)
 				if err != nil {
-					return nil, err
+					return extraction{}, err
 				}
 			}
 			expanded += len(b)
 			if expanded > MaxBatchBytes {
-				return nil, errors.New("annex package exceeds limit")
+				return extraction{}, errors.New("annex package exceeds limit")
 			}
 			header := f.FileHeader
 			header.Method = zip.Deflate
 			w, e := writer.CreateHeader(&header)
 			if e != nil {
-				return nil, errors.New("annex package creation failed")
+				return extraction{}, errors.New("annex package creation failed")
 			}
 			if _, e = w.Write(b); e != nil {
-				return nil, e
+				return extraction{}, e
 			}
 		}
 		if err = writer.Close(); err != nil {
-			return nil, err
+			return extraction{}, err
 		}
 		if output.Len() >= MaxFileBytes {
+			result.skip(name, "size_limit")
 			continue
 		}
 		total += output.Len()
 		if total > MaxBatchBytes {
-			return nil, errors.New("annex batch exceeds limit")
+			return extraction{}, errors.New("annex batch exceeds limit")
 		}
-		result = append(result, File{fmt.Sprintf("annex-%02d.docx", n+1), output.Bytes()})
+		result.files = append(result.files, File{name, output.Bytes()})
 	}
 	return result, nil
 }

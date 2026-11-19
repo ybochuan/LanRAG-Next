@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,9 +43,12 @@ func TestOriginalReclaimWaitsForTombstoneAndRetriesAcrossRestart(t *testing.T) {
 		}
 	}
 	now, attempts := time.Now().UTC(), 0
-	reclaimer := func(_ context.Context, kb, id, hash string) (string, error) {
+	reclaimer := func(_ context.Context, kb, id, hash, resources string) (string, error) {
 		if kb != "kb" || id != "annex" || hash != "file-revision" {
 			t.Fatal("unexpected scoped file reclaim")
+		}
+		if resources != "sealed-native-resources" {
+			t.Fatal("resource snapshot was lost on restart")
 		}
 		attempts++
 		if attempts == 1 {
@@ -56,12 +60,13 @@ func TestOriginalReclaimWaitsForTombstoneAndRetriesAcrossRestart(t *testing.T) {
 		return "removed", nil
 	}
 	makeWorker := func() *Service {
-		s := New(db, nativePath, 7, []string{"kb"}, nil, time.Second).WithReclaimer(reclaimer)
+		s := New(db, nativePath, 7, []string{"kb"}, nil, time.Second).WithResourceReclaimer(reclaimer)
 		s.now = func() time.Time { return now }
 		return s
 	}
 	s := makeWorker()
-	if err := s.Prepare(ctx, 7, []Target{{DocumentID: "annex", KnowledgeBaseID: "kb", FileHash: "file-revision"}}); err != nil {
+	targets := []Target{{DocumentID: "annex", KnowledgeBaseID: "kb", FileHash: "file-revision", Resources: "sealed-native-resources"}}
+	if err := s.Prepare(ctx, 7, targets); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Sweep(ctx); err != nil || attempts != 0 {
@@ -71,6 +76,17 @@ func TestOriginalReclaimWaitsForTombstoneAndRetriesAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Second)
+	if err := s.Sweep(ctx); err != nil || attempts != 0 {
+		t.Fatalf("reclaimed before index confirmation: attempts=%d error=%v", attempts, err)
+	}
+	wrong := slices.Clone(targets)
+	wrong[0].FileHash = "stale-version"
+	if err := s.ConfirmIndexes(ctx, 7, wrong); !errors.Is(err, ErrConflict) {
+		t.Fatalf("accepted stale index checkpoint: %v", err)
+	}
+	if err := s.ConfirmIndexes(ctx, 7, targets); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Sweep(ctx); err == nil || attempts != 1 {
 		t.Fatalf("missing failed recovery attempt: attempts=%d error=%v", attempts, err)
 	}
@@ -102,6 +118,45 @@ func TestOriginalReclaimWaitsForTombstoneAndRetriesAcrossRestart(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLegacyOriginalReclaimResumesWithoutAnIndexCheckpoint(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+	nativePath := filepath.Join(dir, "native.db")
+	db, err := store.OpenDurable(ctx, filepath.Join(dir, "extension.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	native, err := sql.Open("sqlite", nativePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	if _, err := native.Exec(`CREATE TABLE knowledges(id TEXT PRIMARY KEY,tenant_id INTEGER,knowledge_base_id TEXT,file_hash TEXT,metadata TEXT,parse_status TEXT,deleted_at TEXT);
+		INSERT INTO knowledges VALUES('legacy',7,'kb','legacy-revision','{}','completed','2026-11-19')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		// Supply only columns available before the resource-manifest migration.
+		_, err := tx.Exec(`INSERT INTO ext_attachment_reclaims(tenant_id,knowledge_base_id,document_id,parent_document_id,file_hash,title)
+			VALUES('7','kb','legacy','','legacy-revision','Original')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	s := New(db, nativePath, 7, []string{"kb"}, nil, time.Second).WithResourceReclaimer(func(_ context.Context, kb, id, hash, resources string) (string, error) {
+		if kb != "kb" || id != "legacy" || hash != "legacy-revision" || resources != "" {
+			t.Fatal("legacy job acquired an unverified resource manifest")
+		}
+		calls++
+		return "removed", nil
+	})
+	if err := s.Sweep(ctx); err != nil || calls != 1 {
+		t.Fatalf("legacy reclaim did not resume: calls=%d error=%v", calls, err)
 	}
 }
 

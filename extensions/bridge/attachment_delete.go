@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -23,10 +24,14 @@ func (h *AttachmentDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		RequestID string                     `json:"request_id"`
-		TenantID  uint64                     `json:"tenant_id"`
-		Targets   []attachmentcleanup.Target `json:"targets"`
-		CheckOnly bool                       `json:"check_only,omitempty"`
+		RequestID      string                     `json:"request_id"`
+		TenantID       uint64                     `json:"tenant_id"`
+		Targets        []attachmentcleanup.Target `json:"targets"`
+		CheckOnly      bool                       `json:"check_only,omitempty"`
+		Reservation    string                     `json:"reservation_id,omitempty"`
+		Cancel         bool                       `json:"cancel,omitempty"`
+		Transfer       bool                       `json:"transfer,omitempty"`
+		IndexesCleared bool                       `json:"indexes_cleared,omitempty"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 	dec := json.NewDecoder(r.Body)
@@ -36,8 +41,28 @@ func (h *AttachmentDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	action := h.Cleanup.Prepare
-	if req.CheckOnly {
+	if req.IndexesCleared {
+		if req.CheckOnly || req.Cancel || req.Transfer || req.Reservation != "" {
+			writeError(w, http.StatusBadRequest, "invalid_index_receipt")
+			return
+		}
+		action = h.Cleanup.ConfirmIndexes
+	} else if req.Transfer {
+		if !req.CheckOnly || req.Cancel || req.Reservation != "" {
+			writeError(w, http.StatusBadRequest, "invalid_attachment_transfer")
+			return
+		}
+		action = h.Cleanup.ValidateTransfer
+	} else if req.CheckOnly {
 		action = h.Cleanup.Validate
+	} else if req.Cancel {
+		action = func(ctx context.Context, tenant uint64, targets []attachmentcleanup.Target) error {
+			return h.Cleanup.CancelReservation(ctx, tenant, targets, req.Reservation)
+		}
+	} else if req.Reservation != "" {
+		action = func(ctx context.Context, tenant uint64, targets []attachmentcleanup.Target) error {
+			return h.Cleanup.Reserve(ctx, tenant, targets, req.Reservation)
+		}
 	}
 	switch err := action(r.Context(), req.TenantID, req.Targets); {
 	case errors.Is(err, attachmentcleanup.ErrScope):

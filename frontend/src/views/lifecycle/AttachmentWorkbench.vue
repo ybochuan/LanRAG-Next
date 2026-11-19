@@ -16,13 +16,14 @@
       <t-empty v-if="view && !view.items.length" description="暂无附件" />
       <t-card v-for="item in view?.items || []" :key="item.relation_id || item.id" size="small" class="attachment-row">
         <div class="attachment-header">
-          <t-link v-if="!['pending','removed','shared'].includes(item.state)" theme="primary" @click="openKnowledge(item.id)">{{ item.title || item.file_name }}</t-link>
+          <t-link v-if="!['pending','removed','shared'].includes(item.state)" theme="primary" :href="router.resolve(knowledgeRoute(item.id)).href" @click.exact.prevent="router.push(knowledgeRoute(item.id))">{{ item.title || item.file_name }}</t-link>
           <span v-else>{{ item.title || item.file_name }}</span>
           <t-space size="small">
             <t-tag v-if="item.relation_type === 'template_for'" variant="light" size="small">共享模板</t-tag>
+            <t-tag v-if="item.relation_type === 'template_for' && item.mapping_status === 'manual'" variant="light" theme="success" size="small">已人工确认</t-tag>
             <t-tag v-else-if="item.relation_type === 'cites'" variant="light" size="small">引用文件</t-tag>
             <t-tag v-else :theme="item.mapping_status === 'candidate' ? 'warning' : item.mapping_status === 'manual' ? 'success' : 'default'" variant="light" size="small">
-              {{ states[item.state] || mappings[item.mapping_status] || '未匹配' }}
+              {{ reclaimLabel(item) || states[item.state] || mappings[item.mapping_status] || '未匹配' }}
             </t-tag>
           </t-space>
         </div>
@@ -35,9 +36,10 @@
           {{ item.title_state === 'pending' ? '名称待同步' : '名称同步冲突，请重新打开后确认' }}
         </div>
         <div v-if="item.parse_status && item.parse_status !== 'completed'" class="attachment-meta">{{ parseLabels[item.parse_status] || item.parse_status }}</div>
+        <div v-if="item.reclaim_error" class="attachment-meta" role="status">{{ reclaimErrors[item.reclaim_error] || reclaimErrors.storage_unavailable }}</div>
         <t-space size="small" break-line>
-          <t-button v-if="item.state === 'current'" variant="text" size="small" :disabled="busy" @click="download(item)">下载</t-button>
-          <t-button v-if="canWrite && item.managed && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="edit(item)">确认或修正</t-button>
+          <t-button v-if="canWrite && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="download(item)">下载</t-button>
+          <t-button v-if="canWrite && (item.managed || item.relation_type === 'template_for') && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="edit(item)">确认或修正</t-button>
           <t-button v-if="canWrite && item.managed && item.state === 'detached'" variant="text" size="small" :disabled="busy" @click="change(item, 'restore')">恢复关联</t-button>
           <t-button v-if="canWrite && item.state === 'current' && (item.managed || item.relation_id)" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'detach' }">解除关联</t-button>
           <t-button v-if="canWrite && ['current','detached','historical'].includes(item.state)" theme="danger" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'delete' }">从知识库删除</t-button>
@@ -45,14 +47,19 @@
       </t-card>
     </t-loading>
 
-    <t-dialog v-model:visible="showPreview" header="提取附件" :confirm-btn="{ content: '导入选中附件', disabled: !selected.length, loading: busy }" @confirm="importSelected">
-      <t-empty v-if="!preview.length" description="当前主件没有可提取的附件" />
-      <t-checkbox-group v-else v-model="selected">
+    <t-dialog v-model:visible="showPreview" header="提取附件" :confirm-btn="{ content: selected.some(id => importResults[id]?.error) ? '重试选中附件' : '导入选中附件', disabled: !selected.length, loading: busy }" @confirm="importSelected">
+      <t-alert v-if="previewIssues.length" theme="warning" role="status" message="部分附件未提取，原有关联保留。">
+        <ul>
+          <li v-for="(issue, index) in previewIssues" :key="index">{{ issue.file_name }} · {{ extractionLabels[issue.reason] || issue.reason }}</li>
+        </ul>
+      </t-alert>
+      <t-empty v-if="!preview.length && !previewIssues.length" description="当前主件没有可提取的附件" />
+      <t-checkbox-group v-if="preview.length" v-model="selected">
         <div v-for="item in preview" :key="item.fingerprint" class="attachment-option">
-          <t-checkbox :value="item.fingerprint" :disabled="item.state === 'removed'">
+          <t-checkbox :value="item.fingerprint" :disabled="busy || item.state === 'removed' || !!importResults[item.fingerprint]?.document_id">
             {{ item.display_name || item.file_name }}
           </t-checkbox>
-          <span class="attachment-meta">{{ item.file_name }} · {{ previewStates[item.state] || item.state }}</span>
+          <span class="attachment-meta" role="status">{{ item.file_name }} · {{ importLabel(item) }}</span>
         </div>
       </t-checkbox-group>
     </t-dialog>
@@ -84,6 +91,7 @@
     <t-dialog v-model:visible="showEdit" header="确认附件映射"
       :confirm-btn="{ content: '保存', disabled: referenceID === undefined, loading: busy }" @confirm="save">
       <t-form label-align="top">
+		<t-alert v-if="editing?.relation_type === 'template_for'" theme="info" message="正文引用仅用于当前主件。修改文件显示名称后，其他引用也会使用新名称。" />
         <t-form-item label="原文件">{{ editing?.file_name }}</t-form-item>
         <t-form-item label="显示标题"><t-input v-model="editTitle" :maxlength="240" /></t-form-item>
         <t-form-item label="主件正文引用">
@@ -110,7 +118,7 @@ import type { UploadFile } from 'tdesign-vue-next'
 import { listKnowledgeFiles, moveKnowledgeToFolder, delKnowledgeDetails } from '@/api/knowledge-base'
 import { write as writeRelation } from '@/api/business'
 import { downloadRelatedAttachment } from '@/api/relatedAttachments'
-import { attachmentWorkbench, updateAttachment, uploadWorkbenchAttachment, type AttachmentItem, type AttachmentPreview, type AttachmentWorkbench } from '@/api/attachmentWorkbench'
+import { attachmentWorkbench, updateAttachment, uploadWorkbenchAttachment, type AttachmentItem, type AttachmentPreview, type AttachmentImportOutcome, type AttachmentExtractionIssue, type AttachmentWorkbench } from '@/api/attachmentWorkbench'
 import { httpStatus } from '../business/model'
 
 const props = defineProps<{ kb: string; documentId: string; canWrite: boolean }>()
@@ -128,6 +136,8 @@ const showArchive = ref(false)
 const archiveIDs = ref<string[]>([])
 const showEdit = ref(false)
 const preview = ref<AttachmentPreview[]>([])
+const previewIssues = ref<AttachmentExtractionIssue[]>([])
+const importResults = ref<Record<string, AttachmentImportOutcome>>({})
 const selected = ref<string[]>([])
 const uploadFile = ref<File>()
 const pickerQuery = ref('')
@@ -152,6 +162,21 @@ const mappings: Record<string, string> = {
 const states: Record<string, string> = { detached: '已解除', historical: '历史附件', deleting: '删除中', pending: '原件待回收', removed: '已删除，托管原件已回收', shared: '已删除，原件仍有引用' }
 const parseLabels: Record<string, string> = { pending: '等待解析', processing: '解析中', failed: '解析失败', deleting: '删除中' }
 const previewStates: Record<string, string> = { new: '可导入', existing: '沿用已入库文件', pending: '待对账', removed: '已移除' }
+const extractionLabels: Record<string, string> = { size_limit: '超出大小限制', read_failed: '读取失败', invalid_format: '格式校验失败', unsupported_format: '暂不支持此格式' }
+const importErrors: Record<string, string> = { upload_failed: '导入失败，可重试', revision_conflict: '版本或归属已变化，请重新提取', pending: '上传结果待核对，可重试核对', rejected: '文件未被知识库接收，可重试' }
+const reclaimErrors: Record<string, string> = { reclaim_requires_review: '资源归属需要核对，回收任务已保留。', storage_unavailable: '存储暂不可用，后台将重试回收。', index_cleanup_unconfirmed: '正在等待索引清理确认。' }
+
+function reclaimLabel(item: AttachmentItem) {
+  if (!item.resources_verified) return ''
+  return ({ pending: '资源待回收', removed: '已删除，已核验资源已回收', shared: '已删除，共享资源已保留' } as Record<string, string>)[item.state] || ''
+}
+
+function importLabel(item: AttachmentPreview) {
+  const result = importResults.value[item.fingerprint]
+  if (result?.error) return importErrors[result.error] || '导入失败'
+  if (result?.document_id) return '已导入'
+  return previewStates[item.state] || item.state
+}
 const relationTypes = [{ label: '共享模板', value: 'template_for' }, { label: '引用正式文件', value: 'cites' }]
 const referenceOptions = computed(() => [
   { value: '', label: '无对应正文引用' },
@@ -241,6 +266,8 @@ function previewImport() {
     const result = await attachmentWorkbench(props.kb, props.documentId, true)
     view.value = result
     preview.value = result.preview || []
+    previewIssues.value = result.preview_issues || []
+    importResults.value = {}
     selected.value = preview.value.filter(item => item.state === 'new').map(item => item.fingerprint)
     showPreview.value = true
   })
@@ -251,9 +278,12 @@ function importSelected() {
     if (!view.value || !selected.value.length) return
     const { parent_id, parent_version } = view.value
     const result = await updateAttachment(props.kb, parent_id, 'import', 0, { parent_id, parent_version, fingerprints: selected.value }, operationID())
-    showPreview.value = false
+    if (!result.items) throw new Error('attachment_import_result_unavailable')
+    const outcomes = result.items
+    importResults.value = { ...importResults.value, ...Object.fromEntries(outcomes.map(item => [item.fingerprint, item])) }
+    selected.value = outcomes.filter(item => item.error).map(item => item.fingerprint)
     await reload()
-    notice(result.partial ? '部分附件已导入，剩余附件可重新提取。' : '所选附件已导入。', result.partial ? 'warning' : 'success')
+    notice(selected.value.length ? '有附件未导入，请查看逐项结果。' : '所选附件已导入。', selected.value.length ? 'warning' : 'success')
   })
 }
 
@@ -329,7 +359,7 @@ function edit(item: AttachmentItem) {
   return run(async () => {
     const result = await attachmentWorkbench(props.kb, props.documentId, true)
     view.value = result
-    const latest = result.items.find(value => value.id === item.id)
+    const latest = result.items.find(value => value.id === item.id && value.relation_id === item.relation_id)
     if (!latest || latest.state !== 'current') throw new Error('attachment changed')
     editing.value = latest
     editTitle.value = latest.title
@@ -345,7 +375,7 @@ async function mutate(item: AttachmentItem, action: 'confirm' | 'detach' | 'rest
   const { parent_id, parent_version } = view.value
   return updateAttachment(props.kb, parent_id, action, item.revision, {
     parent_id, parent_version, attachment_id: item.id, file_hash: item.file_hash,
-    expected_title: item.native_title, ...(action === 'confirm' ? { title: editTitle.value, reference_id: referenceID.value } : {}),
+    relation_id: item.relation_id, expected_title: item.native_title, ...(action === 'confirm' ? { title: editTitle.value, reference_id: referenceID.value } : {}),
   }, operationID())
 }
 
@@ -388,8 +418,8 @@ function executeAction() {
   })
 }
 
-function openKnowledge(id: string) {
-  void router.push({ name: 'knowledgeBaseDetail', params: { kbId: props.kb }, query: { knowledge_id: id } })
+function knowledgeRoute(id: string) {
+  return { name: 'knowledgeBaseDetail', params: { kbId: props.kb }, query: { knowledge_id: id } }
 }
 
 function download(item: AttachmentItem) {

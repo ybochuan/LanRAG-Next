@@ -963,6 +963,11 @@ func (s *DataSourceService) applyFetchedItem(
 			})
 			return false, nil
 		}
+		// The attachment worker needs the native tombstone to finish reclaiming storage.
+		if attachmentReclaimsFile(existing) {
+			result.Deleted++
+			return false, nil
+		}
 		if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
 			result.Failed++
 			result.DeletionFailed++
@@ -1628,6 +1633,7 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 		return
 	}
 	ids := make([]string, 0, len(children))
+	hardDeleteIDs := make([]string, 0, len(children))
 	for _, child := range children {
 		// Scope to this data source so identical external_id prefixes from
 		// another connector in the same KB cannot be swept.
@@ -1646,6 +1652,9 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 			continue
 		}
 		ids = append(ids, child.ID)
+		if !attachmentReclaimsFile(child) {
+			hardDeleteIDs = append(hardDeleteIDs, child.ID)
+		}
 	}
 	if len(ids) == 0 {
 		return
@@ -1655,9 +1664,14 @@ func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.Dat
 	if derr := s.knowledgeService.DeleteKnowledgeList(ctx, ids); derr != nil {
 		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id=%s: %v",
 			len(ids), item.ExternalID, derr)
-	} else if herr := repo.HardDeleteKnowledgeList(ctx, ds.TenantID, ids); herr != nil {
+		return
+	}
+	if len(hardDeleteIDs) == 0 {
+		return
+	}
+	if herr := repo.HardDeleteKnowledgeList(ctx, ds.TenantID, hardDeleteIDs); herr != nil {
 		logger.Warnf(ctx, "failed to hard-delete %d stale sub-item(s) of external_id=%s: %v",
-			len(ids), item.ExternalID, herr)
+			len(hardDeleteIDs), item.ExternalID, herr)
 	}
 }
 

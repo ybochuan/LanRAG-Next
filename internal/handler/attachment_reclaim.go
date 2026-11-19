@@ -29,9 +29,11 @@ func (h *KnowledgeHandler) ReclaimDeletedAttachment(c *gin.Context) {
 		return
 	}
 	var body struct {
-		KB   string `json:"knowledge_base_id"`
-		Hash string `json:"file_hash"`
+		KB        string `json:"knowledge_base_id"`
+		Hash      string `json:"file_hash"`
+		Resources string `json:"resources"`
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<20)
 	if err := c.ShouldBindJSON(&body); err != nil || len(body.Hash) != 32 || body.KB == "" {
 		_ = c.Error(errors.NewBadRequestError("invalid attachment reclaim binding"))
 		return
@@ -44,23 +46,18 @@ func (h *KnowledgeHandler) ReclaimDeletedAttachment(c *gin.Context) {
 		_ = c.Error(errors.NewForbiddenError("attachment knowledge base outside worker scope"))
 		return
 	}
-	_, kbID, tenant, _, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, body.KB)
-	if err != nil {
+	if err := requireTenantAPIKeyKnowledgeBases(ctx, body.KB); err != nil {
 		_ = c.Error(err)
 		return
 	}
-	if kbID != body.KB || tenant != configuredTenant {
-		_ = c.Error(errors.NewForbiddenError("attachment worker knowledge base mismatch"))
-		return
-	}
 	worker, ok := h.kgService.(interface {
-		ReclaimDeletedAttachment(context.Context, string, string, string) (string, error)
+		ReclaimDeletedAttachment(context.Context, string, string, string, string) (string, error)
 	})
 	if !ok {
 		_ = c.Error(errors.NewServiceUnavailableError("attachment reclaim unavailable"))
 		return
 	}
-	status, err := worker.ReclaimDeletedAttachment(types.WithExecutionTenant(ctx, tenant), kbID, c.Param("id"), body.Hash)
+	status, err := worker.ReclaimDeletedAttachment(types.WithExecutionTenant(ctx, configuredTenant), body.KB, c.Param("id"), body.Hash, body.Resources)
 	if err != nil {
 		_ = c.Error(err)
 		return

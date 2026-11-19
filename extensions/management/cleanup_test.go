@@ -39,6 +39,13 @@ func TestCleanupManagementActions(t *testing.T) {
 	if err := json.Unmarshal(list.Body.Bytes(), &listOut); err != nil || list.Code != 200 || listOut.Data.Total != 1 {
 		t.Fatalf("list=%d %s", list.Code, list.Body.String())
 	}
+	if len(listOut.Data.Tasks) != 1 || listOut.Data.Tasks[0].CanConfirm || listOut.Data.Tasks[0].RetainedUntil == "" {
+		t.Fatalf("retaining task exposes a confirmation action: %+v", listOut.Data.Tasks)
+	}
+	confirmRequest := `{"action":"business_cleanup_confirm","tenant_id":7,"knowledge_base_id":"kb","can_write":true,"actor_id":"7:user","operation_id":"op-confirm","expected_revision":1,"business":{"id":"43db0b16-c44f-4764-9827-87d4a626b9ec"}}`
+	if early := call(s, confirmRequest, s.key); early.Code != 409 {
+		t.Fatalf("early confirm=%d %s", early.Code, early.Body.String())
+	}
 	hold := call(s, `{"action":"business_cleanup_hold","tenant_id":7,"knowledge_base_id":"kb","can_write":true,"actor_id":"7:user","operation_id":"op-hold","expected_revision":1,"business":{"id":"43db0b16-c44f-4764-9827-87d4a626b9ec","payload":{"hold_days":90,"reason":"审计保留"}}}`, s.key)
 	var holdOut struct {
 		Data cleanup.Task
@@ -46,7 +53,7 @@ func TestCleanupManagementActions(t *testing.T) {
 	if err := json.Unmarshal(hold.Body.Bytes(), &holdOut); err != nil || hold.Code != 200 || holdOut.Data.Status != cleanup.StatusHeld {
 		t.Fatalf("hold=%d %s", hold.Code, hold.Body.String())
 	}
-	staleConfirm := call(s, `{"action":"business_cleanup_confirm","tenant_id":7,"knowledge_base_id":"kb","can_write":true,"actor_id":"7:user","operation_id":"op-confirm","expected_revision":1,"business":{"id":"43db0b16-c44f-4764-9827-87d4a626b9ec"}}`, s.key)
+	staleConfirm := call(s, confirmRequest, s.key)
 	if staleConfirm.Code != 409 {
 		t.Fatalf("stale confirm=%d %s", staleConfirm.Code, staleConfirm.Body.String())
 	}

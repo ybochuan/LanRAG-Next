@@ -20,6 +20,14 @@ type PreviewFile struct {
 	State       string `json:"state"`
 }
 
+// ImportOutcome identifies the result of one selected attachment upload.
+type ImportOutcome struct {
+	Fingerprint string `json:"fingerprint"`
+	FileName    string `json:"file_name"`
+	DocumentID  string `json:"document_id,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
 // ParentReference is an evidence choice, scoped to a single checked source revision.
 type ParentReference struct {
 	ID string `json:"id"`
@@ -68,20 +76,21 @@ func ReferenceOptions(name string, data []byte) []ParentReference {
 }
 
 // Preview reads a supported source and returns its independently selectable files.
-func (i *Importer) Preview(ctx context.Context, tenant uint64, kb, parent, version string) ([]PreviewFile, []ParentReference, error) {
+func (i *Importer) Preview(ctx context.Context, tenant uint64, kb, parent, version string) ([]PreviewFile, []ParentReference, []ExtractionIssue, error) {
 	name, current, data, err := i.Source(ctx, tenant, kb, parent, version)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	files, err := i.registry.Extract(name, data)
+	manifest, err := i.registry.extract(name, data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	states, err := i.db.AttachmentImportState(ctx, tenant, kb, parent, current)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	items := []PreviewFile{}
+	files := manifest.files
 	seen := map[string]bool{}
 	semantics := Analyze(name, data, "", files)
 	for index, file := range files {
@@ -96,11 +105,11 @@ func (i *Importer) Preview(ctx context.Context, tenant uint64, kb, parent, versi
 		}
 		items = append(items, PreviewFile{fingerprint, file.Name, semantics[index].DisplayName, semantics[index].MappingStatus, state})
 	}
-	return items, ReferenceOptions(name, data), nil
+	return items, ReferenceOptions(name, data), manifest.issues, nil
 }
 
 // ImportSelected reconciles the given preview selection without retiring other files.
-func (i *Importer) ImportSelected(ctx context.Context, tenant uint64, kb, parent, version string, fingerprints []string) ([]Receipt, error) {
+func (i *Importer) ImportSelected(ctx context.Context, tenant uint64, kb, parent, version string, fingerprints []string) ([]ImportOutcome, error) {
 	if version == "" || len(fingerprints) == 0 || len(fingerprints) > MaxFiles {
 		return nil, store.ErrAttachmentConflict
 	}
@@ -115,7 +124,9 @@ func (i *Importer) ImportSelected(ctx context.Context, tenant uint64, kb, parent
 		}
 		selected[fingerprint] = true
 	}
-	return i.process(ctx, tenant, kb, parent, name, data, version, selected)
+	var outcomes []ImportOutcome
+	_, err = i.process(ctx, tenant, kb, parent, name, data, version, selected, &outcomes)
+	return outcomes, err
 }
 
 // Upload verifies the explicit upload against the same native receipt protocol.

@@ -29,6 +29,7 @@ type Target struct {
 	ImportID         string `json:"import_id,omitempty"`
 	IsAttachment     bool   `json:"is_attachment,omitempty"`
 	Title            string `json:"title,omitempty"`
+	Resources        string `json:"resources,omitempty"`
 }
 
 // Service persists intent in the extension DB and only reads the native DB.
@@ -39,7 +40,7 @@ type Service struct {
 	kbs        map[string]bool
 	scopeJSON  string
 	delete     func(context.Context, string, string, string) error
-	reclaim    func(context.Context, string, string, string) (string, error)
+	reclaim    func(context.Context, string, string, string, string) (string, error)
 	retry      time.Duration
 	now        func() time.Time
 }
@@ -58,14 +59,125 @@ func New(db *store.DB, nativePath string, tenant uint64, kbs []string, deleteChi
 // A child scheduled by this worker must still match its receipt when the
 // native queue actually reaches the authorized deletion checkpoint.
 func (s *Service) Prepare(ctx context.Context, tenant uint64, targets []Target) error {
-	return s.prepare(ctx, tenant, targets, false)
+	return s.prepare(ctx, tenant, targets, false, "")
 }
 
 func (s *Service) Validate(ctx context.Context, tenant uint64, targets []Target) error {
-	return s.prepare(ctx, tenant, targets, true)
+	return s.prepare(ctx, tenant, targets, true, "")
 }
 
-func (s *Service) prepare(ctx context.Context, tenant uint64, targets []Target, checkOnly bool) error {
+// ConfirmIndexes records the native worker's successful index cleanup before row deletion.
+func (s *Service) ConfirmIndexes(ctx context.Context, tenant uint64, targets []Target) error {
+	if tenant != s.tenant || len(targets) == 0 {
+		return ErrScope
+	}
+	return s.db.Write(ctx, func(tx *sql.Tx) error {
+		for _, target := range targets {
+			if !s.kbs[target.KnowledgeBaseID] {
+				return ErrScope
+			}
+			if target.FileHash == "" || s.reclaim == nil {
+				continue
+			}
+			result, err := tx.ExecContext(ctx, `UPDATE ext_attachment_reclaims SET indexes_cleared=1,next_attempt=0,last_error='' WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND file_hash=?`, fmt.Sprint(tenant), target.KnowledgeBaseID, target.DocumentID, target.FileHash)
+			if err != nil {
+				return err
+			}
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if rows != 1 {
+				return ErrConflict
+			}
+		}
+		return nil
+	})
+}
+
+// ValidateTransfer preserves managed ownership while its relationships remain active.
+func (s *Service) ValidateTransfer(ctx context.Context, tenant uint64, targets []Target) error {
+	if err := s.Validate(ctx, tenant, targets); err != nil {
+		return err
+	}
+	return s.db.View(ctx, func(tx *sql.Tx) error {
+		for _, target := range targets {
+			if target.IsAttachment {
+				return ErrConflict
+			}
+			var bound bool
+			err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ext_attachment_links WHERE tenant_id=? AND knowledge_base_id=?
+				AND parent_document_id=? AND removed_at IS NULL AND detached_at IS NULL)
+				OR EXISTS(SELECT 1 FROM ext_document_relations WHERE tenant_id=? AND status='active' AND edge_type='template_for'
+				AND ((knowledge_base_id=? AND document_id=?) OR (target_knowledge_base_id=? AND target_document_id=?)))`,
+				fmt.Sprint(tenant), target.KnowledgeBaseID, target.DocumentID, fmt.Sprint(tenant), target.KnowledgeBaseID, target.DocumentID, target.KnowledgeBaseID, target.DocumentID).Scan(&bound)
+			if err != nil {
+				return err
+			}
+			if bound {
+				return ErrConflict
+			}
+		}
+		return nil
+	})
+}
+
+// Reserve keeps concurrent uploads and bindings out of an admitted native replacement.
+func (s *Service) Reserve(ctx context.Context, tenant uint64, targets []Target, reservation string) error {
+	if !weknora.ValidID(reservation) || len(reservation) > 128 {
+		return ErrScope
+	}
+	return s.prepare(ctx, tenant, targets, false, reservation)
+}
+
+// CancelReservation removes only an unchanged, still-live replacement reservation.
+func (s *Service) CancelReservation(ctx context.Context, tenant uint64, targets []Target, reservation string) error {
+	if tenant != s.tenant || reservation == "" || len(targets) == 0 {
+		return ErrScope
+	}
+	for _, target := range targets {
+		if !s.kbs[target.KnowledgeBaseID] {
+			return ErrScope
+		}
+		err := s.db.ViewNative(ctx, s.nativePath, func(tx *sql.Tx) error {
+			native, err := readNativeFile(ctx, tx, target.DocumentID)
+			if err != nil {
+				return err
+			}
+			if native.tenant != tenant || native.kb != target.KnowledgeBaseID || native.hash != target.FileHash || native.deleted {
+				return ErrConflict
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return s.db.Write(ctx, func(tx *sql.Tx) error {
+		for _, target := range targets {
+			var owner string
+			err := tx.QueryRowContext(ctx, `SELECT reservation_id FROM ext_attachment_delete_intents WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, fmt.Sprint(tenant), target.KnowledgeBaseID, target.DocumentID).Scan(&owner)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if owner != reservation {
+				return ErrConflict
+			}
+			if _, err = tx.ExecContext(ctx, `DELETE FROM ext_attachment_reclaims WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND status='deleting'`, fmt.Sprint(tenant), target.KnowledgeBaseID, target.DocumentID); err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `DELETE FROM ext_attachment_delete_intents WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND reservation_id=?`, fmt.Sprint(tenant), target.KnowledgeBaseID, target.DocumentID, reservation); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Service) prepare(ctx context.Context, tenant uint64, targets []Target, checkOnly bool, reservation string) error {
 	if tenant == 0 || tenant != s.tenant || len(targets) == 0 {
 		return ErrScope
 	}
@@ -86,18 +198,27 @@ func (s *Service) prepare(ctx context.Context, tenant uint64, targets []Target, 
 		}
 		return nil
 	}
+	run := s.db.Write
 	if checkOnly {
-		return s.db.View(ctx, check)
+		run = s.db.View
 	}
-	return s.db.Write(ctx, func(tx *sql.Tx) error {
+	return run(ctx, func(tx *sql.Tx) error {
 		if err := check(tx); err != nil {
 			return err
 		}
 		owner := fmt.Sprint(tenant)
 		stamp := s.now().UTC().Format(time.RFC3339Nano)
 		for _, target := range targets {
+			var existing string
+			err := tx.QueryRowContext(ctx, `SELECT reservation_id FROM ext_attachment_delete_intents WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?`, owner, target.KnowledgeBaseID, target.DocumentID).Scan(&existing)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err == nil && existing != reservation {
+				return ErrConflict
+			}
 			var unsafe bool
-			err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+			err = tx.QueryRowContext(ctx, `SELECT EXISTS(
 				SELECT 1 FROM ext_attachment_links WHERE tenant_id=? AND (
 					(knowledge_base_id=? AND parent_document_id=? AND submitted=1 AND attachment_id IS NULL)
 					OR (attachment_id=? AND cleanup_started=1 AND (
@@ -113,14 +234,18 @@ func (s *Service) prepare(ctx context.Context, tenant uint64, targets []Target, 
 			if unsafe {
 				return ErrConflict
 			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO ext_attachment_delete_intents VALUES(?,?,?,?)
-				ON CONFLICT(tenant_id,knowledge_base_id,document_id) DO NOTHING`, owner, target.KnowledgeBaseID, target.DocumentID, stamp); err != nil {
+			if checkOnly {
+				continue
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO ext_attachment_delete_intents(tenant_id,knowledge_base_id,document_id,created_at,reservation_id) VALUES(?,?,?,?,?)
+				ON CONFLICT(tenant_id,knowledge_base_id,document_id) DO NOTHING`, owner, target.KnowledgeBaseID, target.DocumentID, stamp, reservation); err != nil {
 				return err
 			}
 			if s.reclaim != nil && target.FileHash != "" {
-				if _, err = tx.ExecContext(ctx, `INSERT INTO ext_attachment_reclaims(tenant_id,knowledge_base_id,document_id,parent_document_id,file_hash,title)
-					VALUES(?,?,?,?,?,?) ON CONFLICT(tenant_id,knowledge_base_id,document_id) DO NOTHING`,
-					owner, target.KnowledgeBaseID, target.DocumentID, target.ParentDocumentID, target.FileHash, target.Title); err != nil {
+				if _, err = tx.ExecContext(ctx, `INSERT INTO ext_attachment_reclaims(tenant_id,knowledge_base_id,document_id,parent_document_id,file_hash,title,resources)
+					VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant_id,knowledge_base_id,document_id) DO UPDATE SET resources=excluded.resources
+					WHERE ext_attachment_reclaims.file_hash=excluded.file_hash AND ext_attachment_reclaims.resources=''`,
+					owner, target.KnowledgeBaseID, target.DocumentID, target.ParentDocumentID, target.FileHash, target.Title, target.Resources); err != nil {
 					return err
 				}
 			}

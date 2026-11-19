@@ -4,7 +4,7 @@
    <div class="title-block"><h1 id="lifecycle-title"><ResourceIcon type="document" :size="24" class="page-icon" />{{ $t('workbench.title') }}</h1><p class="page-subtitle">{{ $t('workbench.subtitle') }}</p></div>
    <t-button v-if="!workspaceView" variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
   </header>
-  <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
+   <section class="scope-bar"><label for="lifecycle-kb">知识库</label><t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" @update:model-value="syncScopeQuery" /><t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light">{{ data.can_write?'可管理':'只读' }}</t-tag></section>
   <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="loadAll">重新载入</t-button></t-alert>
   <t-alert v-if="data?.degraded" theme="info" class="notice" role="status">{{ degradedMessage }}</t-alert>
    <t-alert v-if="data?.cleanup?.total" theme="warning" class="notice" role="status">{{ cleanupBanner }} <t-button variant="text" size="small" @click="showList('cleanup')">查看待清理</t-button></t-alert>
@@ -24,29 +24,29 @@
    <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
     <label for="lifecycle-title-search">{{ $t('workbench.list.filterTitle') }}</label>
-    <t-input id="lifecycle-title-search" v-model="titleQuery" :maxlength="160" :placeholder="$t('workbench.list.searchPlaceholder')" clearable class="filter-input" />
+     <t-input id="lifecycle-title-search" v-model="titleQuery" :maxlength="160" :placeholder="$t('workbench.list.searchPlaceholder')" clearable class="filter-input" @update:model-value="syncListQuery" />
     <label for="lifecycle-state-filter">{{ $t('workbench.list.filterState') }}</label>
-    <t-select id="lifecycle-state-filter" v-model="filter" :options="stateOptions" class="filter-select" />
+     <t-select id="lifecycle-state-filter" v-model="filter" :options="stateOptions" class="filter-select" @update:model-value="syncListQuery" />
    </div>
    <div v-if="busy && tab==='documents'" class="loading" role="status">{{ $t('workbench.list.loading') }}</div>
    <template v-else-if="data || tab==='reviews'">
     <template v-if="data">
     <section v-if="tab==='cleanup'" id="panel-cleanup" class="document-panel" role="tabpanel" aria-labelledby="tab-cleanup">
-      <div class="section-heading"><div><h2>待清理文档</h2><p>已删除文档保留 30 天，到期后需要确认才清理扩展表记录；原生文档和原件不会被删除。</p></div></div>
+       <div class="section-heading"><div><h2>待清理文档</h2><p>已删除文档默认保留 30 天。到期后可确认清理扩展记录，原生文档和原件仍会保留。</p></div></div>
       <p v-if="cleanupError" class="notice error" role="alert">{{ cleanupError }}</p>
       <p v-if="cleanupBusy" class="loading" role="status">正在加载清理任务…</p>
       <div v-else class="table-wrap">
        <table>
-        <thead><tr><th>文档</th><th>删除时间</th><th>清理时间</th><th>状态</th><th>操作</th></tr></thead>
+         <thead><tr><th>文档</th><th>删除时间</th><th>保留至</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
          <tr v-for="task in cleanupItems" :key="task.document_id">
           <td>{{ task.title || task.document_id }}</td>
           <td>{{ date(task.native_deleted_at) }}</td>
-          <td>{{ date(task.cleanup_due_at) }}</td>
-          <td><t-tag variant="light" size="small" :theme="cleanupStatusTheme(task.status)">{{ cleanupStatusLabel(task.status) }}</t-tag></td>
+           <td>{{ date(task.retained_until || task.hold_until || task.cleanup_due_at) }}</td>
+           <td><t-tag variant="light" size="small" :theme="cleanupStatusTheme(cleanupDisplayStatus(task))">{{ cleanupStatusLabel(cleanupDisplayStatus(task)) }}</t-tag></td>
           <td class="cleanup-actions">
            <t-button v-if="data?.can_write && (task.status==='pending_cleanup'||task.status==='awaiting_confirmation'||task.status==='failed')" variant="outline" size="small" @click="holdCleanup(task)">保留 90 天</t-button>
-           <t-popconfirm v-if="data?.can_write && (task.status==='pending_cleanup'||task.status==='awaiting_confirmation'||task.status==='failed')" content="确认清理这些扩展表记录？原生文档和原件不会被删除。" theme="danger" @confirm="confirmCleanup(task)"><t-button theme="danger" variant="outline" size="small">确认清理</t-button></t-popconfirm>
+            <t-popconfirm v-if="data?.can_write && task.can_confirm" content="清理此文档的扩展记录？原生文档和原件仍会保留。" theme="danger" @confirm="confirmCleanup(task)"><t-button theme="danger" variant="outline" size="small">{{ task.status==='failed' ? '重试清理' : '确认清理' }}</t-button></t-popconfirm>
           </td>
          </tr>
          <tr v-if="!cleanupItems.length"><td colspan="5" class="empty">当前没有待清理文档。</td></tr>
@@ -71,7 +71,22 @@
      <p class="source-note">{{ $t('workbench.list.count', { n: allDocuments.length }) }}</p>
     </section>
     </template>
-    <section v-if="tab==='reviews'" id="panel-reviews" class="panel" role="tabpanel" aria-labelledby="tab-reviews"><div class="section-heading"><div><h2>{{ $t('workbench.reviews.title') }}</h2><p>{{ $t('workbench.reviews.desc') }}</p></div></div><p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p><p v-if="reviewBusy" role="status">{{ $t('workbench.reviews.loading') }}</p><div v-if="reviewItems.length && !reviewBusy" class="review-sort"><span>{{ $t('workbench.reviews.sortLabel') }}</span><t-radio-group v-model="reviewSort" variant="default" size="small"><t-radio-button value="asc">{{ $t('workbench.reviews.asc') }}</t-radio-button><t-radio-button value="desc">{{ $t('workbench.reviews.desc2') }}</t-radio-button></t-radio-group></div><div v-else-if="reviewItems.length" class="review-list"><div v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" role="button" tabindex="0" @click="openDocument(alert.document_id, alert.title)" @keydown.enter="openDocument(alert.document_id, alert.title)"><span><strong>{{ alert.title || alert.document_id }}</strong><small>{{ $t('workbench.reviews.due', { date: date(alert.review_due) }) }}</small><small v-if="alert.delivered_at">{{ $t('workbench.reviews.delivered', { date: date(alert.delivered_at) }) }}</small></span><t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state) }}</t-tag></div></div><p v-else-if="!reviewError" class="empty">{{ $t('workbench.reviews.empty') }}</p><p v-if="reviewsTruncated" class="notice">{{ $t('workbench.reviews.truncated') }}</p><p class="source-note">{{ $t('workbench.reviews.note') }}</p></section>
+     <section v-if="tab==='reviews'" id="panel-reviews" class="panel" role="tabpanel" aria-labelledby="tab-reviews">
+      <div class="section-heading"><div><h2>{{ $t('workbench.reviews.title') }}</h2><p>{{ $t('workbench.reviews.desc') }}</p></div></div>
+      <p v-if="reviewError" class="notice error" role="alert">{{ reviewError }}</p>
+      <p v-if="reviewBusy" role="status">{{ $t('workbench.reviews.loading') }}</p>
+      <template v-else-if="reviewItems.length">
+       <div class="review-sort"><span>{{ $t('workbench.reviews.sortLabel') }}</span><t-radio-group v-model="reviewSort" variant="default" size="small"><t-radio-button value="asc">{{ $t('workbench.reviews.asc') }}</t-radio-button><t-radio-button value="desc">{{ $t('workbench.reviews.desc2') }}</t-radio-button></t-radio-group></div>
+       <div class="review-list">
+        <div v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" role="button" tabindex="0" @click="openDocument(alert.document_id, alert.title)" @keydown.enter="openDocument(alert.document_id, alert.title)" @keydown.space.prevent="openDocument(alert.document_id, alert.title)">
+         <span><strong>{{ alert.title || alert.document_id }}</strong><small>{{ $t('workbench.reviews.due', { date: date(alert.review_due) }) }}</small><small v-if="alert.delivered_at">{{ $t('workbench.reviews.delivered', { date: date(alert.delivered_at) }) }}</small></span>
+         <t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state) }}</t-tag>
+        </div>
+       </div>
+      </template>
+      <p v-else-if="!reviewError" class="empty">{{ $t('workbench.reviews.empty') }}</p>
+      <p v-if="reviewsTruncated" class="notice">{{ $t('workbench.reviews.truncated') }}</p><p class="source-note">{{ $t('workbench.reviews.note') }}</p>
+     </section>
     <template v-if="data"><section v-if="tab==='rules'" id="panel-rules" class="panel rules-panel" role="tabpanel" aria-labelledby="tab-rules"><span class="eyebrow">{{ $t('workbench.rules.eyebrow') }}</span><h2>{{ $t('workbench.rules.title') }}</h2><p>{{ $t('workbench.rules.desc') }}</p><p class="source-note">{{ $t('workbench.rules.source', { source: ruleSourceLabel(data.rules), revision: data.rule_revision }) }}</p><form @submit.prevent="submitRules"><label>{{ $t('workbench.rules.delay') }}<t-input-number v-model="ruleForm.effective_delay_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>{{ $t('workbench.rules.valid') }}<t-input-number v-model="ruleForm.valid_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>{{ $t('workbench.rules.review') }}<t-input-number v-model="ruleForm.review_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><p v-if="ruleError" class="notice error" role="alert">{{ ruleError }}</p><p v-if="ruleSuccess" class="notice success" role="status">{{ $t('workbench.rules.saved') }}</p><t-button v-if="data.can_write" theme="primary" type="submit" :loading="savingRules" :disabled="!validRules(ruleForm)">{{ savingRules ? $t('workbench.rules.saving') : $t('workbench.rules.save') }}</t-button><p v-else class="source-note">{{ $t('workbench.rules.readonly') }}</p></form></section></template>
    </template>
   </template>
@@ -94,13 +109,19 @@
      <template v-if="detailTab==='life'">
       <h3>有效期与复核</h3>
       <p class="source-note">时间按本机时区显示（{{ timezone }}），保存为 UTC。清空日期不会恢复已失效文档。</p>
+       <t-alert v-if="dateConflictDraft && !documentConflict" theme="warning" class="notice">
+        <p>下方表单已载入最新日期。你上次修改的日期仍在草稿中。</p>
+        <ul><li v-for="field in dateFields" v-show="dateConflictDraft[field.key] !== undefined" :key="field.key">{{ field.label }}：{{ dateConflictDraft[field.key]?.replace('T',' ') || '未设置' }}</li></ul>
+        <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" variant="outline" size="small" @click="applyDateConflictDraft">填回我的修改</t-button>
+        <t-button variant="text" size="small" @click="dateConflictDraft=undefined">放弃草稿</t-button>
+       </t-alert>
       <form @submit.prevent="submitDocument">
        <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">此附件的生效/失效时间继承主件，请到主件编辑日期。</p>
        <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
        <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
        <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
        <t-alert v-if="documentSuccess" theme="success" class="notice" role="status">{{ documentSuccess }}</t-alert>
-       <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="documentConflict">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
+        <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="documentConflict || !!dateConflictDraft">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
       </form>
      </template>
      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
@@ -182,12 +203,14 @@ const workspaceView=computed(()=>{
 })
 const auth=useAuthStore()
 const kbFence=requestFence()
-const tabFromQuery=route.query.tab
-const tab=ref<(typeof tabs)[number]['key']>(tabFromQuery==='reviews'||tabFromQuery==='rules'||tabFromQuery==='cleanup'?tabFromQuery:'documents')
+type ListTab=(typeof tabs)[number]['key']
+const listTab=(value:unknown):ListTab=>value==='reviews'||value==='rules'||value==='cleanup'?value:'documents'
+const listState=(value:unknown):api.LifecycleState|''=>states.find(state=>state===value)||''
+const listTitle=(value:unknown)=>typeof value==='string'?value:''
+const tab=ref(listTab(route.query.tab))
 const kb=ref(''),knowledgeBases=ref<{id:string;name:string}[]>([]),loadingKB=ref(true)
-const filterFromQuery=typeof route.query.state==='string'?route.query.state:''
-const filter=ref<api.LifecycleState|''>(states.includes(filterFromQuery as api.LifecycleState)?filterFromQuery as api.LifecycleState:'')
-const titleQuery=ref(typeof route.query.title==='string'?route.query.title:'')
+const filter=ref(listState(route.query.state))
+const titleQuery=ref(listTitle(route.query.title))
 const data=ref<api.Overview>(),busy=ref(false),error=ref('')
 // The workbench shows the whole document set in one scrollable table. Keep
 // counts/rules in data, and accumulate every page of documents here.
@@ -207,10 +230,11 @@ function sortDocuments(key:DocumentSortKey){
 }
 const sortMark=(key:DocumentSortKey)=>sortKey.value===key?(sortDirection.value===1?' ↑':' ↓'):' ↕'
 const reviewItems=ref<api.ReviewAlert[]>([]),reviewError=ref(''),reviewBusy=ref(false),reviewsTruncated=ref(false),reviewsLoaded=ref(false)
-const cleanupItems=ref<api.CleanupTask[]>([]),cleanupError=ref(''),cleanupBusy=ref(false),cleanupLoaded=ref(false)
+const cleanupItems=ref<api.CleanupTask[]>([]),cleanupError=ref(''),cleanupBusy=ref(false)
+const cleanupDisplayStatus=(task:api.CleanupTask)=>task.status==='pending_cleanup' && task.can_confirm?'awaiting_confirmation':task.status
 const cleanupStatusLabel=(status:string)=>({pending_cleanup:'保留中',awaiting_confirmation:'待确认清理',held:'已保留',failed:'清理失败',cleaned:'已清理',cancelled:'已恢复'} as Record<string,string>)[status]||status
 const cleanupStatusTheme=(status:string)=>({pending_cleanup:'warning',awaiting_confirmation:'danger',held:'default',failed:'danger',cleaned:'success',cancelled:'default'} as Record<string,string>)[status]||'default'
-const cleanupBanner=computed(()=>{const c=data.value?.cleanup;if(!c?.total)return '';const due=c.due_soon?'，其中 '+c.due_soon+' 份将在 7 天内到期':'';return '已删除文档 '+c.total+' 份处于清理保留期'+due+'。'})
+const cleanupBanner=computed(()=>{const c=data.value?.cleanup;return c?.total?`待清理队列中有 ${c.total} 份已删除文档。`:''})
 const reviewSort=ref<'asc'|'desc'>('asc')
 const sortedReviewItems=computed(()=>[...reviewItems.value].sort((a,b)=>{
   const left=a.review_due||'',right=b.review_due||''
@@ -235,6 +259,8 @@ const governanceActions:Record<string,string>={family_member_add:'加入版本�
  family_suggestion_confirm:'确认关联建议',family_suggestion_ignore:'忽略关联建议',family_replace_history:'补录历史版本链'}
 const governanceAction=(action:string)=>governanceActions[action]||actionLabels[action as BusinessAction]||action
 const dateForm=reactive({effective_from:'',effective_until:'',review_due:''})
+const dateFields=[{key:'effective_from',label:'生效时间'},{key:'effective_until',label:'失效时间'},{key:'review_due',label:'复核时间'}] as const
+const dateConflictDraft=ref<Partial<typeof dateForm>>()
 // Short-lived detail cache: flipping between drawer tabs or reopening the same
 // document within the window reuses the snapshot instead of refetching it.
 const DETAIL_TTL_MS=30_000
@@ -252,7 +278,8 @@ const effectiveFromPicker=pickerModel('effective_from')
 const effectiveUntilPicker=pickerModel('effective_until')
 const reviewDuePicker=pickerModel('review_due')
 const dateDirty=computed(()=>dateBaseline.value!==dateKey())
-const listFence=requestFence(),detailFence=requestFence(),reviewFence=requestFence(),ruleFence=requestFence()
+const hasDateDraft=computed(()=>!!dateConflictDraft.value||!!dateBaseline.value&&dateDirty.value)
+const listFence=requestFence(),detailFence=requestFence(),reviewFence=requestFence(),cleanupFence=requestFence(),ruleFence=requestFence()
 const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone
 
 const date=(value?:string|null)=>value?new Date(value).toLocaleString():'未设置'
@@ -284,7 +311,7 @@ async function loadActivity(){
 watch([selectedID,selectedKB],()=>{activityPage.value=1})
 watch([selectedID,selectedKB,detailTab,activityPage],loadActivity)
 function trapFocus(event:KeyboardEvent){const items=drawer.value?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]');if(!items?.length)return;const first=items[0]!,last=items[items.length-1]!;if(event.shiftKey&&(document.activeElement===first||document.activeElement===drawer.value)){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
-function closeDocument(){if(detailLocked.value)return;if(dateDirty.value&&!window.confirm('日期尚未保存，确定关闭文档详情？'))return;detailFence.invalidate();selectedID.value='';selectedKB.value='';detail.value=undefined;detailError.value='';documentSuccess.value='';dateBaseline.value='';previousFocus?.focus()}
+function closeDocument(){if(detailLocked.value)return;if(hasDateDraft.value&&!window.confirm('日期尚未保存，确定关闭文档详情？'))return;detailFence.invalidate();selectedID.value='';selectedKB.value='';detail.value=undefined;detailError.value='';documentSuccess.value='';dateBaseline.value='';dateConflictDraft.value=undefined;previousFocus?.focus()}
 async function loadOverview(){
  clearTimeout(searchTimer)
  const token=listFence.begin(),scope=kb.value;if(!scope)return
@@ -305,27 +332,39 @@ async function loadOverview(){
 }catch(e){if(listFence.current(token)){data.value=undefined;allDocuments.value=[];error.value=errorMessage(e)}}finally{if(listFence.current(token))busy.value=false}
 }
 async function loadReviews(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;reviewBusy.value=true;reviewError.value='';reviewItems.value=[];try{const result=await api.reviews(scope);if(reviewFence.current(token)){reviewItems.value=result.alerts||[];reviewsTruncated.value=result.truncated;reviewsLoaded.value=true}}catch(e){if(reviewFence.current(token))reviewError.value=errorMessage(e)}finally{if(reviewFence.current(token))reviewBusy.value=false}}
-async function loadCleanup(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;cleanupBusy.value=true;cleanupError.value='';try{const result=await api.cleanupList(scope,1,100,'');if(reviewFence.current(token)){cleanupItems.value=result.tasks||[];cleanupLoaded.value=true}}catch(e){if(reviewFence.current(token))cleanupError.value=errorMessage(e)}finally{if(reviewFence.current(token))cleanupBusy.value=false}}
+async function loadCleanup(){const token=cleanupFence.begin(),scope=kb.value;if(!scope)return;cleanupBusy.value=true;cleanupError.value='';try{const result=await api.cleanupList(scope,1,100,'');if(cleanupFence.current(token))cleanupItems.value=result.tasks||[]}catch(e){if(cleanupFence.current(token))cleanupError.value=errorMessage(e)}finally{if(cleanupFence.current(token))cleanupBusy.value=false}}
 async function holdCleanup(task:api.CleanupTask){if(!data.value?.can_write)return;try{await api.holdCleanup(kb.value,task.document_id,task.revision,90,'用户保留','hold-'+task.document_id+'-'+task.revision);await loadCleanup();await loadOverview()}catch(e){cleanupError.value=errorMessage(e)}}
-async function confirmCleanup(task:api.CleanupTask){if(!data.value?.can_write)return;try{await api.confirmCleanup(kb.value,task.document_id,task.revision,'cleanup-'+task.document_id+'-'+task.revision);await loadCleanup();await loadOverview()}catch(e){cleanupError.value=errorMessage(e)}}
+async function confirmCleanup(task:api.CleanupTask){
+ const scope=kb.value
+ if(!data.value?.can_write||!task.can_confirm||task.knowledge_base_id!==scope)return
+ try{
+  await api.confirmCleanup(scope,task.document_id,task.revision,'cleanup-'+task.document_id+'-'+task.revision)
+  if(kb.value===scope){await loadCleanup();if(kb.value===scope)await loadOverview()}
+ }catch(e){
+  if(kb.value!==scope)return
+  if(httpStatus(e)===409)await loadCleanup()
+  if(kb.value===scope)cleanupError.value=httpStatus(e)===409?'清理条件已变化或当前记录仍有关联，请核对任务状态和保留期限。':errorMessage(e)
+ }
+}
 function loadAll(){if(!kb.value){void loadKnowledgeBases();return}ruleError.value='';ruleSuccess.value=false;void loadOverview();if(tab.value==='reviews')void loadReviews();if(tab.value==='cleanup')void loadCleanup()}
-function listQuery(){
+function listQuery(nextTab=tab.value){
  const query:Record<string,string>={}
  if(kb.value)query.kb=kb.value
- if(tab.value!=='documents')query.tab=tab.value
+ if(nextTab!=='documents')query.tab=nextTab
  if(filter.value)query.state=filter.value
- const title=titleQuery.value.trim()
+ const title=titleQuery.value
  if(title)query.title=title
  return query
 }
 function syncListQuery(){
- if(workspaceView.value||!router||typeof router.replace!=='function')return
+ if(workspaceView.value)return
  void router.replace({name:'documents',query:listQuery()})
 }
-function showList(value:(typeof tabs)[number]['key']){
- tab.value=value
- if(workspaceView.value)void router.replace({name:'documents',query:listQuery()})
+function syncScopeQuery(){
+ if(workspaceView.value)void router.replace({name:'documents',query:{...route.query,kb:kb.value}})
+ else syncListQuery()
 }
+function showList(value:ListTab){void router.push({name:'documents',query:listQuery(value)})}
 function showWorkspace(value:(typeof workspaceTabs)[number]['key']){void router.push({name:'documents',query:{kb:kb.value,view:value}})}
 function openWorkspaceDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'life',kbOverride)}
 function openGraphDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'graph',kbOverride)}
@@ -334,10 +373,12 @@ function applyDetail(value:api.Detail){detail.value=value;dateForm.effective_fro
 async function openDocument(id:string,title?:string,nextTab:(typeof detailTabs)[number]['key']='life',kbOverride=kb.value){
  const scope=kbOverride||kb.value
  if(detailLocked.value || !scope)return
- if(selectedID.value&&dateDirty.value&&!window.confirm('日期尚未保存，确定切换到另一篇文档？'))return
+ if(selectedID.value&&hasDateDraft.value&&!window.confirm('日期尚未保存，确定切换到另一篇文档？'))return
  if(!selectedID.value)previousFocus=document.activeElement as HTMLElement
  selectedKB.value=scope;selectedID.value=id;selectedTitle.value=title||'';detailTab.value=nextTab
- await nextTick();drawer.value?.focus();await reloadDocument()
+ dateBaseline.value='';dateConflictDraft.value=undefined;documentConflict.value=false
+ const loading=loadDocument()
+ await nextTick();drawer.value?.focus();await loading
 }
 async function refreshDocumentMembership(){
  void loadOverview()
@@ -348,24 +389,69 @@ async function refreshDocumentMembership(){
   if(scope===selectedKB.value && id===selectedID.value && detail.value)detail.value.business_family=result.business_family
  }catch{}
 }
-async function reloadDocument(){const token=detailFence.begin(),scope=selectedKB.value,id=selectedID.value;detail.value=undefined;detailError.value='';documentSuccess.value='';documentConflict.value=false;detailBusy.value=true;try{const key=detailKey(scope,id);const hit=detailCache.get(key);if(hit&&Date.now()-hit.at<DETAIL_TTL_MS){applyDetail(hit.value);detailBusy.value=false;return}const value=await api.documentDetail(scope,id);if(detailFence.current(token)){detailCache.set(key,{at:Date.now(),value});applyDetail(value);if(!selectedTitle.value)void documentTitle(scope,id).then(title=>{if(detailFence.current(token))selectedTitle.value=title}).catch(()=>{})}}catch(e){if(detailFence.current(token))detailError.value=errorMessage(e)}finally{if(detailFence.current(token))detailBusy.value=false}}
-async function submitDocument(){if(!detail.value||!detailCanWrite.value||savingDocument.value||supplementBusy.value||documentConflict.value)return;const token=detailFence.begin(),scope=selectedKB.value,id=selectedID.value,original=detail.value.snapshot.annotations;savingDocument.value=true;detailError.value='';documentSuccess.value='';try{const result=await api.saveAnnotations(scope,id,original.revision,annotationsForSave(original,dateForm));if(!detailFence.current(token))return;detailCache.set(detailKey(scope,id),{at:Date.now(),value:result});applyDetail(result);documentSuccess.value=result.evaluation_status==='pending'?'日期已保存；状态待后台扫描确认，请稍后刷新。':'日期已保存，状态已重新核验。';void loadOverview();void loadReviews()}catch(e){if(detailFence.current(token)){detailError.value=errorMessage(e);documentConflict.value=httpStatus(e)===409}}finally{if(detailFence.current(token))savingDocument.value=false}}
+function reloadDocument(){return loadDocument(true)}
+async function loadDocument(fresh=false){
+ const token=detailFence.begin(),scope=selectedKB.value,id=selectedID.value,key=detailKey(scope,id)
+ detail.value=undefined;detailError.value='';documentSuccess.value='';detailBusy.value=true
+ if(fresh)detailCache.delete(key)
+ try{
+  const hit=detailCache.get(key)
+  const value=hit&&Date.now()-hit.at<DETAIL_TTL_MS?hit.value:await api.documentDetail(scope,id,fresh)
+  if(!detailFence.current(token))return
+  if(value!==hit?.value)detailCache.set(key,{at:Date.now(),value})
+  applyDetail(value)
+  documentConflict.value=false
+  if(!selectedTitle.value)void documentTitle(scope,id).then(title=>{if(detailFence.current(token))selectedTitle.value=title}).catch(()=>{})
+ }catch(e){if(detailFence.current(token))detailError.value=errorMessage(e)}
+ finally{if(detailFence.current(token))detailBusy.value=false}
+}
+function applyDateConflictDraft(){
+ Object.assign(dateForm,dateConflictDraft.value)
+ dateConflictDraft.value=undefined
+}
+async function submitDocument(){
+ if(!detail.value||!detailCanWrite.value||detailLocked.value||documentConflict.value||dateConflictDraft.value)return
+ const token=detailFence.begin(),scope=selectedKB.value,id=selectedID.value,original=detail.value.snapshot.annotations
+ savingDocument.value=true;detailError.value='';documentSuccess.value=''
+ try{
+  const result=await api.saveAnnotations(scope,id,original.revision,annotationsForSave(original,dateForm))
+  if(!detailFence.current(token))return
+  detailCache.set(detailKey(scope,id),{at:Date.now(),value:result});applyDetail(result)
+  documentSuccess.value=result.evaluation_status==='pending'?'日期已保存；状态待后台扫描确认，请稍后刷新。':'日期已保存，状态已重新核验。'
+  void loadOverview();void loadReviews()
+ }catch(e){
+  if(!detailFence.current(token))return
+  detailError.value=errorMessage(e)
+  if(httpStatus(e)===409){
+   documentConflict.value=true
+   detailCache.delete(detailKey(scope,id))
+   const draft:Partial<typeof dateForm>={}
+   for(const {key} of dateFields){if(dateForm[key]!==toLocalInput(original[key]))draft[key]=dateForm[key]}
+   dateConflictDraft.value=Object.keys(draft).length?draft:undefined
+  }
+ }finally{if(detailFence.current(token))savingDocument.value=false}
+}
 function supplementSaved(){detailCache.delete(detailKey(selectedKB.value,selectedID.value));supplementRevision.value++;void loadOverview();void loadReviews()}
 async function submitRules(){if(!data.value?.can_write||!validRules(ruleForm)||savingRules.value)return;const token=ruleFence.begin(),scope=kb.value,revision=data.value.rule_revision;savingRules.value=true;ruleError.value='';ruleSuccess.value=false;try{const result=await api.saveRules(scope,revision,{...ruleForm});if(ruleFence.current(token)&&data.value){data.value.rules=result.rules;data.value.rule_revision=result.rule_revision;ruleSuccess.value=true}}catch(e){if(ruleFence.current(token))ruleError.value=errorMessage(e)}finally{if(ruleFence.current(token))savingRules.value=false}}
-watch([titleQuery,filter],([,state],[,previousState])=>{clearTimeout(searchTimer);listFence.invalidate();if(!kb.value)return;if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
-watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';selectedKB.value='';dateBaseline.value='';reviewItems.value=[];reviewsLoaded.value=false;reviewsTruncated.value=false;cleanupItems.value=[];cleanupLoaded.value=false;cleanupError.value='';cleanupBusy.value=false;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
-watch(tab,value=>{if(value==='reviews'&&!reviewsLoaded.value)void loadReviews();if(value==='cleanup'&&!cleanupLoaded.value)void loadCleanup()})
+watch([titleQuery,filter,kb],([,state,scope],[,previousState,previousScope])=>{if(!scope||scope!==previousScope)return;clearTimeout(searchTimer);listFence.invalidate();if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
+watch(kb,()=>{clearTimeout(searchTimer);listFence.invalidate();reviewFence.invalidate();cleanupFence.invalidate();detailFence.invalidate();ruleFence.invalidate();savingDocument.value=false;supplementBusy.value=false;childLocked.value=false;viewLocked.value=false;savingRules.value=false;data.value=undefined;detail.value=undefined;selectedID.value='';selectedKB.value='';dateBaseline.value='';dateConflictDraft.value=undefined;reviewItems.value=[];reviewsLoaded.value=false;reviewsTruncated.value=false;cleanupItems.value=[];cleanupError.value='';cleanupBusy.value=false;error.value='';busy.value=false;reviewBusy.value=false;if(kb.value)loadAll()})
+watch([tab,kb],([value,scope],[,previousScope])=>{if(!scope||scope!==previousScope)return;if(value==='reviews'&&!reviewsLoaded.value&&!reviewBusy.value)void loadReviews();if(value==='cleanup'&&!cleanupBusy.value)void loadCleanup()})
 
-async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];kb.value=knowledgeBases.value.find(row=>row.id===route.query.kb)?.id||knowledgeBases.value[0]?.id||''}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
+function scopeFromQuery(value:unknown){return knowledgeBases.value.find(row=>row.id===value)?.id||knowledgeBases.value[0]?.id||''}
+async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];kb.value=scopeFromQuery(route.query.kb)}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
 watch(()=>auth.effectiveTenantId,()=>void loadKnowledgeBases())
-watch(()=>route.query.kb,value=>{if(typeof value==='string' && knowledgeBases.value.some(row=>row.id===value))kb.value=value})
+watch(()=>route.query,query=>{
+ tab.value=listTab(query.tab)
+ filter.value=listState(query.state)
+ titleQuery.value=listTitle(query.title)
+ kb.value=scopeFromQuery(query.kb)
+})
 watch(workspaceView,()=>{viewLocked.value=false})
-watch([kb,tab,filter,titleQuery],syncListQuery)
 function allowNavigation(){return !detailLocked.value && !viewLocked.value}
 onBeforeRouteLeave(allowNavigation)
 onBeforeRouteUpdate(allowNavigation)
 onMounted(loadKnowledgeBases)
-onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.invalidate();detailFence.invalidate();reviewFence.invalidate();ruleFence.invalidate()})
+onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.invalidate();detailFence.invalidate();reviewFence.invalidate();cleanupFence.invalidate();ruleFence.invalidate()})
 </script>
 
 <style scoped>

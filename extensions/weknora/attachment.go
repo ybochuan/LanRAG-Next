@@ -19,6 +19,12 @@ import (
 	"unicode"
 )
 
+// ErrAttachmentUploadRejected means the native upload returned a definitive client rejection.
+var ErrAttachmentUploadRejected = errors.New("attachment upload rejected")
+
+// ErrAttachmentUploadPending means the request may have committed without a usable receipt.
+var ErrAttachmentUploadPending = errors.New("attachment upload outcome unknown")
+
 type attachmentDocument struct {
 	ID           string                     `json:"id"`
 	TenantID     uint64                     `json:"tenant_id"`
@@ -162,12 +168,17 @@ func (c *Client) uploadAttachment(ctx context.Context, kb, parent, name string, 
 		if ctx.Err() != nil {
 			return "", false, ctx.Err()
 		}
-		return "", false, errors.New("attachment upload outcome unknown")
+		return "", false, ErrAttachmentUploadPending
 	}
 	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusRequestEntityTooLarge, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity, http.StatusTooManyRequests:
+		return "", false, ErrAttachmentUploadRejected
+	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (4<<20)+1))
 	if err != nil || len(raw) > 4<<20 {
-		return "", false, errors.New("attachment response unavailable")
+		return "", false, ErrAttachmentUploadPending
 	}
 	var out struct {
 		Success bool               `json:"success"`
@@ -175,7 +186,7 @@ func (c *Client) uploadAttachment(ctx context.Context, kb, parent, name string, 
 		Data    attachmentDocument `json:"data"`
 	}
 	if json.Unmarshal(raw, &out) != nil || !matches(out.Data) || importID != "" && out.Data.value("attachment_import_id") != importID {
-		return "", false, errors.New("attachment response identity mismatch")
+		return "", false, ErrAttachmentUploadPending
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 && out.Success {
 		return out.Data.ID, importID != "", nil
@@ -183,5 +194,5 @@ func (c *Client) uploadAttachment(ctx context.Context, kb, parent, name string, 
 	if response.StatusCode == 409 && out.Code == "duplicate_file" {
 		return out.Data.ID, importID != "", nil
 	}
-	return "", false, errors.New("attachment upload rejected")
+	return "", false, ErrAttachmentUploadPending
 }

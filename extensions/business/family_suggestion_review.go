@@ -127,6 +127,8 @@ func (s *Service) confirmSuggestedRelationTx(ctx context.Context, tx *sql.Tx, sc
 		return "", ErrUnavailable
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO ext_document_relations
+		(tenant_id,knowledge_base_id,relation_id,document_id,target_knowledge_base_id,target_document_id,
+		 source_version_id,target_version_id,edge_type,status,confidence,revision,edge_id,cross_edge_id)
 		SELECT ?,?,?,?,?,?,?,?,?,'active',?,1,NULL,NULL
 		WHERE NOT EXISTS(SELECT 1 FROM ext_document_relations WHERE tenant_id=? AND knowledge_base_id=? AND edge_type=?
 			AND status='active' AND (source_version_id=? AND target_version_id=? OR edge_type='related_to' AND source_version_id=? AND target_version_id=?))`,

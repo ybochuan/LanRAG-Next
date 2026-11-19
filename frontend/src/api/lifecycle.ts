@@ -8,7 +8,7 @@ export interface ResolvedRules {rules:Rules;source:{tenant_id:number;knowledge_b
 export interface DocumentFamily {id:string;label:string}
 export interface DocumentRow {document_id:string;title?:string;native_title?:string;display_name?:string;mapping_status?:string;annex_original?:string;state:LifecycleState;last_event_id:string;annotations:Annotations;business_family?:DocumentFamily;degraded?:boolean;degraded_reason?:string}
 export type CleanupStatus='pending_cleanup'|'awaiting_confirmation'|'held'|'cleaned'|'failed'|'cancelled'
-export interface CleanupTask {tenant_id:number;knowledge_base_id:string;document_id:string;title?:string;native_deleted_at?:string;first_observed_at:string;cleanup_due_at:string;status:CleanupStatus;hold_until?:string;hold_reason?:string;last_error?:string;revision:number;cleaned_at?:string}
+export interface CleanupTask {tenant_id:number;knowledge_base_id:string;document_id:string;title?:string;native_deleted_at?:string;first_observed_at:string;cleanup_due_at:string;status:CleanupStatus;hold_until?:string;hold_reason?:string;retained_until?:string;can_confirm?:boolean;last_error?:string;revision:number;cleaned_at?:string}
 export interface CleanupSummary {total:number;pending:number;awaiting:number;held:number;failed:number;due_soon:number}
 export interface CleanupList {tasks:CleanupTask[];total:number;counts:Record<string,number>}
 export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean;cleanup?:CleanupSummary;degraded?:boolean;degraded_reason?:string}
@@ -29,7 +29,7 @@ export const overview=(kb:string,page:number,state:string,title='',pageSize=20)=
 // authority reads only the caller's write permission; views that need just
 // can_write avoid the counts, document page and annotations of overview.
 export const authority=(kb:string)=>unwrap<{can_write:boolean;tenant_id:number;knowledge_base_id:string}>(get(`${base(kb)}/authority`))
-export const documentDetail=(kb:string,id:string)=>unwrap<Detail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}`))
+export const documentDetail=(kb:string,id:string,fresh=false)=>unwrap<Detail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}`,fresh?{headers:{'Cache-Control':'no-cache'}}:undefined))
 export const saveAnnotations=(kb:string,id:string,expected_revision:number,annotations:Annotations)=>unwrap<Detail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}`,{expected_revision,annotations})).then(value=>{invalidateCache('document-picker-active');return value})
 export const saveRules=(kb:string,expected_revision:number,rules:Rules)=>unwrap<{rules:ResolvedRules;rule_revision:number}>(put(`${base(kb)}/rules`,{expected_revision,rules})).then(value=>{invalidateCache('document-picker-active');return value})
 export const reviews=(kb:string)=>unwrap<{alerts:ReviewAlert[];truncated:boolean}>(get(`${base(kb)}/reviews`))

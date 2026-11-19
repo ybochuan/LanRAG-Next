@@ -12,6 +12,15 @@ import (
 
 var errAttachmentImportConflict = errors.New("attachment import already submitted or ownership conflicts")
 
+// CancelRejectedAttachmentUpload releases a claim after a definite native rejection.
+func (db *DB) CancelRejectedAttachmentUpload(ctx context.Context, importID string) error {
+	return db.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE ext_attachment_links SET submitted=0
+			WHERE import_id=? AND submitted=1 AND attachment_id IS NULL AND cleanup_started=0`, importID)
+		return requireAttachmentRow(result, err)
+	})
+}
+
 const (
 	AttachmentUploadEvidence = "upload_receipt"
 	AttachmentLegacyEvidence = "legacy_reextracted"

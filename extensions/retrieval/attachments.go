@@ -18,8 +18,14 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/weknora"
 )
 
+// AttachmentTemplate carries one verified relation and its optional reference.
+type AttachmentTemplate struct {
+	DocumentID string
+	Reference  *store.AttachmentReference
+}
+
 type AttachmentRelations interface {
-	AttachmentTemplates(context.Context, provenance.Scope, string) ([]string, error)
+	AttachmentTemplates(context.Context, provenance.Scope, string) ([]AttachmentTemplate, error)
 }
 
 func (p *Policy) WithAttachmentRelations(relations AttachmentRelations) *Policy {
@@ -145,6 +151,7 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 	matches := map[string][]weknora.AttachmentDocument{}
 	ids := []string{}
 	seen := map[string]bool{}
+	templateReferences := map[string]map[string]store.AttachmentReference{}
 	for _, kb := range r.KnowledgeBaseIDs {
 		docs, e := p.attachments.ListAttachmentDocuments(ctx, kb)
 		if e != nil {
@@ -170,7 +177,7 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 		}
 	}
 	if p.attachmentRelations != nil {
-		if err := p.appendTemplateMatches(ctx, r, matches, seen, &ids); err != nil {
+		if err := p.appendTemplateMatches(ctx, r, matches, seen, &ids, templateReferences); err != nil {
 			return nil, err
 		}
 	}
@@ -248,6 +255,13 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 			}
 			if !d.IsAttachment && item.MappingStatus == "" {
 				item.MappingStatus = "template"
+				if reference, ok := templateReferences[d.ParentDocumentID][d.ID]; ok {
+					item.MappingStatus = "manual"
+					item.ReferenceTitle = reference.Title
+					item.ReferenceLocation = reference.Location
+					item.ReferenceExcerpt = reference.Excerpt
+					item.AttachmentSequence = reference.Sequence
+				}
 			}
 			result[hit] = append(result[hit], item)
 		}
@@ -274,7 +288,7 @@ func (p *Policy) AttachmentLinks(ctx context.Context, r contract.BeforeRetrieveR
 	return result, nil
 }
 
-func (p *Policy) appendTemplateMatches(ctx context.Context, r contract.BeforeRetrieveRequest, matches map[string][]weknora.AttachmentDocument, seen map[string]bool, ids *[]string) error {
+func (p *Policy) appendTemplateMatches(ctx context.Context, r contract.BeforeRetrieveRequest, matches map[string][]weknora.AttachmentDocument, seen map[string]bool, ids *[]string, references map[string]map[string]store.AttachmentReference) error {
 	keys, _ := json.Marshal(r.KnowledgeIDs)
 	kbs, _ := json.Marshal(r.KnowledgeBaseIDs)
 	type parentScope struct{ kb, id string }
@@ -306,7 +320,16 @@ func (p *Policy) appendTemplateMatches(ctx context.Context, r contract.BeforeRet
 			return err
 		}
 		templates = templates[:min(len(templates), 32)]
-		docs, err := p.attachments.AttachmentDocuments(ctx, []string{parent.kb}, templates)
+		templateIDs := make([]string, 0, len(templates))
+		parentReferences := make(map[string]store.AttachmentReference)
+		for _, template := range templates {
+			templateIDs = append(templateIDs, template.DocumentID)
+			if template.Reference != nil {
+				parentReferences[template.DocumentID] = *template.Reference
+			}
+		}
+		references[parent.id] = parentReferences
+		docs, err := p.attachments.AttachmentDocuments(ctx, []string{parent.kb}, templateIDs)
 		if err != nil {
 			return err
 		}

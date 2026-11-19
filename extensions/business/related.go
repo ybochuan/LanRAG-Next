@@ -13,6 +13,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
 	"github.com/ybochuan/LanRAG-Next/extensions/outbox"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/retrieval"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
 	"github.com/ybochuan/LanRAG-Next/extensions/taggov"
 )
@@ -21,11 +22,14 @@ import (
 // scoped to the knowledge base of the related document, which may differ from
 // the source document's knowledge base for normative relations.
 type Related struct {
-	KnowledgeBaseID string  `json:"knowledge_base_id"`
-	DocumentID      string  `json:"document_id"`
-	EdgeType        string  `json:"edge_type"`
-	Confidence      float64 `json:"confidence"`
-	Direction       string  `json:"direction"`
+	KnowledgeBaseID string                     `json:"knowledge_base_id"`
+	DocumentID      string                     `json:"document_id"`
+	EdgeType        string                     `json:"edge_type"`
+	Confidence      float64                    `json:"confidence"`
+	Direction       string                     `json:"direction"`
+	RelationID      string                     `json:"-"`
+	Revision        int64                      `json:"-"`
+	Reference       *store.AttachmentReference `json:"-"`
 }
 
 func score(p Payload) (float64, error) {
@@ -66,7 +70,7 @@ func relationDocumentKey(kb, document string) string {
 }
 
 // AttachmentTemplates returns current, same-library templates for one parent.
-func (s *Service) AttachmentTemplates(ctx context.Context, scope provenance.Scope, parent string) ([]string, error) {
+func (s *Service) AttachmentTemplates(ctx context.Context, scope provenance.Scope, parent string) ([]retrieval.AttachmentTemplate, error) {
 	related, err := s.QueryRelated(ctx, scope, parent)
 	if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) || errors.Is(err, lineage.ErrSourceMissing) {
 		return nil, nil
@@ -74,13 +78,13 @@ func (s *Service) AttachmentTemplates(ctx context.Context, scope provenance.Scop
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
+	var templates []retrieval.AttachmentTemplate
 	for _, row := range related {
 		if row.KnowledgeBaseID == scope.KnowledgeBaseID && row.EdgeType == "template_for" && row.Direction == "incoming" {
-			ids = append(ids, row.DocumentID)
+			templates = append(templates, retrieval.AttachmentTemplate{DocumentID: row.DocumentID, Reference: row.Reference})
 		}
 	}
-	return ids, nil
+	return templates, nil
 }
 
 func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
@@ -306,6 +310,16 @@ func (s *Service) QueryRelated(ctx context.Context, scope provenance.Scope, doc 
 		Related
 		version string
 	}
+	scan := func(rows *sql.Rows) (item, error) {
+		var v item
+		var evidence sql.NullString
+		err := rows.Scan(&v.KnowledgeBaseID, &v.DocumentID, &v.EdgeType, &v.Confidence, &v.Direction, &v.version,
+			&v.RelationID, &v.Revision, &evidence)
+		if err == nil && evidence.Valid {
+			err = json.Unmarshal([]byte(evidence.String), &v.Reference)
+		}
+		return v, err
+	}
 	items := []item{}
 	e = s.db.View(ctx, func(tx *sql.Tx) error {
 		if e := s.current(ctx, tx, scope, doc, version); e != nil {
@@ -317,8 +331,8 @@ func (s *Service) QueryRelated(ctx context.Context, scope provenance.Scope, doc 
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var v item
-			if e = rows.Scan(&v.KnowledgeBaseID, &v.DocumentID, &v.EdgeType, &v.Confidence, &v.Direction, &v.version); e != nil {
+			v, e := scan(rows)
+			if e != nil {
 				return e
 			}
 			items = append(items, v)
@@ -357,8 +371,8 @@ func (s *Service) QueryRelated(ctx context.Context, scope provenance.Scope, doc 
 		}
 		currentItems := []item{}
 		for rows.Next() {
-			var v item
-			if e = rows.Scan(&v.KnowledgeBaseID, &v.DocumentID, &v.EdgeType, &v.Confidence, &v.Direction, &v.version); e != nil {
+			v, e := scan(rows)
+			if e != nil {
 				rows.Close()
 				return e
 			}
@@ -412,12 +426,12 @@ const relatedConfidenceSQL = `(r.edge_type<>'related_to' OR r.confidence>=0.7 OR
 	AND s.applied_id=r.relation_id AND s.edge_type='related_to' AND s.status='confirmed'
 	AND s.source_version_id=r.source_version_id AND s.target_version_id=r.target_version_id))`
 
-var relatedSQL = `SELECT target_knowledge_base_id,target_document_id,edge_type,confidence,'outgoing',target_version_id FROM ext_document_relations r WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND (source_version_id=? OR (edge_type='template_for' AND ` + store.AttachmentPresentationRevisionSQL("r.source_version_id", "?") + `)) AND status='active' AND ` + relatedConfidenceSQL + `
- UNION SELECT knowledge_base_id,document_id,edge_type,confidence,'incoming',source_version_id FROM ext_document_relations r WHERE tenant_id=? AND target_knowledge_base_id=? AND target_document_id=? AND (target_version_id=? OR (edge_type='template_for' AND ` + store.AttachmentPresentationRevisionSQL("r.target_version_id", "?") + `)) AND status='active' AND ` + relatedConfidenceSQL + `
- UNION SELECT c.knowledge_base_id,p.parent_document_id,'supplements',1,'outgoing',p.parent_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id AND p.tenant_id=d.tenant_id AND p.knowledge_base_id=d.knowledge_base_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.child_version_node_id=?
- UNION SELECT c.knowledge_base_id,c.document_id,'supplements',1,'incoming',d.child_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id AND p.tenant_id=d.tenant_id AND p.knowledge_base_id=d.knowledge_base_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND p.parent_document_id=? AND p.parent_version_node_id=?
- UNION SELECT cp.parent_knowledge_base_id,cp.parent_document_id,'supplements',1,'outgoing',cp.parent_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id AND cp.tenant_id=d.tenant_id AND cp.knowledge_base_id=d.knowledge_base_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.child_version_node_id=?
- UNION SELECT cp.knowledge_base_id,cp.document_id,'supplements',1,'incoming',d.child_version_node_id FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id AND cp.tenant_id=d.tenant_id AND cp.knowledge_base_id=d.knowledge_base_id WHERE cp.tenant_id=? AND cp.parent_knowledge_base_id=? AND cp.parent_document_id=? AND cp.parent_version_node_id=? LIMIT 101`
+var relatedSQL = `SELECT target_knowledge_base_id,target_document_id,edge_type,confidence,'outgoing',target_version_id,r.relation_id,r.revision,r.attachment_reference_json FROM ext_document_relations r WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND (source_version_id=? OR (edge_type='template_for' AND ` + store.AttachmentPresentationRevisionSQL("r.source_version_id", "?") + `)) AND status='active' AND ` + relatedConfidenceSQL + `
+ UNION SELECT knowledge_base_id,document_id,edge_type,confidence,'incoming',source_version_id,r.relation_id,r.revision,r.attachment_reference_json FROM ext_document_relations r WHERE tenant_id=? AND target_knowledge_base_id=? AND target_document_id=? AND (target_version_id=? OR (edge_type='template_for' AND ` + store.AttachmentPresentationRevisionSQL("r.target_version_id", "?") + `)) AND status='active' AND ` + relatedConfidenceSQL + `
+ UNION SELECT c.knowledge_base_id,p.parent_document_id,'supplements',1,'outgoing',p.parent_version_node_id,'',0,NULL FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id AND p.tenant_id=d.tenant_id AND p.knowledge_base_id=d.knowledge_base_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.child_version_node_id=?
+ UNION SELECT c.knowledge_base_id,c.document_id,'supplements',1,'incoming',d.child_version_node_id,'',0,NULL FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_parents p ON p.declaration_id=d.declaration_id AND p.tenant_id=d.tenant_id AND p.knowledge_base_id=d.knowledge_base_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND p.parent_document_id=? AND p.parent_version_node_id=?
+ UNION SELECT cp.parent_knowledge_base_id,cp.parent_document_id,'supplements',1,'outgoing',cp.parent_version_node_id,'',0,NULL FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id AND cp.tenant_id=d.tenant_id AND cp.knowledge_base_id=d.knowledge_base_id WHERE c.tenant_id=? AND c.knowledge_base_id=? AND c.document_id=? AND d.child_version_node_id=?
+ UNION SELECT cp.knowledge_base_id,cp.document_id,'supplements',1,'incoming',d.child_version_node_id,'',0,NULL FROM ext_supplement_current c JOIN ext_supplement_declarations d ON d.tenant_id=c.tenant_id AND d.knowledge_base_id=c.knowledge_base_id AND d.document_id=c.document_id AND d.declaration_id=c.declaration_id AND d.revision=c.revision AND d.status='active' JOIN ext_supplement_cross_parents cp ON cp.declaration_id=d.declaration_id AND cp.tenant_id=d.tenant_id AND cp.knowledge_base_id=d.knowledge_base_id WHERE cp.tenant_id=? AND cp.parent_knowledge_base_id=? AND cp.parent_document_id=? AND cp.parent_version_node_id=? LIMIT 101`
 
 func relatedArgs(scope provenance.Scope, doc, version string) []any {
 	out := []any{}

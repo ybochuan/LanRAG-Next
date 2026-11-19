@@ -28,6 +28,7 @@ var (
 	// ErrUnavailable means the cleanup service is not configured.
 	ErrUnavailable     = errors.New("cleanup service unavailable")
 	errFamilyReference = fmt.Errorf("business family still references document: %w", ErrConflict)
+	errRetentionActive = fmt.Errorf("cleanup retention deadline has not been reached: %w", ErrConflict)
 )
 
 // Status values for one cleanup task.
@@ -62,9 +63,40 @@ type Task struct {
 	Status          string `json:"status"`
 	HoldUntil       string `json:"hold_until,omitempty"`
 	HoldReason      string `json:"hold_reason,omitempty"`
+	RetainedUntil   string `json:"retained_until,omitempty"`
+	CanConfirm      bool   `json:"can_confirm"`
 	LastError       string `json:"last_error,omitempty"`
 	Revision        int64  `json:"revision"`
 	CleanedAt       string `json:"cleaned_at,omitempty"`
+}
+
+func (s *Service) retentionDeadline(t Task) (time.Time, bool) {
+	due, err := time.Parse(time.RFC3339Nano, t.CleanupDueAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	firstObserved, err := time.Parse(time.RFC3339Nano, t.FirstObservedAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	// Older sweeps overwrote the original deadline when releasing a hold.
+	if earliest := firstObserved.Add(s.retention); earliest.After(due) {
+		due = earliest
+	}
+	if t.HoldUntil != "" {
+		hold, err := time.Parse(time.RFC3339Nano, t.HoldUntil)
+		if err != nil {
+			return time.Time{}, false
+		}
+		if hold.After(due) {
+			due = hold
+		}
+	}
+	return due, true
+}
+
+func (t Task) confirmableStatus() bool {
+	return t.Status == StatusPending || t.Status == StatusAwaiting || t.Status == StatusFailed
 }
 
 // Summary is returned with the workbench overview for the top banner.
@@ -309,7 +341,7 @@ func (s *Service) advance(ctx context.Context) error {
 
 func (s *Service) releaseExpiredHolds(ctx context.Context, now time.Time) error {
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, "UPDATE ext_cleanup_tasks SET status=?,cleanup_due_at=?,revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id IN (SELECT value FROM json_each(?)) AND status=? AND COALESCE(hold_until,'')<>'' AND hold_until<=?", StatusPending, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), strconv.FormatUint(s.tenant, 10), s.scopeJSON, StatusHeld, now.Format(time.RFC3339Nano))
+		_, err := tx.ExecContext(ctx, "UPDATE ext_cleanup_tasks SET status=?,revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id IN (SELECT value FROM json_each(?)) AND status=? AND COALESCE(hold_until,'')<>'' AND hold_until<=?", StatusPending, now.Format(time.RFC3339Nano), strconv.FormatUint(s.tenant, 10), s.scopeJSON, StatusHeld, now.Format(time.RFC3339Nano))
 		return err
 	})
 }
@@ -371,7 +403,9 @@ func (s *Service) promoteDue(ctx context.Context, now time.Time) error {
 			if err != nil {
 				return err
 			}
-			due = append(due, t)
+			if deadline, ok := s.retentionDeadline(t); ok && !now.Before(deadline) {
+				due = append(due, t)
+			}
 		}
 		return rows.Err()
 	})
@@ -462,6 +496,7 @@ func (s *Service) List(ctx context.Context, scope Scope, state string, page, pag
 		return ListResult{}, ErrScope
 	}
 	out := ListResult{Tasks: []Task{}, Counts: map[string]int{}}
+	now := s.now().UTC()
 	where := "tenant_id=? AND knowledge_base_id=?"
 	args := []any{strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID}
 	if state != "" {
@@ -484,6 +519,10 @@ func (s *Service) List(ctx context.Context, scope Scope, state string, page, pag
 			if err != nil {
 				rows.Close()
 				return err
+			}
+			if deadline, ok := s.retentionDeadline(t); ok {
+				t.RetainedUntil = deadline.UTC().Format(time.RFC3339Nano)
+				t.CanConfirm = t.confirmableStatus() && !now.Before(deadline)
 			}
 			out.Tasks = append(out.Tasks, t)
 		}
@@ -582,7 +621,7 @@ func (s *Service) Confirm(ctx context.Context, scope Scope, id, actor, operation
 	if err != nil {
 		return Task{}, err
 	}
-	if t.Revision != expected || t.Status != StatusPending && t.Status != StatusAwaiting && t.Status != StatusFailed {
+	if t.Revision != expected || !t.confirmableStatus() {
 		return Task{}, ErrConflict
 	}
 	if err := s.cleanTask(ctx, scope, t, actor, operation); err != nil {
@@ -593,6 +632,10 @@ func (s *Service) Confirm(ctx context.Context, scope Scope, id, actor, operation
 }
 
 func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, operation string) error {
+	now := s.now().UTC()
+	if deadline, ok := s.retentionDeadline(task); !ok || now.Before(deadline) {
+		return errRetentionActive
+	}
 	id := task.DocumentID
 	var deletedAt string
 	err := s.db.ViewNative(ctx, s.nativePath, func(tx *sql.Tx) error {
@@ -610,7 +653,6 @@ func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, 
 	if deletedAt != task.NativeDeletedAt {
 		return ErrConflict
 	}
-	now := s.now().UTC()
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE ext_cleanup_tasks SET status=?,cleaned_at=?,last_error='',revision=revision+1,updated_at=? WHERE tenant_id=? AND knowledge_base_id=? AND document_id=? AND revision=? AND status=? AND native_deleted_at=?`, StatusCleaned, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id, task.Revision, task.Status, deletedAt)
 		if err != nil {
@@ -650,7 +692,7 @@ func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, 
 }
 
 func (s *Service) markFailed(ctx context.Context, scope Scope, task Task, cause error) error {
-	if cause == ErrConflict {
+	if cause == ErrConflict || errors.Is(cause, errRetentionActive) {
 		return nil
 	}
 	return s.db.Write(ctx, func(tx *sql.Tx) error {

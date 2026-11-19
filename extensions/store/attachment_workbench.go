@@ -76,6 +76,7 @@ type AttachmentReviewEdit struct {
 	Tenant                                               uint64
 	KB, Actor, Operation, Action                         string
 	Parent, ParentHash, Document, DocumentHash, ImportID string
+	RelationID                                           string `json:"relation_id,omitempty"`
 	PreviousTitle, NextTitle                             string
 	NativeTitle                                          string `json:"-"`
 	ExpectedRevision                                     int64
@@ -85,6 +86,89 @@ type AttachmentReviewEdit struct {
 type AttachmentReviewResult struct {
 	Revision   int64  `json:"revision"`
 	TitleState string `json:"title_state,omitempty"`
+}
+
+// reviewAttachmentTemplate uses the same relation revision for evidence edits and revocation.
+func reviewAttachmentTemplate(ctx context.Context, tx *sql.Tx, c AttachmentReviewEdit) (before AttachmentReference, revision int64, err error) {
+	if c.Action != "confirm" {
+		return before, 0, ErrAttachmentConflict
+	}
+	keys := []any{fmt.Sprint(c.Tenant), c.KB, c.RelationID, c.Document, c.Parent, c.ExpectedRevision}
+	var raw sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT r.attachment_reference_json FROM ext_document_relations r
+		JOIN ext_document_version_family a ON a.tenant_id=r.tenant_id AND a.knowledge_base_id=r.knowledge_base_id AND a.document_id=r.document_id
+		JOIN ext_document_version_family p ON p.tenant_id=r.tenant_id AND p.knowledge_base_id=r.target_knowledge_base_id AND p.document_id=r.target_document_id
+		WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.relation_id=? AND r.document_id=? AND r.target_document_id=? AND r.revision=?
+		AND r.target_knowledge_base_id=r.knowledge_base_id AND r.edge_type='template_for' AND r.status='active'
+		AND (a.current_version_node_id=r.source_version_id OR `+AttachmentPresentationRevisionSQL("r.source_version_id", "a.current_version_node_id")+`)
+		AND (p.current_version_node_id=r.target_version_id OR `+AttachmentPresentationRevisionSQL("r.target_version_id", "p.current_version_node_id")+`)`, keys...).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return before, 0, ErrAttachmentConflict
+	}
+	if err != nil {
+		return before, 0, err
+	}
+	if raw.Valid {
+		if err = json.Unmarshal([]byte(raw.String), &before); err != nil {
+			return before, 0, err
+		}
+	}
+	evidence, _ := json.Marshal(c.Reference)
+	err = tx.QueryRowContext(ctx, `UPDATE ext_document_relations SET attachment_reference_json=?,revision=revision+1
+		WHERE tenant_id=? AND knowledge_base_id=? AND relation_id=? AND document_id=? AND target_document_id=? AND revision=?
+		RETURNING revision`, append([]any{string(evidence)}, keys...)...).Scan(&revision)
+	return before, revision, err
+}
+
+func reviewAttachmentLink(ctx context.Context, tx *sql.Tx, c AttachmentReviewEdit, now string) (AttachmentReference, int64, error) {
+	args := []any{fmt.Sprint(c.Tenant), c.KB, c.Parent, c.ParentHash, c.Document, c.DocumentHash}
+	var before AttachmentReference
+	var detached, retired bool
+	err := tx.QueryRowContext(ctx, `SELECT detached_at IS NOT NULL,retired_at IS NOT NULL FROM ext_attachment_links
+		WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=? AND parent_file_hash=?
+		AND attachment_id=? AND attachment_file_hash=? AND removed_at IS NULL AND cleanup_started=0
+		AND ((evidence_kind='upload_receipt' AND import_id=?) OR (evidence_kind='legacy_reextracted' AND ?=''))`,
+		append(args, c.ImportID, c.ImportID)...).Scan(&detached, &retired)
+	if errors.Is(err, sql.ErrNoRows) {
+		return before, 0, ErrAttachmentConflict
+	}
+	if err != nil {
+		return before, 0, err
+	}
+	if c.Action == "restore" && !detached || c.Action != "restore" && (detached || retired) {
+		return before, 0, ErrAttachmentConflict
+	}
+	var revision int64
+	err = tx.QueryRowContext(ctx, `SELECT revision,reference_title,reference_location,reference_excerpt,reference_sequence
+		FROM ext_attachment_confirmations WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=?
+		AND parent_file_hash=? AND attachment_id=? AND attachment_file_hash=?`, args...).
+		Scan(&revision, &before.Title, &before.Location, &before.Excerpt, &before.Sequence)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return before, 0, err
+	}
+	if revision != c.ExpectedRevision {
+		return before, 0, ErrAttachmentConflict
+	}
+	switch c.Action {
+	case "confirm":
+		revision++
+		_, err = tx.ExecContext(ctx, `INSERT INTO ext_attachment_confirmations VALUES(?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(tenant_id,knowledge_base_id,parent_document_id,parent_file_hash,attachment_id,attachment_file_hash)
+			DO UPDATE SET revision=excluded.revision, reference_title=excluded.reference_title,
+			reference_location=excluded.reference_location,reference_excerpt=excluded.reference_excerpt,reference_sequence=excluded.reference_sequence`,
+			append(args, revision, c.Reference.Title, c.Reference.Location, c.Reference.Excerpt, c.Reference.Sequence)...)
+	case "detach":
+		_, err = tx.ExecContext(ctx, `UPDATE ext_attachment_links SET detached_at=?,retired_at=?
+			WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=? AND parent_file_hash=?
+			AND attachment_id=? AND attachment_file_hash=?`, append([]any{now, now}, args...)...)
+	case "restore":
+		_, err = tx.ExecContext(ctx, `UPDATE ext_attachment_links SET detached_at=NULL,retired_at=NULL
+			WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=? AND parent_file_hash=?
+			AND attachment_id=? AND attachment_file_hash=?`, args...)
+	default:
+		return before, 0, ErrAttachmentConflict
+	}
+	return before, revision, err
 }
 
 // AttachmentReview saves a confirmation/detach/restore and its audit atomically.
@@ -113,55 +197,14 @@ func (db *DB) AttachmentReview(ctx context.Context, c AttachmentReviewEdit) (Att
 		if err = checkAttachmentParentWritable(ctx, tx, c.Tenant, c.KB, c.Document); err != nil {
 			return ErrAttachmentConflict
 		}
-		args := []any{tenant, c.KB, c.Parent, c.ParentHash, c.Document, c.DocumentHash}
-		var detached, retired bool
-		err = tx.QueryRowContext(ctx, `SELECT detached_at IS NOT NULL,retired_at IS NOT NULL FROM ext_attachment_links
-			WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=? AND parent_file_hash=?
-			AND attachment_id=? AND attachment_file_hash=? AND removed_at IS NULL AND cleanup_started=0
-			AND ((evidence_kind='upload_receipt' AND import_id=?) OR (evidence_kind='legacy_reextracted' AND ?=''))`,
-			append(append([]any{}, args...), c.ImportID, c.ImportID)...).Scan(&detached, &retired)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAttachmentConflict
-		}
-		if err != nil {
-			return err
-		}
-		if c.Action == "restore" && !detached || c.Action != "restore" && (detached || retired) {
-			return ErrAttachmentConflict
-		}
-		previous := AttachmentConfirmation{}
-		err = tx.QueryRowContext(ctx, `SELECT revision,reference_title,reference_location,reference_excerpt,reference_sequence
-			FROM ext_attachment_confirmations WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=?
-			AND parent_file_hash=? AND attachment_id=? AND attachment_file_hash=?`, args...).
-			Scan(&previous.Revision, &previous.Title, &previous.Location, &previous.Excerpt, &previous.Sequence)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if previous.Revision != c.ExpectedRevision {
-			return ErrAttachmentConflict
-		}
 		if c.NextTitle != "" && c.PreviousTitle != c.NativeTitle {
 			return ErrAttachmentConflict
 		}
-		result.Revision = previous.Revision
-		switch c.Action {
-		case "confirm":
-			result.Revision++
-			values := append(append([]any{}, args...), result.Revision, c.Reference.Title, c.Reference.Location, c.Reference.Excerpt, c.Reference.Sequence)
-			_, err = tx.ExecContext(ctx, `INSERT INTO ext_attachment_confirmations VALUES(?,?,?,?,?,?,?,?,?,?,?)
-				ON CONFLICT(tenant_id,knowledge_base_id,parent_document_id,parent_file_hash,attachment_id,attachment_file_hash)
-				DO UPDATE SET revision=excluded.revision, reference_title=excluded.reference_title,
-				reference_location=excluded.reference_location,reference_excerpt=excluded.reference_excerpt,reference_sequence=excluded.reference_sequence`, values...)
-		case "detach":
-			_, err = tx.ExecContext(ctx, `UPDATE ext_attachment_links SET detached_at=?,retired_at=?
-				WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=? AND parent_file_hash=?
-				AND attachment_id=? AND attachment_file_hash=?`, append([]any{now, now}, args...)...)
-		case "restore":
-			_, err = tx.ExecContext(ctx, `UPDATE ext_attachment_links SET detached_at=NULL,retired_at=NULL
-				WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=? AND parent_file_hash=?
-				AND attachment_id=? AND attachment_file_hash=?`, args...)
-		default:
-			return ErrAttachmentConflict
+		var previous AttachmentReference
+		if c.RelationID != "" {
+			previous, result.Revision, err = reviewAttachmentTemplate(ctx, tx, c)
+		} else {
+			previous, result.Revision, err = reviewAttachmentLink(ctx, tx, c, now)
 		}
 		if err != nil {
 			return err
@@ -174,8 +217,8 @@ func (db *DB) AttachmentReview(ctx context.Context, c AttachmentReviewEdit) (Att
 		if _, err = tx.ExecContext(ctx, `INSERT INTO ext_business_receipts VALUES(?,?,?,?,?)`, tenant, c.KB, c.Operation, digest, string(saved)); err != nil {
 			return err
 		}
-		audit, _ := json.Marshal(map[string]any{"before": previous.AttachmentReference, "after": c.Reference, "previous_title": c.PreviousTitle, "title": c.NextTitle,
-			"parent_document_id": c.Parent, "parent_file_hash": c.ParentHash, "attachment_file_hash": c.DocumentHash})
+		audit, _ := json.Marshal(map[string]any{"before": previous, "after": c.Reference, "previous_title": c.PreviousTitle, "title": c.NextTitle,
+			"parent_document_id": c.Parent, "parent_file_hash": c.ParentHash, "attachment_file_hash": c.DocumentHash, "relation_id": c.RelationID})
 		if _, err = tx.ExecContext(ctx, `INSERT INTO ext_business_audit(tenant_id,knowledge_base_id,operation_id,actor_id,action,aggregate_id,revision,status,occurred_at,payload_json)
 			VALUES(?,?,?,?,?,?,?,?,?,?)`, tenant, c.KB, c.Operation, c.Actor, "attachment_"+c.Action, c.Document, result.Revision, "applied", now, string(audit)); err != nil {
 			return err

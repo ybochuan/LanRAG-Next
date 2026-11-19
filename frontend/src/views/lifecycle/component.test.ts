@@ -5,17 +5,19 @@ import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as model from './model'
-import { requestFence } from '../lifecycle/model'
+import { httpStatus } from '../business/model'
 
 function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, string> = {}) {
   const scope = vue.effectScope()
+  const route = vue.reactive({ query: routeQuery })
   const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const modules: Record<string, unknown> = {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
-    'vue-router': { useRoute:()=>({query:routeQuery}), useRouter:()=>({}), onBeforeRouteLeave(){}, onBeforeRouteUpdate(){} },
+    'vue-router': { useRoute:()=>route, useRouter:()=>({}), onBeforeRouteLeave(){}, onBeforeRouteUpdate(){} },
     '@/api/business': {},
-    '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }) },
+    '../business/model': { httpStatus },
+    '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [{ id: 'kb', name: '测试库' }] }) },
     '@/api/lifecycle': {
       overview: async () => ({
         counts: {}, total: 0, page: 1, page_size: 20, documents: [],
@@ -30,10 +32,10 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict};`)(
     (id: string) => modules[id], () => ({}), () => 0, () => {}, {}, { activeElement: null, querySelector: () => null }, {},
   ))
-  return { state, stop: () => scope.stop() }
+  return { state, route, stop: () => scope.stop() }
 }
 
 test('late overview response from previous KB cannot replace current data', async () => {
@@ -89,6 +91,68 @@ test('route query seeds the list tab, state and title', () => {
     assert.equal(view.state.tab.value, 'reviews')
     assert.equal(view.state.filter.value, 'active')
     assert.equal(view.state.titleQuery.value, '合同')
+  } finally { view.stop() }
+})
+
+test('same-page navigation and history restore the list tab and filters', async () => {
+  const cleanupLoads: string[] = []
+  const view = mountSetup({ cleanupList: async (kb: string) => { cleanupLoads.push(kb); return { tasks: [] } } }, { kb: 'kb', state: 'active', title: '合同' })
+  try {
+    await view.state.loadKnowledgeBases()
+    await vue.nextTick()
+    const initial = view.route.query
+    view.route.query = { kb: 'kb', tab: 'cleanup' }
+    await vue.nextTick()
+    assert.equal(view.state.tab.value, 'cleanup')
+    assert.equal(view.state.filter.value, '')
+    assert.equal(view.state.titleQuery.value, '')
+    assert.deepEqual(cleanupLoads, ['kb'])
+    view.route.query = initial
+    await vue.nextTick()
+    assert.equal(view.state.tab.value, 'documents')
+    assert.equal(view.state.filter.value, 'active')
+    assert.equal(view.state.titleQuery.value, '合同')
+  } finally { view.stop() }
+})
+
+test('date conflict reload uses a fresh revision and reapplies only the edited dates', async () => {
+  const detailLoads: boolean[] = []
+  const newUntil = '2027-05-01T09:00:00Z'
+  const initial = { revision: 1, labels: {}, effective_until: '2027-04-01T09:00:00Z' }
+  const current = { ...initial, revision: 2, effective_until: newUntil }
+  const detail = (annotations: typeof initial) => ({ snapshot: { annotations }, can_write: true })
+  const revisions: number[] = []
+  const view = mountSetup({
+    documentDetail: async (_kb: string, _id: string, fresh: boolean) => {
+      detailLoads.push(fresh)
+      return detail(fresh ? current : initial)
+    },
+    saveAnnotations: async (_kb: string, _id: string, revision: number, annotations: typeof initial & { review_due: string }) => {
+      revisions.push(revision)
+      if (revision === 1) throw { $httpStatus: 409 }
+      assert.equal(annotations.effective_until, newUntil)
+      assert.equal(model.toLocalInput(annotations.review_due), '2027-01-05T09:30')
+      return detail({ ...annotations, revision: 3 })
+    },
+  })
+  try {
+    const state = view.state
+    state.kb.value = 'kb'
+    await vue.nextTick()
+    await state.openDocument('doc', '合同')
+    state.dateForm.review_due = '2027-01-05T09:30'
+    await state.submitDocument()
+    assert.equal(state.documentConflict.value, true)
+    await state.reloadDocument()
+    assert.deepEqual(detailLoads, [false, true])
+    assert.equal(state.dateForm.effective_until, model.toLocalInput(newUntil))
+    assert.equal(state.dateForm.review_due, '')
+    assert.deepEqual(state.dateConflictDraft.value, { review_due: '2027-01-05T09:30' })
+    await state.submitDocument()
+    assert.deepEqual(revisions, [1])
+    state.applyDateConflictDraft()
+    await state.submitDocument()
+    assert.deepEqual(revisions, [1, 2])
   } finally { view.stop() }
 })
 test('every workspace view has a top-level tab entry', () => {

@@ -25,6 +25,8 @@ func TestConfirmCannotOverrideConcurrentHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	now = now.Add(30 * 24 * time.Hour)
+	s.WithNow(func() time.Time { return now })
 	checkedNative, resume := make(chan struct{}), make(chan struct{})
 	defer func() {
 		select {
@@ -182,7 +184,21 @@ func TestHoldAndConfirmCleanExtensionProjections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := s.Confirm(ctx, Scope{TenantID: testTenant, KnowledgeBaseID: testKB}, second, "actor:1", "op-confirm", task2.Revision)
+	scope := Scope{TenantID: testTenant, KnowledgeBaseID: testKB}
+	due := now.Add(30 * 24 * time.Hour)
+	s.WithNow(func() time.Time { return due.Add(-time.Nanosecond) })
+	if _, err := s.Confirm(ctx, scope, second, "actor:1", "op-confirm", task2.Revision); !errors.Is(err, errRetentionActive) {
+		t.Fatalf("early confirm error=%v", err)
+	}
+	unchanged, err := s.task(ctx, scope, second)
+	if err != nil || unchanged != task2 {
+		t.Fatalf("early confirm changed task: %+v err=%v", unchanged, err)
+	}
+	if _, err := lifecycle.NewStore(db).Current(ctx, lifecycle.Scope{TenantID: testTenant, KnowledgeBaseID: testKB, DocumentID: second}); err != nil {
+		t.Fatalf("early confirm removed lifecycle projection: %v", err)
+	}
+	s.WithNow(func() time.Time { return due })
+	confirmed, err := s.Confirm(ctx, scope, second, "actor:1", "op-confirm", task2.Revision)
 	if err != nil || confirmed.Status != StatusCleaned {
 		t.Fatalf("confirmed=%+v err=%v", confirmed, err)
 	}
@@ -205,5 +221,56 @@ func TestHoldAndConfirmCleanExtensionProjections(t *testing.T) {
 	task2, err = s.task(ctx, Scope{TenantID: testTenant, KnowledgeBaseID: testKB}, second)
 	if err != nil || task2.Status != StatusCleaned {
 		t.Fatalf("cleaned task recreated: %+v err=%v", task2, err)
+	}
+}
+
+func TestShortHoldCannotAdvanceCleanupAndFailureCanRetry(t *testing.T) {
+	db, nativePath, now, notices := fixture(t)
+	s := newService(db, nativePath, now, notices)
+	ctx := context.Background()
+	scope := Scope{TenantID: testTenant, KnowledgeBaseID: testKB}
+	if err := s.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.task(ctx, scope, testDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Hold(ctx, scope, testDoc, 1, "audit", "actor:1", "hold", task.Revision); err != nil {
+		t.Fatal(err)
+	}
+	due := now.Add(30 * 24 * time.Hour)
+	now = now.AddDate(0, 0, 1)
+	s.WithNow(func() time.Time { return now })
+	s.autoConfirm = true
+	if err := s.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.List(ctx, scope, "", 1, 20)
+	if err != nil || len(list.Tasks) != 1 || list.Tasks[0].Status != StatusPending || list.Tasks[0].CanConfirm || list.Tasks[0].RetainedUntil != due.Format(time.RFC3339Nano) {
+		t.Fatalf("released short hold: %+v err=%v", list, err)
+	}
+	// Older workers may have overwritten the due time on hold release, and
+	// may have recorded a failure when attempting a premature confirmation.
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE ext_cleanup_tasks SET cleanup_due_at=?,status=? WHERE document_id=?", now.Format(time.RFC3339Nano), StatusFailed, testDoc)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err = s.task(ctx, scope, testDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Confirm(ctx, scope, testDoc, "actor:1", "early-retry", task.Revision); !errors.Is(err, errRetentionActive) {
+		t.Fatalf("early retry error=%v", err)
+	}
+	now = due
+	list, err = s.List(ctx, scope, "", 1, 20)
+	if err != nil || len(list.Tasks) != 1 || !list.Tasks[0].CanConfirm || list.Tasks[0].Status != StatusFailed {
+		t.Fatalf("due retry: %+v err=%v", list, err)
+	}
+	if result, err := s.Confirm(ctx, scope, testDoc, "actor:1", "retry", task.Revision); err != nil || result.Status != StatusCleaned {
+		t.Fatalf("due retry result=%+v err=%v", result, err)
 	}
 }
