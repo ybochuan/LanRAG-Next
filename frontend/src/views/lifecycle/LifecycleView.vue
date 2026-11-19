@@ -35,14 +35,14 @@
        <div class="section-heading"><div><h2>待清理文档</h2><p>已删除文档默认保留 30 天。到期后可确认清理扩展记录，原生文档和原件仍会保留。</p></div></div>
       <p v-if="cleanupError" class="notice error" role="alert">{{ cleanupError }}</p>
       <p v-if="cleanupBusy" class="loading" role="status">正在加载清理任务…</p>
-      <div v-else class="table-wrap">
+      <div v-else-if="!cleanupError || cleanupItems.length" class="table-wrap">
        <table>
          <thead><tr><th>文档</th><th>删除时间</th><th>保留至</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
          <tr v-for="task in cleanupItems" :key="task.document_id">
           <td>{{ task.title || task.document_id }}</td>
           <td>{{ date(task.native_deleted_at) }}</td>
-           <td>{{ date(task.retained_until || task.hold_until || task.cleanup_due_at) }}</td>
+           <td>{{ date(task.retained_until) }}</td>
            <td><t-tag variant="light" size="small" :theme="cleanupStatusTheme(cleanupDisplayStatus(task))">{{ cleanupStatusLabel(cleanupDisplayStatus(task)) }}</t-tag></td>
           <td class="cleanup-actions">
            <t-button v-if="data?.can_write && (task.status==='pending_cleanup'||task.status==='awaiting_confirmation'||task.status==='failed')" variant="outline" size="small" @click="holdCleanup(task)">保留 90 天</t-button>
@@ -78,10 +78,10 @@
       <template v-else-if="reviewItems.length">
        <div class="review-sort"><span>{{ $t('workbench.reviews.sortLabel') }}</span><t-radio-group v-model="reviewSort" variant="default" size="small"><t-radio-button value="asc">{{ $t('workbench.reviews.asc') }}</t-radio-button><t-radio-button value="desc">{{ $t('workbench.reviews.desc2') }}</t-radio-button></t-radio-group></div>
        <div class="review-list">
-        <div v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" role="button" tabindex="0" @click="openDocument(alert.document_id, alert.title)" @keydown.enter="openDocument(alert.document_id, alert.title)" @keydown.space.prevent="openDocument(alert.document_id, alert.title)">
+        <t-button v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" variant="text" @click="openDocument(alert.document_id, alert.title)">
          <span><strong>{{ alert.title || alert.document_id }}</strong><small>{{ $t('workbench.reviews.due', { date: date(alert.review_due) }) }}</small><small v-if="alert.delivered_at">{{ $t('workbench.reviews.delivered', { date: date(alert.delivered_at) }) }}</small></span>
          <t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state) }}</t-tag>
-        </div>
+        </t-button>
        </div>
       </template>
       <p v-else-if="!reviewError" class="empty">{{ $t('workbench.reviews.empty') }}</p>
@@ -109,7 +109,7 @@
      <template v-if="detailTab==='life'">
       <h3>有效期与复核</h3>
       <p class="source-note">时间按本机时区显示（{{ timezone }}），保存为 UTC。清空日期不会恢复已失效文档。</p>
-       <t-alert v-if="dateConflictDraft && !documentConflict" theme="warning" class="notice">
+       <t-alert v-if="dateConflictDraft && !documentConflict" theme="warning" class="notice" role="status">
         <p>下方表单已载入最新日期。你上次修改的日期仍在草稿中。</p>
         <ul><li v-for="field in dateFields" v-show="dateConflictDraft[field.key] !== undefined" :key="field.key">{{ field.label }}：{{ dateConflictDraft[field.key]?.replace('T',' ') || '未设置' }}</li></ul>
         <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" variant="outline" size="small" @click="applyDateConflictDraft">填回我的修改</t-button>
@@ -117,11 +117,11 @@
        </t-alert>
       <form @submit.prevent="submitDocument">
        <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">此附件的生效/失效时间继承主件，请到主件编辑日期。</p>
-       <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
-       <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
-       <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="!detailCanWrite || detailLocked || !!detail.snapshot.attachment_parent_document_id" clearable /></label>
+       <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
+       <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
+       <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
        <t-alert v-if="documentSuccess" theme="success" class="notice" role="status">{{ documentSuccess }}</t-alert>
-        <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="documentConflict || !!dateConflictDraft">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
+        <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="dateEditingLocked">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
       </form>
      </template>
      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
@@ -231,7 +231,10 @@ function sortDocuments(key:DocumentSortKey){
 const sortMark=(key:DocumentSortKey)=>sortKey.value===key?(sortDirection.value===1?' ↑':' ↓'):' ↕'
 const reviewItems=ref<api.ReviewAlert[]>([]),reviewError=ref(''),reviewBusy=ref(false),reviewsTruncated=ref(false),reviewsLoaded=ref(false)
 const cleanupItems=ref<api.CleanupTask[]>([]),cleanupError=ref(''),cleanupBusy=ref(false)
-const cleanupDisplayStatus=(task:api.CleanupTask)=>task.status==='pending_cleanup' && task.can_confirm?'awaiting_confirmation':task.status
+const cleanupDisplayStatus=(task:api.CleanupTask)=>{
+ if(task.status==='pending_cleanup'||task.status==='awaiting_confirmation')return task.can_confirm?'awaiting_confirmation':'pending_cleanup'
+ return task.status
+}
 const cleanupStatusLabel=(status:string)=>({pending_cleanup:'保留中',awaiting_confirmation:'待确认清理',held:'已保留',failed:'清理失败',cleaned:'已清理',cancelled:'已恢复'} as Record<string,string>)[status]||status
 const cleanupStatusTheme=(status:string)=>({pending_cleanup:'warning',awaiting_confirmation:'danger',held:'default',failed:'danger',cleaned:'success',cancelled:'default'} as Record<string,string>)[status]||'default'
 const cleanupBanner=computed(()=>{const c=data.value?.cleanup;return c?.total?`待清理队列中有 ${c.total} 份已删除文档。`:''})
@@ -261,6 +264,7 @@ const governanceAction=(action:string)=>governanceActions[action]||actionLabels[
 const dateForm=reactive({effective_from:'',effective_until:'',review_due:''})
 const dateFields=[{key:'effective_from',label:'生效时间'},{key:'effective_until',label:'失效时间'},{key:'review_due',label:'复核时间'}] as const
 const dateConflictDraft=ref<Partial<typeof dateForm>>()
+const dateEditingLocked=computed(()=>!detailCanWrite.value||detailLocked.value||documentConflict.value||!!dateConflictDraft.value||!!detail.value?.snapshot.attachment_parent_document_id)
 // Short-lived detail cache: flipping between drawer tabs or reopening the same
 // document within the window reuses the snapshot instead of refetching it.
 const DETAIL_TTL_MS=30_000
@@ -332,7 +336,17 @@ async function loadOverview(){
 }catch(e){if(listFence.current(token)){data.value=undefined;allDocuments.value=[];error.value=errorMessage(e)}}finally{if(listFence.current(token))busy.value=false}
 }
 async function loadReviews(){const token=reviewFence.begin(),scope=kb.value;if(!scope)return;reviewBusy.value=true;reviewError.value='';reviewItems.value=[];try{const result=await api.reviews(scope);if(reviewFence.current(token)){reviewItems.value=result.alerts||[];reviewsTruncated.value=result.truncated;reviewsLoaded.value=true}}catch(e){if(reviewFence.current(token))reviewError.value=errorMessage(e)}finally{if(reviewFence.current(token))reviewBusy.value=false}}
-async function loadCleanup(){const token=cleanupFence.begin(),scope=kb.value;if(!scope)return;cleanupBusy.value=true;cleanupError.value='';try{const result=await api.cleanupList(scope,1,100,'');if(cleanupFence.current(token))cleanupItems.value=result.tasks||[]}catch(e){if(cleanupFence.current(token))cleanupError.value=errorMessage(e)}finally{if(cleanupFence.current(token))cleanupBusy.value=false}}
+async function loadCleanup(){
+ const token=cleanupFence.begin(),scope=kb.value
+ if(!scope)return
+ cleanupBusy.value=true;cleanupError.value=''
+ try{
+  const result=await api.cleanupList(scope,1,100,'')
+  if(cleanupFence.current(token))cleanupItems.value=result.tasks||[]
+ }catch(e){
+  if(cleanupFence.current(token)){cleanupItems.value=[];cleanupError.value=errorMessage(e)}
+ }finally{if(cleanupFence.current(token))cleanupBusy.value=false}
+}
 async function holdCleanup(task:api.CleanupTask){if(!data.value?.can_write)return;try{await api.holdCleanup(kb.value,task.document_id,task.revision,90,'用户保留','hold-'+task.document_id+'-'+task.revision);await loadCleanup();await loadOverview()}catch(e){cleanupError.value=errorMessage(e)}}
 async function confirmCleanup(task:api.CleanupTask){
  const scope=kb.value
@@ -342,8 +356,9 @@ async function confirmCleanup(task:api.CleanupTask){
   if(kb.value===scope){await loadCleanup();if(kb.value===scope)await loadOverview()}
  }catch(e){
   if(kb.value!==scope)return
-  if(httpStatus(e)===409)await loadCleanup()
-  if(kb.value===scope)cleanupError.value=httpStatus(e)===409?'清理条件已变化或当前记录仍有关联，请核对任务状态和保留期限。':errorMessage(e)
+  // A failed request may still have advanced the task revision or completed cleanup.
+  await loadCleanup()
+  if(kb.value===scope&&!cleanupError.value)cleanupError.value=httpStatus(e)===409?'清理条件已变化或当前记录仍有关联，请核对任务状态和保留期限。':'清理请求失败。请查看刷新后的任务状态，再决定是否重试。'
  }
 }
 function loadAll(){if(!kb.value){void loadKnowledgeBases();return}ruleError.value='';ruleSuccess.value=false;void loadOverview();if(tab.value==='reviews')void loadReviews();if(tab.value==='cleanup')void loadCleanup()}
@@ -410,7 +425,7 @@ function applyDateConflictDraft(){
  dateConflictDraft.value=undefined
 }
 async function submitDocument(){
- if(!detail.value||!detailCanWrite.value||detailLocked.value||documentConflict.value||dateConflictDraft.value)return
+ if(!detail.value||dateEditingLocked.value)return
  const token=detailFence.begin(),scope=selectedKB.value,id=selectedID.value,original=detail.value.snapshot.annotations
  savingDocument.value=true;detailError.value='';documentSuccess.value=''
  try{
@@ -792,14 +807,22 @@ form label {
 }
 .review-item {
   width:100%;
+  height:auto;
+  padding-block:var(--td-comp-paddingTB-m);
+  border-bottom:1px solid var(--td-component-stroke);
+  color:inherit;
+  white-space:normal;
+  text-align:left;
+}
+.review-item:hover {
+  color:var(--td-brand-color);
+  background:transparent;
+}
+.review-item :deep(.t-button__text) {
+  width:100%;
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:16px 0;
-  border-bottom:1px solid var(--td-component-stroke);
-  background:transparent;
-  color:inherit;
-  text-align:left;
   gap:16px;
 }
 .review-item strong {

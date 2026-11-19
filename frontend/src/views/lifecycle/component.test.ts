@@ -32,7 +32,7 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup};`)(
     (id: string) => modules[id], () => ({}), () => 0, () => {}, {}, { activeElement: null, querySelector: () => null }, {},
   ))
   return { state, route, stop: () => scope.stop() }
@@ -112,6 +112,31 @@ test('same-page navigation and history restore the list tab and filters', async 
     assert.equal(view.state.tab.value, 'documents')
     assert.equal(view.state.filter.value, 'active')
     assert.equal(view.state.titleQuery.value, '合同')
+  } finally { view.stop() }
+})
+
+test('a failed cleanup refreshes the task so a retry uses the latest revision', async () => {
+  let task = { knowledge_base_id: 'kb', document_id: 'doc', revision: 4, status: 'awaiting_confirmation', can_confirm: true }
+  const revisions: number[] = []
+  const view = mountSetup({
+    cleanupList: async () => ({ tasks: [task] }),
+    confirmCleanup: async (_kb: string, _id: string, revision: number) => {
+      revisions.push(revision)
+      if (revision === 4) {
+        task = { ...task, revision: 5, status: 'failed' }
+        throw { $httpStatus: 503 }
+      }
+    },
+  })
+  try {
+    const state = view.state
+    await state.loadKnowledgeBases()
+    await vue.nextTick()
+    await state.loadCleanup()
+    await state.confirmCleanup(state.cleanupItems.value[0])
+    assert.equal(state.cleanupItems.value[0]?.status, 'failed')
+    await state.confirmCleanup(state.cleanupItems.value[0])
+    assert.deepEqual(revisions, [4, 5])
   } finally { view.stop() }
 })
 
