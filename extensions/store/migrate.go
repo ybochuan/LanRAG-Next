@@ -115,8 +115,17 @@ var attachmentWorkbenchMigration string
 //go:embed migrations/037_attachment_template_reference.sql
 var attachmentTemplateReferenceMigration string
 
+//go:embed migrations/038_reading_relations.sql
+var readingRelationsMigration string
+
+//go:embed migrations/039_answer_feedback.sql
+var answerFeedbackMigration string
+
+//go:embed migrations/040_annotation_checks.sql
+var annotationChecksMigration string
+
 // LatestSchemaVersion is the last published migration supported by this Host.
-const LatestSchemaVersion = 37
+const LatestSchemaVersion = 40
 
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
@@ -435,6 +444,30 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(37)"); err != nil {
+				return err
+			}
+		}
+		if version < 38 {
+			if _, err := tx.ExecContext(ctx, readingRelationsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(38)"); err != nil {
+				return err
+			}
+		}
+		if version < 39 {
+			if _, err := tx.ExecContext(ctx, answerFeedbackMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(39)"); err != nil {
+				return err
+			}
+		}
+		if version < 40 {
+			if _, err := tx.ExecContext(ctx, annotationChecksMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(40)"); err != nil {
 				return err
 			}
 		}

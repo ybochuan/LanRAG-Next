@@ -100,11 +100,14 @@ def main():
     parser.add_argument("--expected-tables", type=int, default=4)
     parser.add_argument("--governance", action="store_true", help="Verify RAG/Agent links and click-time parent lifecycle enforcement")
     parser.add_argument("--cleanup", action="store_true", help="Also verify managed attachment deletion and restart recovery")
+    parser.add_argument("--delete-kb", action="store_true", help="Also delete the isolated knowledge base and verify attachment reclamation")
     parser.add_argument("--release-relations", action="store_true", help="Verify schema upgrade, native reparse and relationship release gates")
     args = parser.parse_args()
     if args.release_relations and args.sample:
         parser.error("--release-relations requires synthetic input")
-    args.cleanup = args.cleanup or args.release_relations
+    if args.delete_kb and args.release_relations:
+        parser.error("--delete-kb and --release-relations use different final states")
+    args.cleanup = args.cleanup or args.release_relations or args.delete_kb
     args.governance = args.governance or args.cleanup
     raw, count, tables = synthetic_docx() if args.sample is None else (args.sample.read_bytes(), args.expected_annexes, args.expected_tables)
     source_hash = hashlib.sha256(raw).digest()
@@ -386,7 +389,7 @@ def main():
             def removed(doc):
                 row = native_row(doc)
                 return row is not None and bool(row[0])
-            def cleaned(owner, ids):
+            def cleaned(owner, ids, *, kb_deleted=False):
                 with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
                     done = {r[0] for r in db.execute(
                         "SELECT attachment_id FROM ext_attachment_links WHERE parent_document_id=? AND removed_at IS NOT NULL",
@@ -400,7 +403,7 @@ def main():
                             raise RuntimeError("native delete left live chunks")
                         if db.execute("SELECT COUNT(*) FROM lite_embeddings WHERE knowledge_id=?", (doc,)).fetchone()[0]:
                             raise RuntimeError("native delete left indexed embeddings")
-                return not documents()
+                return kb_deleted or not documents()
 
             http.api("DELETE", "/knowledge/" + parent)
             startup.until(lambda: "[Bridge] attachment delete intent unavailable; native deletion deferred" in core_log.read_text(errors="replace"), 20)
@@ -443,6 +446,41 @@ def main():
                     http.api("DELETE", "/knowledge-bases/" + kb["id"] + "/knowledge")
                 startup.until(lambda: removed(current) and cleaned(current, current_children), 45)
                 emit(f"[DELETE-{mode.upper()}] PASS: native list, live chunks, and embeddings contain no orphan attachments")
+            if args.delete_kb:
+                current = upload_parent()
+                startup.until(completed, 90)
+                targets = {d["id"] for d in documents()}
+                current_children = targets - {current}
+                if current not in targets or len(current_children) != count:
+                    raise RuntimeError("whole-KB deletion fixture incomplete")
+
+                def kb_removed():
+                    with sqlite3.connect((work / "core.db").as_uri() + "?mode=ro", uri=True) as db:
+                        row = db.execute("SELECT deleted_at FROM knowledge_bases WHERE id=?", (kb["id"],)).fetchone()
+                    return row is not None and bool(row[0])
+
+                def reclaimed():
+                    with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
+                        done = {row[0] for row in db.execute(
+                            "SELECT document_id FROM ext_attachment_reclaims WHERE knowledge_base_id=? "
+                            "AND indexes_cleared=1 AND status IN ('removed','shared')",
+                            (kb["id"],),
+                        )}
+                    return targets <= done
+
+                kb_path = "/knowledge-bases/" + kb["id"]
+                helpers.stop_owned(host)
+                host = None
+                status, _ = http.call("DELETE", http.base_url + "/api/v1" + kb_path)
+                if status < 400 or kb_removed() or any(removed(doc) for doc in targets):
+                    raise RuntimeError("offline Host did not block whole-KB deletion before mutation")
+                emit("[KB-DELETE-OFFLINE] PASS: the request left the knowledge base and its files live")
+
+                host = start_host()
+                http.api("DELETE", kb_path)
+                startup.until(lambda: kb_removed() and removed(current)
+                              and cleaned(current, current_children, kb_deleted=True) and reclaimed(), 60)
+                emit("[KB-DELETE] PASS: attachment links retired, native chunks and embeddings cleared, and file reclamation resolved")
         if args.release_relations:
             rel04_checks.run(http, kb, work, raw, synthetic_docx(revised=True)[0], ask, emit)
         if args.sample and hashlib.sha256(args.sample.read_bytes()).digest() != source_hash:

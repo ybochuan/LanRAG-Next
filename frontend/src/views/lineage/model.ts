@@ -11,7 +11,7 @@ export const edgeLabels: Record<string, string> = {
   supplements: '补充', amends: '修订', interprets: '解释', related_to: '相关', attachment_of: '归属主件',
   cites: '引用依据', implements: '实施细则', template_for: '独立模板', repeals: '废止',
   exception_to: '条款例外', conflicts_with: '条款冲突',
-  rendition_of: '转换自',
+  rendition_of: '转换自', explains_more: '补充说明', reading_note: '内容提示',
 }
 export const typeLabels: Record<string, string> = {
   document_version: '文档版本', chunk: '分块', parser_artifact: '解析产物', chunk_revision: '分块修订',

@@ -59,6 +59,8 @@ const props = defineProps<{
   fileType: string;
   fileName: string;
   active: boolean;
+  /** Leave focus with the host when an inline preview loads. */
+  disableAutoFocus?: boolean;
   fillHeight?: boolean;
   /** Place preview actions beside the host header's download button. */
   toolbarTarget?: HTMLElement | null;
@@ -127,33 +129,45 @@ function focusPreviewContent() {
   target.focus({ preventScroll: true });
 }
 
+async function focusPreviewAfterUpdate() {
+  if (!props.active) return;
+  const previousFocus = document.activeElement;
+  await nextTick();
+  // Do not override a user who moved to another control while rendering.
+  if (document.activeElement !== previousFocus && document.activeElement !== document.body) return;
+  focusPreviewContent();
+}
+
 watch(
-  () => [props.active, previewRoot.value, getPreviewSourceKey(), props.sourceBlob, htmlViewMode.value, isFullscreen.value],
-  async () => {
-    if (!props.active) return;
-    const previousFocus = document.activeElement;
-    await nextTick();
-    // Do not override a user who moved to another control while rendering.
-    if (document.activeElement !== previousFocus && document.activeElement !== document.body) return;
-    focusPreviewContent();
+  () => [props.active, previewRoot.value, getPreviewSourceKey(), props.sourceBlob, htmlViewMode.value],
+  () => {
+    if (!props.disableAutoFocus) return focusPreviewAfterUpdate();
   },
   { flush: 'post' },
 );
 
+watch(isFullscreen, focusPreviewAfterUpdate, { flush: 'post' });
+
 watch(
   () => [previewContent.value, docxContainer.value],
   () => {
-    // While downloading, focus rests on the preview root. Transfer it only
-    // if it is still there when the content arrives (never steal input focus).
+    if (props.disableAutoFocus && !isFullscreen.value) return;
+    // Transfer focus from the loading root only while it still owns focus.
     if (document.activeElement === previewRoot.value) focusPreviewContent();
   },
   { flush: 'post' },
 );
 
 function onPreviewFrameLoad() {
+  if (props.disableAutoFocus && !isFullscreen.value) return;
   if (document.activeElement === previewContent.value || document.activeElement === previewRoot.value) {
     focusPreviewContent();
   }
+}
+
+function toggleHtmlViewMode() {
+  htmlViewMode.value = htmlViewMode.value === 'render' ? 'source' : 'render';
+  if (props.disableAutoFocus) void focusPreviewAfterUpdate();
 }
 
 function toggleFullscreen() {
@@ -884,7 +898,7 @@ onUnmounted(() => {
             theme="default" variant="text" size="small" shape="square"
             :title="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
             :aria-label="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
-            @click="htmlViewMode = htmlViewMode === 'render' ? 'source' : 'render'"
+            @click="toggleHtmlViewMode"
           >
             <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
           </t-button>

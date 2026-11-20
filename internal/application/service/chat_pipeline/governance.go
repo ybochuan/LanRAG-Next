@@ -65,44 +65,50 @@ func isGovernanceWebResult(r *types.SearchResult) bool {
 	return r.MatchType == types.MatchTypeWebSearch || r.ChunkType == string(types.ChunkTypeWebSearch)
 }
 
-// sourceInputsForModel describes the fields actually rendered by this pipeline.
-// Unsupported composition remains unattributed; citations never fill the gaps.
+// sourceInputsForModel fingerprints the native fields in the provider's rows.
+// The legacy merged passage is replaced by separately rendered source bodies.
 func sourceInputsForModel(cm *types.ChatManage) ([]extensionbridge.SourceInput, bool) {
-	// A configured rerank model is deliberately NOT a reason to give up: rerank
-	// only selects and reorders candidates, it never rewrites the bytes that are
-	// rendered. The rendered context comes from MergeResult, and each entry is
-	// still checked below for a native chunk ID and unmodified content. A query
-	// rewrite (EnableRewrite) stays refused because the rewritten query is model
-	// output, not a native field.
-	if len(cm.History) != 0 || cm.MemoryPrompt != "" || len(cm.Images) != 0 || len(cm.ContextImages) != 0 || cm.ImageDescription != "" || len(cm.Attachments) != 0 || cm.QuotedContext != "" || cm.DataAnalysisEnabled || cm.EnableRewrite {
+	if len(cm.History) != 0 || cm.MemoryPrompt != "" || len(cm.Images) != 0 || len(cm.ContextImages) != 0 || cm.ImageDescription != "" || len(cm.Attachments) != 0 || cm.QuotedContext != "" || cm.DataAnalysisEnabled {
 		return nil, false
 	}
 	if !cm.NeedsRetrieval() {
-		return nil, true
+		return nil, len(cm.MergeResult) == 0
+	}
+	for _, r := range cm.MergeResult {
+		if !plainModelSource(r) || r.ContentRewritten && len(r.CitationSources) == 0 {
+			return nil, false
+		}
 	}
 	var inputs []extensionbridge.SourceInput
 	seen := map[string]bool{}
-	for _, r := range cm.MergeResult {
-		if r == nil || isGovernanceWebResult(r) || r.ContentRewritten || r.ImageInfo != "" || r.ChunkType == string(types.ChunkTypeFAQ) || r.KnowledgeID == "" || r.ID == "" || r.KnowledgeCustomMetadata != "" {
+	for _, r := range pipelineModelRows(cm) {
+		if !plainModelSource(r) || r.ContentRewritten || r.Content == "" {
 			return nil, false
 		}
-		inputs = append(inputs, extensionbridge.SourceInput{DocumentID: r.KnowledgeID, ChunkID: r.ID, Field: "content", ValueHash: extensionbridge.SourceFieldHash(r.Content)})
+		inputs = append(inputs,
+			extensionbridge.SourceInput{DocumentID: r.KnowledgeID, ChunkID: r.ID, Field: "content", ValueHash: extensionbridge.SourceFieldHash(r.Content)},
+			extensionbridge.SourceInput{DocumentID: r.KnowledgeID, ChunkID: r.ID, Field: "content_revision", ValueHash: extensionbridge.SourceFieldHash(r.ContentRevision)},
+		)
 		if seen[r.KnowledgeID] {
 			continue
 		}
 		seen[r.KnowledgeID] = true
-		title, field := r.KnowledgeTitle, "title"
-		if title == "" {
-			title, field = r.KnowledgeFilename, "file_name"
+		title, field := firstPipelineTitle(r), "title"
+		if r.KnowledgeTitle == "" {
+			field = "file_name"
 		}
 		if title != "" {
 			inputs = append(inputs, extensionbridge.SourceInput{DocumentID: r.KnowledgeID, Field: field, ValueHash: extensionbridge.SourceFieldHash(title)})
-			if r.KnowledgeDescription != "" {
-				inputs = append(inputs, extensionbridge.SourceInput{DocumentID: r.KnowledgeID, Field: "description", ValueHash: extensionbridge.SourceFieldHash(r.KnowledgeDescription)})
-			}
 		}
 	}
 	return inputs, true
+}
+
+func plainModelSource(r *types.SearchResult) bool {
+	return r != nil && r.ID != "" && r.KnowledgeID != "" && r.KnowledgeBaseID != "" &&
+		!isGovernanceWebResult(r) && !isPipelineWebReference(r) && r.MatchType != types.MatchTypeGraph &&
+		(r.ChunkType == "" || r.ChunkType == string(types.ChunkTypeText)) &&
+		r.ParentChunkID == "" && r.ImageInfo == "" && r.KnowledgeCustomMetadata == ""
 }
 
 func finishSourceModelRun(ctx context.Context, call *extensionbridge.SourceCall, success bool) {

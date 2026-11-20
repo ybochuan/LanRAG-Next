@@ -1113,6 +1113,7 @@ func (e *AgentEngine) appendToolResults(
 			Name:       toolCall.Name,
 		}
 
+		e.searchOutputs.bind(toolCall, toolMsg)
 		messages = append(messages, toolMsg)
 	}
 

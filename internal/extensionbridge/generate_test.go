@@ -18,7 +18,7 @@ func TestGuidanceIsEphemeralBoundToActualRequestAndFailsOpen(t *testing.T) {
 	t.Cleanup(func() { sourceHTTPClient = original })
 	h := SourceRunHandle{Scope: SourceScope{TenantID: 7, KnowledgeBaseID: "kb"}, RunID: "run", Capability: strings.Repeat("b", 64)}
 	ctx := context.WithValue(context.Background(), sourceRunKey{}, h)
-	for _, mode := range []string{"valid", "unattributed", "503", "timeout", "scope", "oversize", "duplicate"} {
+	for _, mode := range []string{"valid", "unattributed", "503", "timeout", "scope", "oversize", "duplicate", "annotation", "mixed", "bad-annotation"} {
 		t.Run(mode, func(t *testing.T) {
 			sourceHTTPClient = &http.Client{Timeout: 500 * time.Millisecond, Transport: provenanceRoundTrip(func(req *http.Request) (*http.Response, error) {
 				var q sourceRequest
@@ -50,7 +50,23 @@ func TestGuidanceIsEphemeralBoundToActualRequestAndFailsOpen(t *testing.T) {
 					if mode == "duplicate" {
 						items = append(items, items[0])
 					}
-					data = map[string]any{"step_id": q.Guidance.StepID, "call_id": q.Guidance.CallID, "content": text, "items": items, "units": len(text) + 16}
+					payload := map[string]any{"step_id": q.Guidance.StepID, "call_id": q.Guidance.CallID, "content": text, "items": items, "units": len(text) + 16}
+					if mode == "annotation" || mode == "mixed" || mode == "bad-annotation" {
+						const annotation = "APPROVED_CORRECTION"
+						units := len(annotation) + 16
+						if mode == "mixed" {
+							units += len(text) + 16
+						} else {
+							payload["content"] = ""
+						}
+						if mode == "bad-annotation" {
+							units++
+						}
+						payload["annotation_content"] = annotation
+						payload["annotation_policy"] = "Use the approved factual correction when applicable."
+						payload["units"] = units
+					}
+					data = payload
 				}
 				body, _ := json.Marshal(map[string]any{"success": true, "request_id": q.RequestID, "scope": scope, "data": data})
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
@@ -68,8 +84,16 @@ func TestGuidanceIsEphemeralBoundToActualRequestAndFailsOpen(t *testing.T) {
 				t.Fatal("original prompt mutated")
 			}
 			want := 2
-			if mode == "valid" || mode == "unattributed" {
+			if mode == "valid" || mode == "unattributed" || mode == "mixed" {
 				want = 3
+			}
+			system := actual[0].Content
+			if mode == "annotation" || mode == "mixed" {
+				if !strings.HasPrefix(system, "CACHED_PREFIX\n\n") || !strings.Contains(system, "APPROVED_CORRECTION") || !strings.Contains(system, "Use the approved factual correction when applicable.") || actual[1].Role != messages[1].Role || actual[1].Content != messages[1].Content {
+					t.Fatalf("model did not get scoped instruction in initial system turn: %#v", actual)
+				}
+			} else if system != "CACHED_PREFIX" {
+				t.Fatalf("mode=%s modified system context: %q", mode, system)
 			}
 			if len(actual) != want {
 				t.Fatalf("mode=%s messages=%v", mode, actual)

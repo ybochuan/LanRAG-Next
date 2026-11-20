@@ -615,6 +615,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	})
 
 	var result *types.ToolResult
+	var searchOutput extensionbridge.ConsumedToolOutput
 	var err error
 	if len(tc.UnresolvedHandles) > 0 && !webFetchValidatesReferences(tc) {
 		// A temporary handle is not an application identity. Fail before tool
@@ -637,7 +638,13 @@ func (e *AgentEngine) runToolCallAnswered(
 			if err != nil || result == nil || !result.Success {
 				outcome = "error"
 			}
-			if sourceCall.Finish(outcome) != nil {
+			var finishErr error
+			if outcome == "success" && tc.Function.Name == agenttools.ToolSearchKnowledge && target == nil {
+				searchOutput, finishErr = sourceCall.FinishAgentSearch(tc.ID)
+			} else {
+				finishErr = sourceCall.Finish(outcome)
+			}
+			if finishErr != nil {
 				logger.Warn(ctx, "[Bridge] tool provenance unacknowledged; run cannot seal")
 			}
 		}
@@ -647,6 +654,7 @@ func (e *AgentEngine) runToolCallAnswered(
 		}
 		if err == nil {
 			e.describeToolImages(toolCtx, result)
+			e.searchOutputs.record(ctx, searchOutput, result)
 		}
 	}
 	duration := time.Since(toolCallStartTime).Milliseconds()

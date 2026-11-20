@@ -60,7 +60,8 @@ type Task struct {
 	NativeDeletedAt string `json:"native_deleted_at,omitempty"`
 	FirstObservedAt string `json:"first_observed_at"`
 	CleanupDueAt    string `json:"cleanup_due_at"`
-	Status          string `json:"status"`
+	Status          string `json:"status"` // Persisted state, retained for existing clients.
+	EffectiveStatus string `json:"effective_status"`
 	HoldUntil       string `json:"hold_until,omitempty"`
 	HoldReason      string `json:"hold_reason,omitempty"`
 	RetainedUntil   string `json:"retained_until,omitempty"`
@@ -99,21 +100,47 @@ func (t Task) confirmableStatus() bool {
 	return t.Status == StatusPending || t.Status == StatusAwaiting || t.Status == StatusFailed
 }
 
+// projectTask derives the workbench status without changing the stored state.
+func (s *Service) projectTask(t *Task, now time.Time) (time.Time, bool) {
+	deadline, hasDeadline := s.retentionDeadline(*t)
+	t.EffectiveStatus = t.Status
+	if hasDeadline {
+		t.RetainedUntil = deadline.UTC().Format(time.RFC3339Nano)
+		t.CanConfirm = t.confirmableStatus() && !now.Before(deadline)
+	}
+	if t.Status == StatusPending || t.Status == StatusAwaiting {
+		t.EffectiveStatus = StatusPending
+		if t.CanConfirm {
+			t.EffectiveStatus = StatusAwaiting
+		}
+	}
+	return deadline, hasDeadline
+}
+
+func (t Task) matchesStatus(state string) bool {
+	if state != "" {
+		return t.EffectiveStatus == state
+	}
+	return t.EffectiveStatus != StatusCleaned && t.EffectiveStatus != StatusCancelled
+}
+
 // Summary is returned with the workbench overview for the top banner.
 type Summary struct {
-	Total    int `json:"total"`
-	Pending  int `json:"pending"`
-	Awaiting int `json:"awaiting"`
-	Held     int `json:"held"`
-	Failed   int `json:"failed"`
-	DueSoon  int `json:"due_soon"`
+	Total      int `json:"total"`
+	Pending    int `json:"pending"`
+	Awaiting   int `json:"awaiting"`
+	Held       int `json:"held"`
+	Failed     int `json:"failed"`
+	DueSoon    int `json:"due_soon"`
+	Actionable int `json:"actionable"` // Tasks eligible for confirmation or retry.
 }
 
 // ListResult is the workbench cleanup tab payload.
 type ListResult struct {
-	Tasks  []Task         `json:"tasks"`
-	Total  int            `json:"total"`
-	Counts map[string]int `json:"counts"`
+	Tasks      []Task         `json:"tasks"`
+	Total      int            `json:"total"`      // Tasks matching the filter, before pagination.
+	Counts     map[string]int `json:"counts"`     // Effective status counts for the whole scope.
+	Actionable int            `json:"actionable"` // Tasks eligible for confirmation or retry in the whole scope.
 }
 
 // Notice is delivered to the native notification bell by the Host adapter.
@@ -222,6 +249,15 @@ func (s *Service) task(ctx context.Context, scope Scope, id string) (Task, error
 		return Task{}, ErrConflict
 	}
 	return out, err
+}
+
+func (s *Service) taskResult(ctx context.Context, scope Scope, id string) (Task, error) {
+	t, err := s.task(ctx, scope, id)
+	if err != nil {
+		return Task{}, err
+	}
+	s.projectTask(&t, s.now().UTC())
+	return t, nil
 }
 
 func (s *Service) insertTaskTx(ctx context.Context, tx *sql.Tx, row nativeRow, now time.Time) error {
@@ -490,63 +526,13 @@ func (s *Service) sendNotice(ctx context.Context, scope Scope, stage string, cou
 	return nil
 }
 
-// List returns one bounded page of cleanup tasks.
+// List returns one bounded page after applying the effective status filter.
 func (s *Service) List(ctx context.Context, scope Scope, state string, page, pageSize int) (ListResult, error) {
 	if !s.validScope(scope) || page < 1 || page > 100000 || pageSize < 1 || pageSize > 100 || state != "" && !validStatus(state) {
 		return ListResult{}, ErrScope
 	}
-	out := ListResult{Tasks: []Task{}, Counts: map[string]int{}}
-	now := s.now().UTC()
-	where := "tenant_id=? AND knowledge_base_id=?"
-	args := []any{strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID}
-	if state != "" {
-		where += " AND status=?"
-		args = append(args, state)
-	} else {
-		where += " AND status IN (?,?,?,?)"
-		args = append(args, StatusPending, StatusAwaiting, StatusHeld, StatusFailed)
-	}
-	err := s.db.View(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM ext_cleanup_tasks WHERE "+where, args...).Scan(&out.Total); err != nil {
-			return err
-		}
-		rows, err := tx.QueryContext(ctx, taskSelect()+" WHERE "+where+" ORDER BY cleanup_due_at,document_id LIMIT ? OFFSET ?", append(args, pageSize, (page-1)*pageSize)...)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			t, err := scanTask(rows)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			if deadline, ok := s.retentionDeadline(t); ok {
-				t.RetainedUntil = deadline.UTC().Format(time.RFC3339Nano)
-				t.CanConfirm = t.confirmableStatus() && !now.Before(deadline)
-			}
-			out.Tasks = append(out.Tasks, t)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-		countRows, err := tx.QueryContext(ctx, `SELECT status,count(*) FROM ext_cleanup_tasks WHERE tenant_id=? AND knowledge_base_id=? GROUP BY status`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID)
-		if err != nil {
-			return err
-		}
-		defer countRows.Close()
-		for countRows.Next() {
-			var status string
-			var n int
-			if err := countRows.Scan(&status, &n); err != nil {
-				return err
-			}
-			out.Counts[status] = n
-		}
-		return countRows.Err()
-	})
-	return out, err
+	list, _, err := s.readQueue(ctx, scope, state, (page-1)*pageSize, pageSize)
+	return list, err
 }
 
 // Summary returns counts for the workbench banner.
@@ -554,39 +540,58 @@ func (s *Service) Summary(ctx context.Context, scope Scope) (Summary, error) {
 	if !s.validScope(scope) {
 		return Summary{}, ErrScope
 	}
-	var out Summary
+	_, summary, err := s.readQueue(ctx, scope, "", 0, 0)
+	return summary, err
+}
+
+// readQueue uses one clock reading and one database snapshot for the page and
+// counts. Only matching page rows are retained in memory. Comparing parsed
+// times keeps the same deadline precision as the confirmation guard.
+func (s *Service) readQueue(ctx context.Context, scope Scope, state string, offset, limit int) (ListResult, Summary, error) {
+	list := ListResult{Tasks: []Task{}, Counts: map[string]int{}}
+	var summary Summary
+	now := s.now().UTC()
+	soon := now.AddDate(0, 0, 7)
+	query := taskSelect() + " WHERE tenant_id=? AND knowledge_base_id=?"
+	if limit > 0 {
+		query += " ORDER BY cleanup_due_at,document_id"
+	}
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT status,count(*) FROM ext_cleanup_tasks WHERE tenant_id=? AND knowledge_base_id=? GROUP BY status`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID)
+		rows, err := tx.QueryContext(ctx, query, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID)
 		if err != nil {
 			return err
 		}
+		defer rows.Close()
 		for rows.Next() {
-			var status string
-			var n int
-			if err := rows.Scan(&status, &n); err != nil {
-				rows.Close()
+			t, err := scanTask(rows)
+			if err != nil {
 				return err
 			}
-			switch status {
-			case StatusPending:
-				out.Pending += n
-			case StatusAwaiting:
-				out.Awaiting += n
-			case StatusHeld:
-				out.Held += n
-			case StatusFailed:
-				out.Failed += n
+			deadline, hasDeadline := s.projectTask(&t, now)
+			list.Counts[t.EffectiveStatus]++
+			if t.CanConfirm {
+				list.Actionable++
 			}
+			if t.EffectiveStatus == StatusPending && hasDeadline && !soon.Before(deadline) {
+				summary.DueSoon++
+			}
+			if limit == 0 || !t.matchesStatus(state) {
+				continue
+			}
+			if list.Total >= offset && len(list.Tasks) < limit {
+				list.Tasks = append(list.Tasks, t)
+			}
+			list.Total++
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-		out.Total = out.Pending + out.Awaiting + out.Held + out.Failed
-		return tx.QueryRowContext(ctx, `SELECT count(*) FROM ext_cleanup_tasks WHERE tenant_id=? AND knowledge_base_id=? AND status=? AND cleanup_due_at<=?`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, StatusPending, s.now().UTC().AddDate(0, 0, 7).Format(time.RFC3339Nano)).Scan(&out.DueSoon)
+		return rows.Err()
 	})
-	return out, err
+	summary.Pending = list.Counts[StatusPending]
+	summary.Awaiting = list.Counts[StatusAwaiting]
+	summary.Held = list.Counts[StatusHeld]
+	summary.Failed = list.Counts[StatusFailed]
+	summary.Total = summary.Pending + summary.Awaiting + summary.Held + summary.Failed
+	summary.Actionable = list.Actionable
+	return list, summary, err
 }
 
 // Hold moves a task out of automatic cleanup for the requested number of days.
@@ -609,7 +614,7 @@ func (s *Service) Hold(ctx context.Context, scope Scope, id string, days int, re
 	if err != nil {
 		return Task{}, err
 	}
-	return s.task(ctx, scope, id)
+	return s.taskResult(ctx, scope, id)
 }
 
 // Confirm verifies the native deletion again and removes extension projections.
@@ -628,7 +633,7 @@ func (s *Service) Confirm(ctx context.Context, scope Scope, id, actor, operation
 		_ = s.markFailed(ctx, scope, t, err)
 		return Task{}, err
 	}
-	return s.task(ctx, scope, id)
+	return s.taskResult(ctx, scope, id)
 }
 
 func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, operation string) error {

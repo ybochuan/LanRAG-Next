@@ -43,7 +43,7 @@ func score(p Payload) (float64, error) {
 
 func navigationRelation(kind string) bool {
 	switch kind {
-	case "cites", "implements", "template_for":
+	case "cites", "implements", "template_for", "explains_more", "reading_note":
 		return true
 	default:
 		return false
@@ -52,6 +52,49 @@ func navigationRelation(kind string) bool {
 
 func declarableRelation(kind string) bool {
 	return kind == "amends" || kind == "interprets" || kind == "related_to" || navigationRelation(kind)
+}
+
+func validRelationListFilters(kind, status string) bool {
+	if !declarableRelation(kind) {
+		switch kind {
+		case "", "repeals", "exception_to", "conflicts_with", "attachment_of", "supplements":
+		default:
+			return false
+		}
+	}
+	switch status {
+	case "", "candidate", "active", "revoked", "pending_review", "scheduled", "applied", "needs_review",
+		"awaiting_resolution", "resolved", "linked", "attachment_removed", "attachment_retired",
+		"attachment_cleanup_retry", "attachment_cleanup_pending", "supplement_declared":
+		return true
+	default:
+		return false
+	}
+}
+
+func addRelationReviewReasons(ctx context.Context, tx *sql.Tx, tenant uint64, now time.Time, rows []map[string]any) error {
+	for _, row := range rows {
+		kind, _ := row["edge_type"].(string)
+		if row["status"] != "active" || !declarableRelation(kind) {
+			continue
+		}
+		sourceKB, _ := row["knowledge_base_id"].(string)
+		sourceDoc, _ := row["document_id"].(string)
+		sourceVersion, _ := row["source_version_id"].(string)
+		targetKB, _ := row["target_knowledge_base_id"].(string)
+		targetDoc, _ := row["target_document_id"].(string)
+		targetVersion, _ := row["target_version_id"].(string)
+		reason, err := lineage.RelationReviewReasonTx(ctx, tx, tenant, kind,
+			lineage.RelationPin{KnowledgeBaseID: sourceKB, DocumentID: sourceDoc, VersionID: sourceVersion},
+			lineage.RelationPin{KnowledgeBaseID: targetKB, DocumentID: targetDoc, VersionID: targetVersion}, now)
+		if err != nil {
+			return err
+		}
+		if reason != "" {
+			row["review_reason"] = reason
+		}
+	}
+	return nil
 }
 
 func relationTargetScope(source provenance.Scope, targetKB string) provenance.Scope {
@@ -134,6 +177,20 @@ func (s *Service) relation(ctx context.Context, c Command) (Result, error) {
 			}
 			if e = s.current(ctx, tx, targetScope, p.TargetDocumentID, target); e != nil {
 				return Result{}, e
+			}
+			if p.EdgeType == "explains_more" || p.EdgeType == "reading_note" {
+				var duplicate bool
+				err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ext_document_relations
+					WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?
+					AND target_knowledge_base_id=? AND target_document_id=? AND edge_type=?
+					AND source_version_id=? AND target_version_id=? AND status='active')`,
+					args(c.Scope, p.DocumentID, targetKB, p.TargetDocumentID, p.EdgeType, source, target)...).Scan(&duplicate)
+				if err != nil {
+					return Result{}, err
+				}
+				if duplicate {
+					return Result{}, ErrConflict
+				}
 			}
 			if p.EdgeType == "template_for" {
 				var blocked bool

@@ -30,7 +30,7 @@ func prepareMessagesWithModelContext(
 		return messages, registry
 	}
 
-	ordered := expandCitationSources(orderedPipelineReferences(chatManage))
+	ordered := pipelineModelRows(chatManage)
 	knowledgeResults := make([]*types.SearchResult, 0, len(ordered))
 	knowledgeRows := make([]map[string]interface{}, 0, len(ordered))
 	webRows := make([]map[string]interface{}, 0)
@@ -119,6 +119,11 @@ func isPipelineWebReference(result *types.SearchResult) bool {
 	}
 	return strings.EqualFold(result.ChunkType, string(types.ChunkTypeWebSearch)) ||
 		strings.EqualFold(result.KnowledgeSource, "web_search")
+}
+
+// pipelineModelRows selects the separate source bodies that the provider receives.
+func pipelineModelRows(chatManage *types.ChatManage) []*types.SearchResult {
+	return expandCitationSources(orderedPipelineReferences(chatManage))
 }
 
 func orderedPipelineReferences(chatManage *types.ChatManage) []*types.SearchResult {

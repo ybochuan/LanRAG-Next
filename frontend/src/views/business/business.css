@@ -308,18 +308,6 @@
 .business-page .actions{
   margin-top:20px
 }
-/* Document references are plain text that turns brand-coloured on hover. */
-.business-page .doc-link {
-  color:var(--td-text-color-primary);
-  text-decoration:none;
-  cursor:pointer;
-}
-.business-page .doc-link:hover,.business-page .doc-link:focus-visible {
-  color:var(--td-brand-color);
-  text-decoration:none;
-  outline:none;
-  background:transparent;
-}
 /* Keep breathing room after an inline alert before the next control row. */
 .business-page .notice + .t-button,.business-page .notice + .actions,.business-page .notice + form{
   margin-top:12px
@@ -421,7 +409,7 @@
   gap:10px
 }
 .business-page .relation-query{
-  margin-bottom:24px
+  margin-bottom:12px
 }
 .business-page .relation-query .section-heading h2{
   margin:0
@@ -444,15 +432,20 @@
   margin:12px 0 0;
   padding:0
 }
-.business-page .relation-results li{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
+.business-page .relation-result{
   padding:12px 0;
   border-top:1px solid var(--td-component-stroke)
 }
-.business-page .relation-results li span{
+.business-page .relation-result-row,.business-page .relation-result-actions{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px 12px
+}
+.business-page .relation-result-row{
+  justify-content:space-between
+}
+.business-page .relation-result-row > span{
   min-width:0;
   overflow-wrap:anywhere
 }

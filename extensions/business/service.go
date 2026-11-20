@@ -64,30 +64,38 @@ type Payload struct {
 	Similarity            float64           `json:"similarity,omitempty"`
 	Declaration           float64           `json:"declaration,omitempty"`
 	Structure             float64           `json:"structure,omitempty"`
+	CitedChunkIDs         []string          `json:"cited_chunk_ids,omitempty"`
+	Decision              string            `json:"decision,omitempty"`
 }
 
 // FeedbackContext contains the excerpts a submitter explicitly shares with reviewers.
 // Only the sealed run supplies authoritative citation identity.
 type FeedbackContext struct {
-	Rating            string `json:"rating"`
-	Question          string `json:"question,omitempty"`
-	AnswerExcerpt     string `json:"answer_excerpt,omitempty"`
-	SuggestedRevision string `json:"suggested_revision,omitempty"`
+	Rating             string `json:"rating"`
+	Question           string `json:"question,omitempty"`
+	AnswerExcerpt      string `json:"answer_excerpt,omitempty"`
+	SuggestedRevision  string `json:"suggested_revision,omitempty"`
+	QuestionTruncated  bool   `json:"question_truncated,omitempty"`
+	AnswerTruncated    bool   `json:"answer_truncated,omitempty"`
+	SnapshotRestricted bool   `json:"snapshot_restricted,omitempty"`
+	CommentPresent     bool   `json:"comment_present,omitempty"`
 }
 
 // Command is a native-authorized, idempotent business operation.
 type Command struct {
-	Scope                  provenance.Scope `json:"scope"`
-	ActorID                string           `json:"actor_id"`
-	Action                 string           `json:"action"`
-	OperationID            string           `json:"operation_id"`
-	ID                     string           `json:"id,omitempty"`
-	ExpectedRevision       int64            `json:"expected_revision"`
-	Payload                Payload          `json:"payload"`
-	Page                   int              `json:"page,omitempty"`
-	PageSize               int              `json:"page_size,omitempty"`
-	ListStatus             string           `json:"-"`
-	IncludeFeedbackContext bool             `json:"-"`
+	Scope                         provenance.Scope `json:"scope"`
+	ActorID                       string           `json:"actor_id"`
+	Action                        string           `json:"action"`
+	OperationID                   string           `json:"operation_id"`
+	ID                            string           `json:"id,omitempty"`
+	ExpectedRevision              int64            `json:"expected_revision"`
+	Payload                       Payload          `json:"payload"`
+	Page                          int              `json:"page,omitempty"`
+	PageSize                      int              `json:"page_size,omitempty"`
+	ListStatus                    string           `json:"-"`
+	ListEdgeType                  string           `json:"-"`
+	IncludeSupplementDeclarations bool             `json:"-"`
+	IncludeFeedbackContext        bool             `json:"-"`
 }
 
 // Result describes a committed governance state, not a current retrieval permit.
@@ -189,7 +197,8 @@ func (s *Service) transact(ctx context.Context, c Command, f func(*sql.Tx) (Resu
 	if s == nil || s.db == nil {
 		return out, ErrUnavailable
 	}
-	if c.Scope.TenantID == 0 || !validID(c.Scope.KnowledgeBaseID) || !validID(c.ActorID) || !validID(c.OperationID) || c.ExpectedRevision < 0 {
+	tenantQA := c.Scope.KnowledgeBaseID == "" && (c.Action == "qa_feedback_submit" || c.Action == "qa_feedback_review")
+	if c.Scope.TenantID == 0 || (!tenantQA && !validID(c.Scope.KnowledgeBaseID)) || !validID(c.ActorID) || !validID(c.OperationID) || c.ExpectedRevision < 0 {
 		return out, ErrInvalid
 	}
 	hash := digest(c)
@@ -222,6 +231,9 @@ func (s *Service) transact(ctx context.Context, c Command, f func(*sql.Tx) (Resu
 		}
 		audit := c
 		audit.Payload.FeedbackContext = nil
+		if c.Action == "qa_feedback_submit" {
+			audit.Payload.Text = ""
+		}
 		payload, _ := json.Marshal(audit)
 		_, e = tx.ExecContext(ctx, `INSERT INTO ext_business_audit(tenant_id,knowledge_base_id,operation_id,actor_id,action,aggregate_id,revision,status,occurred_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, args(c.Scope, c.OperationID, c.ActorID, c.Action, out.ID, out.Revision, out.Status, s.now().UTC().Format(time.RFC3339Nano), string(payload))...)
 		return e
@@ -322,7 +334,7 @@ func (s *Service) Execute(ctx context.Context, c Command) (Result, error) {
 		return s.reviewFamilySuggestion(ctx, c)
 	case "relation_declare", "relation_confirm", "relation_revoke":
 		return s.relation(ctx, c)
-	case "feedback_create", "feedback_capture", "feedback_approve", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "feedback_sample_review", "feedback_topic_recover", "guidance_seed", "guidance_quarantine_topic":
+	case "feedback_create", "feedback_capture", "feedback_approve", "feedback_record_only", "feedback_needs_evidence", "feedback_reject", "feedback_quarantine", "feedback_activate", "feedback_withdraw", "feedback_sample_review", "feedback_topic_recover", "guidance_seed", "guidance_quarantine_topic":
 		return s.feedback(ctx, c)
 	case "revision_create", "revision_create_binary", "revision_approve", "revision_reject":
 		return s.revision(ctx, c)

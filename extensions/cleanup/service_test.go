@@ -224,6 +224,102 @@ func TestHoldAndConfirmCleanExtensionProjections(t *testing.T) {
 	}
 }
 
+func TestEffectiveQueueStatusFiltersCountsAndPaginates(t *testing.T) {
+	db, nativePath, now, notices := fixture(t)
+	s := newService(db, nativePath, now, notices)
+	ctx := context.Background()
+	scope := Scope{TenantID: testTenant, KnowledgeBaseID: testKB}
+	stamp := func(at time.Time) string { return at.Format(time.RFC3339Nano) }
+	const retention = 30 * 24 * time.Hour
+	tasks := []struct {
+		id, status string
+		due, first time.Time
+		hold       string
+	}{
+		{id: "cleaned", status: StatusCleaned, due: now.Add(-96 * time.Hour)},
+		{id: "held", status: StatusHeld, due: now.Add(-72 * time.Hour), hold: stamp(now.Add(time.Nanosecond))},
+		{id: "hold-ended", status: StatusHeld, due: now.Add(-48 * time.Hour), hold: stamp(now)},
+		{id: "failed-waiting", status: StatusFailed, due: now.Add(-24 * time.Hour), first: now.Add(-retention + time.Nanosecond)},
+		{id: "failed-ready", status: StatusFailed, due: now.Add(-3 * time.Hour)},
+		{id: "due-earlier", status: StatusPending, due: now.Add(-time.Hour)},
+		{id: "due-now", status: StatusPending, due: now},
+		{id: "pending", status: StatusPending, due: now.Add(time.Nanosecond)},
+		{id: "legacy-awaiting", status: StatusAwaiting, due: now.AddDate(0, 0, 8)},
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		for _, task := range tasks {
+			first := task.first
+			if first.IsZero() {
+				first = task.due.Add(-retention)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO ext_cleanup_tasks(tenant_id,knowledge_base_id,document_id,first_observed_at,cleanup_due_at,status,hold_until,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, testTenant, testKB, task.id, stamp(first), stamp(task.due), task.status, task.hold, stamp(first), stamp(first)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := s.List(ctx, scope, "", 1, 20)
+	if err != nil || all.Total != 8 || len(all.Tasks) != 8 || all.Actionable != 3 {
+		t.Fatalf("unfiltered list=%+v err=%v", all, err)
+	}
+	summary, err := s.Summary(ctx, scope)
+	wantSummary := Summary{Total: 8, Pending: 2, Awaiting: 2, Held: 2, Failed: 2, DueSoon: 1, Actionable: 3}
+	if err != nil || summary != wantSummary {
+		t.Fatalf("summary=%+v want=%+v err=%v", summary, wantSummary, err)
+	}
+	for status, count := range map[string]int{StatusPending: 2, StatusAwaiting: 2, StatusHeld: 2, StatusFailed: 2, StatusCleaned: 1} {
+		page, err := s.List(ctx, scope, status, 1, 20)
+		if err != nil || page.Total != count || len(page.Tasks) != count || page.Counts[status] != count || page.Actionable != all.Actionable {
+			t.Fatalf("filter=%s page=%+v err=%v", status, page, err)
+		}
+		for _, row := range page.Tasks {
+			if row.EffectiveStatus != status {
+				t.Fatalf("filter=%s returned row %+v", status, row)
+			}
+		}
+	}
+	for i, id := range []string{"due-earlier", "due-now"} {
+		page, err := s.List(ctx, scope, StatusAwaiting, i+1, 1)
+		if err != nil || page.Total != 2 || len(page.Tasks) != 1 || page.Tasks[0].DocumentID != id || page.Tasks[0].Status != StatusPending || !page.Tasks[0].CanConfirm {
+			t.Fatalf("awaiting page %d: %+v err=%v", i+1, page, err)
+		}
+	}
+	beyond, err := s.List(ctx, scope, StatusAwaiting, 3, 1)
+	if err != nil || beyond.Total != 2 || len(beyond.Tasks) != 0 {
+		t.Fatalf("out-of-range page=%+v err=%v", beyond, err)
+	}
+	expected := map[string]struct {
+		status, effective, retainedUntil string
+		confirm                          bool
+	}{
+		"held":            {StatusHeld, StatusHeld, stamp(now.Add(time.Nanosecond)), false},
+		"hold-ended":      {StatusHeld, StatusHeld, stamp(now), false},
+		"failed-waiting":  {StatusFailed, StatusFailed, stamp(now.Add(time.Nanosecond)), false},
+		"failed-ready":    {StatusFailed, StatusFailed, stamp(now.Add(-3 * time.Hour)), true},
+		"legacy-awaiting": {StatusAwaiting, StatusPending, stamp(now.AddDate(0, 0, 8)), false},
+	}
+	for _, task := range all.Tasks {
+		if want, ok := expected[task.DocumentID]; ok {
+			if task.Status != want.status || task.EffectiveStatus != want.effective || task.RetainedUntil != want.retainedUntil || task.CanConfirm != want.confirm || task.Revision != 1 {
+				t.Fatalf("task=%+v want=%+v", task, want)
+			}
+		}
+	}
+	s.WithNow(func() time.Time { return now.Add(-time.Nanosecond) })
+	before, err := s.Summary(ctx, scope)
+	if err != nil || before.Awaiting != 1 || before.Actionable != 2 {
+		t.Fatalf("before deadline=%+v err=%v", before, err)
+	}
+	s.WithNow(func() time.Time { return now.Add(time.Nanosecond) })
+	after, err := s.Summary(ctx, scope)
+	if err != nil || after.Awaiting != 3 || after.Actionable != 5 || after.Held != 2 {
+		t.Fatalf("after deadline=%+v err=%v", after, err)
+	}
+}
+
 func TestShortHoldCannotAdvanceCleanupAndFailureCanRetry(t *testing.T) {
 	db, nativePath, now, notices := fixture(t)
 	s := newService(db, nativePath, now, notices)

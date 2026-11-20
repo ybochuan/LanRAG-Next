@@ -39,6 +39,7 @@ type RouterParams struct {
 	ChunkService                 interfaces.ChunkService
 	SessionService               interfaces.SessionService
 	MessageService               interfaces.MessageService
+	MessageRepository            interfaces.MessageRepository
 	ModelService                 interfaces.ModelService
 	EvaluationService            interfaces.EvaluationService
 	KBShareService               interfaces.KBShareService
@@ -308,6 +309,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
+		registerQAFeedbackRoutes(v1, handler.NewQAFeedbackHandler(params.SessionService, params.MessageRepository, params.KBService, params.KnowledgeService))
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, params.SandboxSkillHandler, rbacGuards)
 		RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)

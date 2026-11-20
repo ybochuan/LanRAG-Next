@@ -8,9 +8,9 @@ export interface ResolvedRules {rules:Rules;source:{tenant_id:number;knowledge_b
 export interface DocumentFamily {id:string;label:string}
 export interface DocumentRow {document_id:string;title?:string;native_title?:string;display_name?:string;mapping_status?:string;annex_original?:string;state:LifecycleState;last_event_id:string;annotations:Annotations;business_family?:DocumentFamily;degraded?:boolean;degraded_reason?:string}
 export type CleanupStatus='pending_cleanup'|'awaiting_confirmation'|'held'|'cleaned'|'failed'|'cancelled'
-export interface CleanupTask {tenant_id:number;knowledge_base_id:string;document_id:string;title?:string;native_deleted_at?:string;first_observed_at:string;cleanup_due_at:string;status:CleanupStatus;hold_until?:string;hold_reason?:string;retained_until?:string;can_confirm?:boolean;last_error?:string;revision:number;cleaned_at?:string}
-export interface CleanupSummary {total:number;pending:number;awaiting:number;held:number;failed:number;due_soon:number}
-export interface CleanupList {tasks:CleanupTask[];total:number;counts:Record<string,number>}
+export interface CleanupTask {tenant_id:number;knowledge_base_id:string;document_id:string;title?:string;native_deleted_at?:string;first_observed_at:string;cleanup_due_at:string;status:CleanupStatus;effective_status:CleanupStatus;hold_until?:string;hold_reason?:string;retained_until?:string;can_confirm:boolean;last_error?:string;revision:number;cleaned_at?:string}
+export interface CleanupSummary {total:number;pending:number;awaiting:number;held:number;failed:number;due_soon:number;actionable:number}
+export interface CleanupList {tasks:CleanupTask[];total:number;counts:Partial<Record<CleanupStatus,number>>;actionable:number}
 export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean;cleanup?:CleanupSummary;degraded?:boolean;degraded_reason?:string}
 export interface LifecycleEvent {event_id:string;from_state:string;to_state:string;reason:string;occurred_at:string;source_event_id?:string}
 export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};annotations:Annotations;review_overdue:boolean;attachment_parent_document_id?:string};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null;can_write?:boolean}

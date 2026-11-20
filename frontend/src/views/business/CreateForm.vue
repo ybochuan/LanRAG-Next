@@ -7,21 +7,22 @@
       <label v-if="kind==='revision'">{{ $t('workbench.form.publishMode') }}
         <t-select v-model="revisionMode" :options="revisionModeOptions" :disabled="disabled" />
       </label>
-      <p v-if="fixedDocument?.end==='source'" class="subtle">源文档 · {{ fixedDocument.title }}</p>
-      <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :label="form.edge_type==='repeals'?'废止通知':'源文档'" :show-identity="form.edge_type==='repeals'||clauseMode" />
-      <p v-if="fixedDocument?.end==='target'" class="subtle">关联文档 · {{ fixedDocument.title }}</p>
-      <t-alert v-if="fixedDocument?.end==='target'&&kind==='relation'" theme="info" class="notice">当前从目标文档创建关系，仅支持同库关联。跨库关系请前往源文档所在知识库发起；此入口已禁用。</t-alert>
+      <label v-if="kind==='relation'">{{ $t('workbench.form.relationType') }}<t-select v-model="form.edge_type" :options="relationTypeOptions" :disabled="disabled" /></label>
+      <p v-if="fixedDocument?.end==='source'" class="subtle">{{ sourceLabel }} · {{ fixedDocument.title }}</p>
+      <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :exclude="kind==='relation'&&!crossKB ? form.target_document_id : undefined" :label="sourceLabel" @selected="sourceSelection=$event" :show-identity="form.edge_type==='repeals'||clauseMode" />
+      <p v-if="fixedDocument?.end==='target'" class="subtle">{{ targetLabel }} · {{ fixedDocument.title }}</p>
+      <t-alert v-if="targetSideCrossBlocked" theme="info" class="notice">从正文详情可新增同库补充说明和内容提示。其他关系请从源文档或文档关联页面创建。</t-alert>
       <template v-if="kind==='relation'&&fixedDocument?.end!=='target'">
         <label v-if="crossEligible" class="target-kb">目标知识库
           <t-select v-model="form.target_knowledge_base_id" :options="targetKBOptions" :disabled="disabled" />
         </label>
         <p v-if="crossEligible&&crossKB" class="subtle">跨库规范性关联仅支持修订、解释和相关；相关候选需要显式确认。</p>
-        <DocumentPicker v-model="form.target_document_id" :kb="crossEligible?(form.target_knowledge_base_id||kb):kb" :disabled="disabled" :exclude="form.document_id" :label="form.edge_type==='repeals'?'被废止制度':'关联文档'" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
+        <DocumentPicker v-model="form.target_document_id" :kb="crossEligible?(form.target_knowledge_base_id||kb):kb" :disabled="disabled" :exclude="form.document_id" :label="targetLabel" @selected="targetSelection=$event" :show-identity="form.edge_type==='repeals'||clauseMode" searchable />
         <label v-if="form.edge_type==='related_to'&&crossEligible&&crossKB" class="check-label"><t-checkbox v-model="form.second_confirmation" :disabled="disabled">{{ $t('workbench.form.confirmCross') }}</t-checkbox></label>
       </template>
       <template v-if="kind==='relation'">
-        <label>{{ $t('workbench.form.relationType') }}<t-select v-model="form.edge_type" :options="relationTypeOptions" :disabled="disabled" /></label>
-        <p class="subtle">{{ relationChoices.find(item => item.key === form.edge_type)?.direction }}</p>
+        <p class="subtle">{{ relationSentence(form.edge_type, sourcePreview, targetPreview) }}</p>
+        <p v-if="conditionPreview" class="subtle">{{ conditionPreview }}</p>
         <div v-if="form.edge_type==='related_to'" class="score-fields"><label>{{ $t('workbench.form.similarity') }}<t-input-number v-model="form.similarity" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>{{ $t('workbench.form.declarationSignal') }}<t-input-number v-model="form.declaration" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label><label>{{ $t('workbench.form.structureSignal') }}<t-input-number v-model="form.structure" :min="0" :max="1" :step="0.05" :disabled="disabled" /></label></div>
         <template v-if="form.edge_type==='repeals'">
           <label>{{ $t('workbench.form.repealTime') }}<t-date-picker v-model="effectiveAtPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="disabled" clearable /></label>
@@ -57,7 +58,7 @@
         <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">{{ $t('workbench.form.prev') }}</t-button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">{{ $t('workbench.form.next') }}</t-button></div>
         <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <t-button variant="text" size="small" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">{{ $t('workbench.form.remove') }}</t-button></small>
       </fieldset>
-      <t-button theme="primary" type="submit" :disabled="disabled || targetSideCrossBlocked || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</t-button>
+      <t-button theme="primary" type="submit" :disabled="disabled || targetSideCrossBlocked || relationMissingDocuments || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</t-button>
     </form>
   </section>
 </template>
@@ -67,7 +68,7 @@ import * as api from '@/api/business'
 import DocumentPicker from './DocumentPicker.vue'
 import ClausePicker from './ClausePicker.vue'
 import { requestFence } from '../lifecycle/model'
-import { clauseRelation, relationChoices } from './model'
+import { clauseRelation, relationChoices, readingRelation, relationSentence } from './model'
 import { useI18n } from 'vue-i18n'
 const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;knowledgeBases?:{id:string;name:string}[];initialGuidance?:string;fixedDocument?:{id:string;title:string;end:'source'|'target'}}>()
 const emit=defineEmits<{submit:[action:api.BusinessAction,payload:api.BusinessPayload]}>()
@@ -81,7 +82,21 @@ const crossKB=computed(()=>crossEligible.value&&(form.target_knowledge_base_id||
 // relation_declare has no source_knowledge_base_id: a cross-KB relation can only
 // be declared from the source document's KB. Block the target-side entry
 // instead of silently producing a wrong-scoped relation.
-const targetSideCrossBlocked=computed(()=>props.kind==='relation'&&props.fixedDocument?.end==='target')
+const targetSideCrossBlocked=computed(()=>props.kind==='relation'&&props.fixedDocument?.end==='target'&&!readingRelation(form.edge_type))
+const sourceLabel=computed(()=>({repeals:'废止通知',explains_more:'说明文件',reading_note:'提示文件'}[form.edge_type as 'repeals'|'explains_more'|'reading_note']||'源文档'))
+const targetLabel=computed(()=>form.edge_type==='repeals'?'被废止制度':readingRelation(form.edge_type)?'正文文档':'关联文档')
+const sourceSelection=ref<{id:string;title:string}>()
+const targetSelection=ref<{id:string;title:string}>()
+const sourcePreview=computed(()=>props.fixedDocument?.end==='source' ? props.fixedDocument.title : sourceSelection.value?.id===form.document_id ? sourceSelection.value.title : sourceLabel.value)
+const targetPreview=computed(()=>props.fixedDocument?.end==='target' ? props.fixedDocument.title : targetSelection.value?.id===form.target_document_id ? targetSelection.value.title : targetLabel.value)
+const conditionPreview=computed(()=>{
+  if(readingRelation(form.edge_type))return '选择同库文件。登记后由正文查询核验两端版本及文档状态，读者才可展开。'
+  if(form.edge_type==='repeals')return form.effective_at ? '审核通过后，按计划时间 '+form.effective_at.replace('T',' ')+' 生效。' : '先填写计划生效时间，再提交废止审核。'
+  if(clauseMode.value)return '锁定两端条款及版本，提交后待审核。'
+  if(form.edge_type==='related_to')return '一般相关先登记为待确认。跨库登记需额外确认。'
+  return ''
+})
+const relationMissingDocuments=computed(()=>props.kind==='relation'&&(!form.document_id||!form.target_document_id||form.document_id===form.target_document_id))
 const revisionMode=ref<'single'|'split'>('single')
 // TDesign checkbox is boolean; the selection stays an id array capped at 3.
 function toggleGuidance(id:string){const at=selected.value.indexOf(id);if(at>=0)selected.value.splice(at,1);else if(selected.value.length<3)selected.value.push(id)}
@@ -111,6 +126,7 @@ function addSplitPart(){
 }
 function submit(){
   if(props.disabled||targetSideCrossBlocked.value)return
+  if(relationMissingDocuments.value)return
   if(clauseMode.value){
     emit('submit','clause_create',{document_id:form.document_id,target_document_id:form.target_document_id,edge_type:form.edge_type,...clauses})
   }
@@ -126,7 +142,7 @@ function submit(){
   }
   else emit('submit',props.kind==='guidance'?'guidance_seed':'feedback_create',{topic:form.topic.trim(),text:form.text,...(props.kind==='feedback'?{risk:form.risk,negative:form.negative}:{})})
 }
-watch(()=>form.target_knowledge_base_id,()=>{form.target_document_id='';form.second_confirmation=false})
+watch(()=>form.target_knowledge_base_id,()=>{targetSelection.value=undefined;form.target_document_id=props.fixedDocument?.end==='target'?props.fixedDocument.id:'';form.second_confirmation=false})
 watch(()=>form.edge_type,()=>{if(!crossEligible.value){if(form.target_knowledge_base_id)form.target_knowledge_base_id='';form.second_confirmation=false}else if(!crossKB.value)form.second_confirmation=false})
 watch(()=>props.kb,()=>{if(props.kind==='revision')void loadGuidances()},{immediate:true})
 watch(()=>props.fixedDocument,(fixed)=>{

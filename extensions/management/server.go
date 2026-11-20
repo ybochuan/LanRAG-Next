@@ -127,14 +127,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.attachmentUpload(w, r)
 		return
 	}
+	const maxFeedbackRequest = 192 << 10
 	var req Request
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	body := &io.LimitedReader{R: r.Body, N: maxFeedbackRequest + 1}
+	dec := json.NewDecoder(body)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || dec.Decode(new(any)) != io.EOF {
+	if err := dec.Decode(&req); err != nil || dec.Decode(new(any)) != io.EOF || body.N == 0 ||
+		(req.Action != "qa_feedback_submit" && maxFeedbackRequest+1-body.N > 64<<10) {
 		writeError(w, 400, "invalid_request")
 		return
 	}
-	if !s.scopes[lifecycle.PolicyScope{TenantID: req.TenantID, KnowledgeBaseID: req.KnowledgeBaseID}] {
+	feedbackAction := req.Action == "qa_feedback_submit" || req.Action == "qa_feedback_list" || req.Action == "qa_feedback_review"
+	configured := s.scopes[lifecycle.PolicyScope{TenantID: req.TenantID, KnowledgeBaseID: req.KnowledgeBaseID}]
+	if feedbackAction {
+		if !s.feedbackTenantConfigured(req.TenantID) || (req.Action != "qa_feedback_submit" && req.KnowledgeBaseID != "") {
+			writeError(w, 403, "scope_not_configured")
+			return
+		}
+		if !req.CanWrite && req.Action != "qa_feedback_submit" {
+			writeError(w, 403, "read_only")
+			return
+		}
+	} else if !configured {
 		writeError(w, 403, "scope_not_configured")
 		return
 	}
@@ -157,7 +171,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request")
 		return
 	}
-	data, err := s.execute(r.Context(), req)
+	var data any
+	var err error
+	if feedbackAction {
+		data, err = s.executeQAFeedback(r.Context(), req, configured)
+	} else {
+		data, err = s.execute(r.Context(), req)
+	}
 	if err != nil {
 		status, code := 400, "invalid_configuration"
 		if errors.Is(err, lifecycle.ErrConfigurationConflict) || errors.Is(err, lineage.ErrConflict) || errors.Is(err, business.ErrConflict) || errors.Is(err, cleanup.ErrConflict) || errors.Is(err, store.ErrAttachmentConflict) {

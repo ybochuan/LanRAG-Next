@@ -25,17 +25,17 @@ function draw() {
       { tagName: 'text', selector: 'status' },
     ],
     attrs: {
-      body: { rx: 10, ry: 10, fill: node.current && node.state === 'active' ? '#eff8f2' : '#ffffff', stroke: node.current && node.state === 'active' ? '#4c9c67' : '#d7dee6', strokeWidth: 1.5 },
-      title: { text: nodeTitle(node), refX: 16, refY: 23, textAnchor: 'start', fontSize: 13, fontWeight: 600, fill: '#24384a', textWrap: { width: 216, height: 34, ellipsis: true } },
-      kind: { text: `${typeLabels[node.type] || node.type}${node.sequence ? ' · 观测 V' + node.sequence : ''}`, refX: 16, refY: 62, textAnchor: 'start', fontSize: 11, fill: '#6c7d8d' },
-      status: { text: [stateLabels[node.state], node.current ? '当前观测版本' : ''].filter(Boolean).join(' · '), refX: 16, refY: 84, textAnchor: 'start', fontSize: 11, fill: '#536a5b' },
+      body: { rx: 10, ry: 10, fill: node.current && node.state === 'active' ? 'var(--td-success-color-1)' : 'var(--td-bg-color-container)', stroke: node.current && node.state === 'active' ? 'var(--td-success-color)' : 'var(--td-component-stroke)', strokeWidth: 1.5 },
+      title: { text: nodeTitle(node), refX: 16, refY: 23, textAnchor: 'start', fontSize: 13, fontWeight: 600, fill: 'var(--td-text-color-primary)', textWrap: { width: 216, height: 34, ellipsis: true } },
+      kind: { text: `${typeLabels[node.type] || node.type}${node.sequence ? ' · 观测 V' + node.sequence : ''}`, refX: 16, refY: 62, textAnchor: 'start', fontSize: 11, fill: 'var(--td-text-color-secondary)' },
+      status: { text: [stateLabels[node.state], node.current ? '当前观测版本' : ''].filter(Boolean).join(' · '), refX: 16, refY: 84, textAnchor: 'start', fontSize: 11, fill: 'var(--td-text-color-secondary)' },
     },
   }))
   const edges = props.data.edges.map(edge => ({
     id: 'edge:' + edge.id, shape: 'edge', source: edge.from, target: edge.to,
     router: { name: 'manhattan', args: { padding: 22 } }, connector: { name: 'rounded' },
-    attrs: { line: { stroke: '#91a3b4', strokeWidth: 1.5, strokeDasharray: edge.type === 'related_to' || edge.status === 'awaiting_resolution' ? '5 4' : '', targetMarker: { name: 'block', width: 7, height: 6 } } },
-    labels: [{ attrs: { label: { text: edge.status === 'awaiting_resolution' ? '条款冲突 · 待裁决' : edge.status === 'resolved' ? '条款冲突 · 已裁决' : edgeLabels[edge.type] || edge.type, fill: '#526779', fontSize: 11 }, body: { fill: '#f8fafb', stroke: '#e6ebef', rx: 3, ry: 3 } } }],
+    attrs: { line: { stroke: 'var(--td-text-color-placeholder)', strokeWidth: 1.5, strokeDasharray: edge.type === 'related_to' || edge.status === 'awaiting_resolution' || edge.status === 'unavailable' ? '5 4' : '', targetMarker: { name: 'block', width: 7, height: 6 } } },
+    labels: [{ attrs: { label: { text: edge.status === 'awaiting_resolution' ? '条款冲突 · 待裁决' : edge.status === 'resolved' ? '条款冲突 · 已裁决' : (edgeLabels[edge.type] || edge.type) + (edge.status === 'registered' ? ' · 已登记' : edge.status === 'unavailable' ? ' · 待复核' : ''), fill: 'var(--td-text-color-secondary)', fontSize: 11 }, body: { fill: 'var(--td-bg-color-secondarycontainer)', stroke: 'var(--td-component-stroke)', rx: 3, ry: 3 } } }],
   }))
   graph.fromJSON({ nodes, edges })
   highlight()
@@ -46,7 +46,7 @@ function highlight() {
   for (const node of graph.getNodes()) {
     const item = props.data.nodes.find(item => item.id === node.id)
     const current = item?.current && item.state === 'active'
-    node.attr('body/stroke', node.id === props.selectedId ? '#2563eb' : current ? '#4c9c67' : '#d7dee6')
+    node.attr('body/stroke', node.id === props.selectedId ? 'var(--td-brand-color)' : current ? 'var(--td-success-color)' : 'var(--td-component-stroke)')
     node.attr('body/strokeWidth', node.id === props.selectedId ? 3 : 1.5)
   }
 }
@@ -63,7 +63,7 @@ onMounted(() => {
   if (!container.value) return
   graph = new Graph({
     container: container.value, autoResize: true, grid: { size: 20, visible: true },
-    background: { color: '#f8fafb' }, panning: true, mousewheel: { enabled: true, minScale: 0.2, maxScale: 2 },
+    background: { color: 'var(--td-bg-color-secondarycontainer)' }, panning: true, mousewheel: { enabled: true, minScale: 0.2, maxScale: 2 },
     interacting: false,
   })
   graph.on('node:click', ({ node }) => emit('select', node.id))

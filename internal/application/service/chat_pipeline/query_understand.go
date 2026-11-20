@@ -104,7 +104,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	}
 
 	// --- Build prompts ---
-	systemContent, userContent := p.buildPrompts(ctx, chatManage, historyList)
+	systemContent, userContent, hasMemory := p.buildPrompts(ctx, chatManage, historyList)
 
 	userMsg := chat.Message{Role: "user", Content: userContent}
 	if useImages {
@@ -122,20 +122,35 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	// --- Call model ---
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "query_rewrite", "")
-	response, err := rewriteModel.Chat(modelCtx, []chat.Message{
-		{Role: "system", Content: systemContent},
-		userMsg,
-	}, &chat.ChatOptions{
+	messages := []chat.Message{{Role: "system", Content: systemContent}, userMsg}
+	options := &chat.ChatOptions{
 		Temperature:         0.3,
 		MaxCompletionTokens: maxTokens,
 		Thinking:            &thinking,
-	})
+	}
+	// The first text-only rewrite consumes the user's question and prompt templates.
+	// History, attachments, memory and images have no source adapter here.
+	complete := len(historyList) == 0 && !hasImages && len(chatManage.Attachments) == 0 && !hasMemory
+	request := struct{ Messages, Options any }{messages, options}
+	modelCtx, sourceCall, err := extensionbridge.BeginSourceCall(modelCtx, "model", request, nil, complete)
 	if err != nil {
+		return ErrModelCall.WithError(err)
+	}
+	response, err := rewriteModel.Chat(modelCtx, messages, options)
+	sourceCall.Record(response)
+	if err != nil {
+		if finishErr := sourceCall.Finish("error"); finishErr != nil {
+			return ErrModelCall.WithError(finishErr)
+		}
 		pipelineError(ctx, "QueryUnderstand", "model_call", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"error":      err.Error(),
 		})
 		return next()
+	}
+
+	if err := sourceCall.Finish("success"); err != nil {
+		return ErrModelCall.WithError(err)
 	}
 
 	// --- Parse structured output ---
@@ -294,7 +309,7 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 // buildPrompts constructs system and user prompts with placeholder replacement.
 func (p *PluginQueryUnderstand) buildPrompts(
 	ctx context.Context, chatManage *types.ChatManage, historyList []*types.History,
-) (string, string) {
+) (string, string, bool) {
 	userPrompt := p.config.Conversation.RewritePromptUser
 	if chatManage.RewritePromptUser != "" {
 		userPrompt = chatManage.RewritePromptUser
@@ -317,7 +332,8 @@ func (p *PluginQueryUnderstand) buildPrompts(
 	} else {
 		queryContent += "\n<no_document_attached />"
 	}
-	queryContent += p.memoryBackground(ctx, chatManage)
+	memory := p.memoryBackground(ctx, chatManage)
+	queryContent += memory
 
 	vals := types.PlaceholderValues{
 		"conversation": conversationText,
@@ -326,7 +342,7 @@ func (p *PluginQueryUnderstand) buildPrompts(
 	}
 
 	return types.RenderPromptPlaceholders(systemPrompt, vals),
-		types.RenderPromptPlaceholders(userPrompt, vals)
+		types.RenderPromptPlaceholders(userPrompt, vals), memory != ""
 }
 
 // memoryBackground gives the rewriter who is asking.

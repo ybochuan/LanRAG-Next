@@ -84,6 +84,7 @@ type AgentEngine struct {
 	// cannot be compared with that one for calibration.
 	contextRewrites int
 	modelContext    *modelcontext.Registry // single request-local boundary for every model handle
+	searchOutputs   searchOutputReceipts
 	// steerSink, when set, lets users append messages into the running turn.
 	// Drained at every round boundary; nil disables mid-run injection.
 	steerSink         types.SteerSink

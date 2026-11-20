@@ -52,7 +52,12 @@ func ManageLifecycle(ctx context.Context, payload ManagementRequest) (json.RawMe
 		return nil, unavailable
 	}
 	body, err := json.Marshal(payload)
-	if err != nil || len(body) > 64<<10 {
+	maxBody := 64 << 10
+	if payload.Action == "qa_feedback_submit" {
+		// Bounded UTF-8 feedback and snapshot fields can expand during JSON escaping.
+		maxBody = 192 << 10
+	}
+	if err != nil || len(body) > maxBody {
 		return nil, unavailable
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:8090/management/lifecycle", bytes.NewReader(body))

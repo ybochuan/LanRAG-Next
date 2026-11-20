@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
+	"github.com/ybochuan/LanRAG-Next/extensions/store"
 )
 
 // GraphNode describes registered metadata. State is the document's current lifecycle.
@@ -247,14 +248,11 @@ SELECT version_node_id FROM versions UNION SELECT id FROM neighbours`, scopeArgs
 }
 
 func appendNavigationEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, ids string, out *GraphSnapshot) error {
-	rows, err := tx.QueryContext(ctx, `SELECT 'relation:'||r.relation_id,r.source_version_id,r.target_version_id,r.edge_type
+	rows, err := tx.QueryContext(ctx, `SELECT 'relation:'||r.relation_id,r.source_version_id,r.target_version_id,r.edge_type,
+		r.document_id,r.target_document_id
 	FROM ext_document_relations r
-	JOIN ext_document_version_family a ON a.tenant_id=r.tenant_id AND a.knowledge_base_id=r.knowledge_base_id
-		AND a.document_id=r.document_id AND a.current_version_node_id=r.source_version_id
-	JOIN ext_document_version_family b ON b.tenant_id=r.tenant_id AND b.knowledge_base_id=r.knowledge_base_id
-		AND b.document_id=r.target_document_id AND b.current_version_node_id=r.target_version_id
-	WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.status='active'
-	AND r.edge_type IN ('cites','implements','template_for')
+	WHERE r.tenant_id=? AND r.knowledge_base_id=? AND r.target_knowledge_base_id=r.knowledge_base_id AND r.status='active'
+	AND r.edge_type IN ('cites','implements','template_for','explains_more','reading_note')
 	AND r.source_version_id IN (SELECT value FROM json_each(?))
 	AND r.target_version_id IN (SELECT value FROM json_each(?))
 	ORDER BY r.relation_id LIMIT 513`, scopeArgs(s, ids, ids)...)
@@ -262,18 +260,112 @@ func appendNavigationEdges(ctx context.Context, tx *sql.Tx, s provenance.Scope, 
 		return err
 	}
 	defer rows.Close()
+	now := time.Now().UTC()
 	for rows.Next() {
-		var edge GraphEdge
-		if err := rows.Scan(&edge.ID, &edge.From, &edge.To, &edge.Type); err != nil {
-			return err
-		}
 		if len(out.Edges) == 512 {
 			out.Truncated = true
 			break
 		}
+		var edge GraphEdge
+		source := RelationPin{KnowledgeBaseID: s.KnowledgeBaseID}
+		target := RelationPin{KnowledgeBaseID: s.KnowledgeBaseID}
+		if err := rows.Scan(&edge.ID, &edge.From, &edge.To, &edge.Type, &source.DocumentID, &target.DocumentID); err != nil {
+			return err
+		}
+		source.VersionID, target.VersionID = edge.From, edge.To
+		reason, err := RelationReviewReasonTx(ctx, tx, s.TenantID, edge.Type, source, target, now)
+		if err != nil {
+			return err
+		}
+		edge.Status = "registered"
+		if reason != "" && reason != "source_unverified" && reason != "target_unverified" {
+			edge.Status = "unavailable"
+		}
 		out.Edges = append(out.Edges, edge)
 	}
 	return rows.Err()
+}
+
+// RelationPin identifies a document and the version used when the relationship was registered.
+type RelationPin struct {
+	KnowledgeBaseID string
+	DocumentID      string
+	VersionID       string
+}
+
+// RelationReviewReasonTx reports the first known blocker in the current local
+// evidence, or an unverified endpoint when required evidence is missing.
+// An empty reason provides no live permission or guarantee of current validity.
+func RelationReviewReasonTx(ctx context.Context, tx *sql.Tx, tenant uint64, kind string, source, target RelationPin, now time.Time) (string, error) {
+	unknown := ""
+	for _, endpoint := range []struct {
+		prefix string
+		pin    RelationPin
+	}{{"source_", source}, {"target_", target}} {
+		reason, err := relationEndpointReasonTx(ctx, tx, tenant, kind, endpoint.pin, now)
+		if err != nil {
+			return "", err
+		}
+		if reason == "unverified" {
+			if unknown == "" {
+				unknown = endpoint.prefix + reason
+			}
+		} else if reason != "" {
+			return endpoint.prefix + reason, nil
+		}
+	}
+	return unknown, nil
+}
+
+func relationEndpointReasonTx(ctx context.Context, tx *sql.Tx, tenant uint64, kind string, pin RelationPin, now time.Time) (string, error) {
+	scope := provenance.Scope{TenantID: tenant, KnowledgeBaseID: pin.KnowledgeBaseID}
+	var head, state, availability, from, until sql.NullString
+	var held bool
+	err := tx.QueryRowContext(ctx, `SELECT f.current_version_node_id,
+		CASE WHEN `+store.LifecycleCurrentVerifiedSQL+` THEN c.state END,
+		av.status,a.effective_from,a.effective_until,
+		(`+store.RepealDueSQL+` OR `+store.PublicationTargetPendingSQL+` OR `+store.FamilyReplacementDueSQL+`)
+	FROM (SELECT ? AS tenant_id,? AS knowledge_base_id,? AS document_id) pin
+	LEFT JOIN ext_document_version_family f USING(tenant_id,knowledge_base_id,document_id)
+	LEFT JOIN ext_lifecycle_current c USING(tenant_id,knowledge_base_id,document_id)
+	LEFT JOIN ext_document_availability av USING(tenant_id,knowledge_base_id,document_id)
+	`+store.LifecycleEventJoinSQL+store.LifecycleAnnotationJoinSQL,
+		append([]any{now.UnixMilli()}, scopeArgs(scope, pin.DocumentID)...)...).Scan(&head, &state, &availability, &from, &until, &held)
+	if err != nil {
+		return "", err
+	}
+	if availability.String == "missing" || availability.String == "deleted" || held {
+		return "unavailable", nil
+	}
+	if head.Valid && head.String != pin.VersionID {
+		var presentationOnly bool
+		if kind == "template_for" {
+			if err := tx.QueryRowContext(ctx, "SELECT "+store.AttachmentPresentationRevisionSQL("?", "?"),
+				pin.VersionID, head.String).Scan(&presentationOnly); err != nil {
+				return "", err
+			}
+		}
+		if !presentationOnly {
+			return "version_changed", nil
+		}
+	}
+	if state.Valid && state.String != "active" {
+		return "inactive", nil
+	}
+	if effective, err := store.EffectiveAt(now, sql.NullString{}, until); err != nil {
+		return "unverified", nil
+	} else if !effective {
+		return "expired", nil
+	}
+	if effective, err := store.EffectiveAt(now, from, sql.NullString{}); err != nil {
+		return "unverified", nil
+	} else if !effective {
+		return "not_yet_effective", nil
+	}
+	if !head.Valid || !state.Valid {
+		return "unverified", nil
+	}
+	return "", nil
 }
 
 // appendAttachmentEdges projects stored ownership only onto current observed

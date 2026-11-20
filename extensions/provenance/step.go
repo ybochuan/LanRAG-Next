@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/guidance"
 )
 
 // InputEvidence describes the actual consumed native field; it carries hashes only.
@@ -48,6 +50,7 @@ type StepResult struct {
 	Outcome     string `json:"outcome"`
 	InputHash   string `json:"input_hash"`
 	OutputHash  string `json:"output_hash"`
+	AnnotationDelivery string `json:"annotation_delivery,omitempty"`
 }
 
 // BeginStep persists the step before a producer/model call can be acknowledged.
@@ -241,10 +244,23 @@ func (r *Runs) FinishStep(ctx context.Context, h RunHandle, q StepResult) error 
 	if q.Outcome == "success" && (!digest(q.InputHash) || !digest(q.OutputHash)) {
 		return ErrInvalid
 	}
+	if q.AnnotationDelivery != "" && (!digest(q.InputHash) || q.AnnotationDelivery != "applied" && q.AnnotationDelivery != "unavailable") {
+		return ErrInvalid
+	}
 	var result struct{}
 	return r.mutate(ctx, h, q.OperationID, "step-finish", q, &result, func(tx *sql.Tx, v *RunSnapshot) error {
-		if _, e := stepOpen(ctx, tx, h, q.StepID); e != nil {
-			return e
+		kind, err := stepOpen(ctx, tx, h, q.StepID)
+		if err != nil {
+			return err
+		}
+		if q.AnnotationDelivery != "" {
+			if kind != "model" {
+				return ErrInvalid
+			}
+			scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, RunID: h.RunID, StepID: q.StepID}
+			if err = guidance.FinishCheckTx(ctx, tx, scope, q.InputHash, q.AnnotationDelivery, r.now()); err != nil {
+				return err
+			}
 		}
 		if q.Outcome == "success" {
 			var pending int

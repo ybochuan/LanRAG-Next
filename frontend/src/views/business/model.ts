@@ -3,6 +3,7 @@ import type { BusinessAction, BusinessBody, BusinessKind, BusinessPayload, Busin
 export const statusLabels: Record<string, string> = {
   candidate: '待确认', active: '已生效', linked: '自动登记', revoked: '已撤销', pending_review: '待审核', approved: '已批准',
   rejected: '已拒绝', quarantined: '已隔离', withdrawn: '已撤回', publishing: '发布处理中',
+  received: '已收到', record_only: '仅记录', needs_evidence: '待补证',
   publish_failed: '发布待恢复', indexed: '已入库，待完成发布', published: '已发布', superseded: '已被替代',
   attachment_cleanup_pending: '附件清理中', attachment_cleanup_retry: '清理待重试', attachment_removed: '已随主件删除',
   attachment_retired: '旧版附件',
@@ -15,10 +16,30 @@ export const actionLabels: Record<BusinessAction, string> = {
   relation_declare: '保存关联', relation_confirm: '确认关联', relation_revoke: '撤销关联',
   repeal_create: '提交废止审核', repeal_approve: '批准废止', repeal_cancel: '撤回废止计划',
   clause_create: '提交条款审核', clause_confirm: '确认条款关系', clause_resolve: '记录冲突裁决', clause_revoke: '撤销条款关系',
-  feedback_create: '提交反馈', feedback_approve: '批准反馈', feedback_reject: '拒绝反馈', feedback_quarantine: '隔离反馈',
+  feedback_create: '提交反馈', feedback_approve: '批准反馈', feedback_reject: '驳回反馈', feedback_quarantine: '隔离反馈',
+  feedback_record_only: '仅记录', feedback_needs_evidence: '标记待补证',
   feedback_activate: '激活指导', feedback_withdraw: '撤回反馈', feedback_sample_review: '抽检复核', guidance_seed: '添加种子指导', guidance_quarantine_topic: '隔离主题',
   revision_create: '创建修订提案', revision_create_binary: '创建二进制修订建议', revision_bind_binary: '绑定修订文件', revision_approve: '批准提案', revision_reject: '拒绝提案', revision_publish: '核对并发布',
   split_create: '创建拆分批次', split_approve: '批准整批拆分', split_reject: '拒绝整批拆分',
+}
+export const feedbackRatings: Record<string, string> = {
+  like: '点赞', dislike: '点踩', supplement: '补充', correction: '修正',
+  incorrect: '内容有误', suggestion: '改进建议', helpful: '有帮助',
+}
+export const feedbackReasons: Record<string, string> = {
+  inaccurate: '不准确', incomplete: '不完整', missing_sources: '缺少来源', other: '其他',
+}
+export const feedbackRating = (row: BusinessRecord) => row.rating || row.feedback_context?.rating || ''
+export const isAnswerFeedback = (row: BusinessRecord) =>
+  ['like', 'dislike', 'supplement', 'correction'].includes(feedbackRating(row))
+export const feedbackRestricted = (row: BusinessRecord) => row.feedback_context?.snapshot_restricted === true
+export const feedbackAwaiting = (row: BusinessRecord) => ['pending_review', 'needs_evidence'].includes(row.status)
+export function isInboxAction(action: BusinessAction): action is 'feedback_record_only' | 'feedback_needs_evidence' | 'feedback_reject' {
+  return action === 'feedback_record_only' || action === 'feedback_needs_evidence' || action === 'feedback_reject'
+}
+export function feedbackTriageActions(row: BusinessRecord): BusinessAction[] {
+  if (!feedbackAwaiting(row) && row.status !== 'received') return []
+  return ['feedback_record_only', ...(row.status !== 'needs_evidence' ? ['feedback_needs_evidence' as const] : []), 'feedback_reject']
 }
 // A feedback that hit the 20% sample still has a pending review even after it
 // was auto-activated. Failed reviews quarantine the staged guidance.
@@ -30,6 +51,7 @@ export const edgeLabels: Record<string, string> = {
   amends: '修订', interprets: '解释', related_to: '相关', supplements: '补充依赖', attachment_of: '附件归属',
   cites: '引用依据', implements: '实施细则', template_for: '独立模板', repeals: '制度废止',
   exception_to: '条款例外', conflicts_with: '条款冲突',
+  explains_more: '补充说明', reading_note: '内容提示',
 }
 
 export const relationChoices = [
@@ -39,10 +61,43 @@ export const relationChoices = [
   { key: 'cites', label: edgeLabels.cites, direction: '引用文件 → 被引用的依据' },
   { key: 'implements', label: edgeLabels.implements, direction: '实施细则 → 上位制度' },
   { key: 'template_for', label: edgeLabels.template_for, direction: '独立模板 → 使用该模板的制度' },
+  { key: 'explains_more', label: edgeLabels.explains_more, direction: '说明文件 → 被说明正文' },
+  { key: 'reading_note', label: edgeLabels.reading_note, direction: '提示文件 → 被提示正文' },
   { key: 'repeals', label: edgeLabels.repeals, direction: '废止通知 → 被废止制度' },
   { key: 'exception_to', label: edgeLabels.exception_to, direction: '例外条款 → 通用条款' },
   { key: 'conflicts_with', label: edgeLabels.conflicts_with, direction: '登记两端冲突条款，确认后进入人工裁决' },
 ]
+export const associationQueryKeys = ['relationDocument','relationKB','relationType','relationStatus','relationEndpoint','relationPage'] as const
+export const relationReviewLabels: Record<string, string> = {
+  source_version_changed: '源文档版本已变化', target_version_changed: '目标文档版本已变化',
+  source_inactive: '源文档当前未生效', target_inactive: '目标文档当前未生效',
+  source_expired: '源文档已过有效期', target_expired: '目标文档已过有效期',
+  source_not_yet_effective: '源文档尚未到生效时间', target_not_yet_effective: '目标文档尚未到生效时间',
+  source_unavailable: '暂无法核验源文档', target_unavailable: '暂无法核验目标文档',
+  source_dependency_blocked: '源文档的补充依赖待核对', target_dependency_blocked: '目标文档的补充依赖待核对',
+  source_governance_blocked: '源文档当前受治理流程限制', target_governance_blocked: '目标文档当前受治理流程限制',
+}
+export const readingRelation = (type?: string) => type === 'explains_more' || type === 'reading_note'
+
+export function relationSentence(type: string | undefined, source: string, target: string): string {
+  switch (type) {
+    case 'amends': return `《${source}》修订《${target}》`
+    case 'interprets': return `《${source}》解释《${target}》`
+    case 'related_to': return `《${source}》与《${target}》相关`
+    case 'cites': return `《${source}》引用《${target}》作为依据`
+    case 'implements': return `《${source}》落实《${target}》`
+    case 'template_for': return `《${source}》是《${target}》使用的模板`
+    case 'repeals': return `《${source}》发出废止《${target}》的通知`
+    case 'exception_to': return `《${source}》中的条款是《${target}》中对应条款的例外`
+    case 'conflicts_with': return `《${source}》与《${target}》的指定条款存在冲突`
+    case 'supplements': return `《${source}》补充并依赖《${target}》`
+    case 'attachment_of': return `《${source}》是《${target}》的附件`
+    case 'explains_more': return `《${source}》为《${target}》补充说明`
+    case 'reading_note': return `《${source}》提示如何阅读《${target}》`
+    default: return `《${source}》关联至《${target}》`
+  }
+}
+
 export const clauseRelation = (type?: string) => type === 'exception_to' || type === 'conflicts_with'
 export const clauseDecisions: Record<string, string> = {
   prefer_source: '按源条款处理', prefer_target: '按目标条款处理', contextual: '按裁决说明区分适用条件',

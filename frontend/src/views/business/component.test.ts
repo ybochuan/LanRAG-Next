@@ -8,20 +8,34 @@ import * as model from './model'
 import { requestFence } from '../lifecycle/model'
 
 // Execute the actual setup script with controlled API completion and router hooks.
-function mountSetup(api: Record<string, unknown>, lifecycle: Record<string, unknown> = {}, props: { section: 'associations' | 'feedback-governance' | 'revisions'; scope?: string; canWrite?: boolean } = { section: 'revisions' }) {
+function mountSetup(
+  api: Record<string, unknown>,
+  lifecycle: Record<string, unknown> = {},
+  props: { section: 'associations' | 'feedback-governance' | 'revisions'; scope?: string; canWrite?: boolean; inboxOnly?: boolean } = { section: 'revisions' },
+  auth = vue.reactive({ effectiveTenantId: 7, isLoggedIn: true, admin: false }),
+) {
   const guards: (() => boolean | void)[] = []
   const scope = vue.effectScope()
   let overviewCalls = 0
+  let nextID = 0
+  class Element {
+    dataset: Record<string, string> = {}
+    focuses = 0
+    focus() { this.focuses++ }
+  }
   const source = parse(readFileSync(new URL('./BusinessView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const modules: Record<string, unknown> = {
-    vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
-    'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({}), onBeforeRouteLeave: (guard: () => boolean) => guards.push(guard), onBeforeRouteUpdate: (guard: () => boolean) => guards.push(guard) },
-    '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
+    vue: { ...vue, useId: () => 'test-' + nextID++, onMounted() {}, onBeforeUnmount() {} },
+    'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({ options: { history: { state: {} } } }), onBeforeRouteLeave: (guard: () => boolean) => guards.push(guard), onBeforeRouteUpdate: (guard: () => boolean) => guards.push(guard) },
+    '@/stores/auth': { useAuthStore: () => ({ get effectiveTenantId() { return auth.effectiveTenantId }, get isLoggedIn() { return auth.isLoggedIn }, hasRole: () => auth.admin }) },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }) },
-    '@/api/lifecycle': { overview: async () => { overviewCalls++; return { can_write: true, documents: [] } }, ...lifecycle },
-    '@/api/business': { documentTitle: async () => '', ...api },
+    '@/api/lifecycle': {
+      authority: async () => { overviewCalls++; return { can_write: true } },
+      ...lifecycle,
+    },
+    '@/api/business': { documentTitle: async () => '', relationRecords: api.list, ...api },
     './CreateForm.vue': {}, './DocumentPicker.vue': {}, '../lifecycle/model': { requestFence }, './model': model,
   }
   const state = scope.run(() => new Function('require', 'defineProps', 'defineEmits', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated};`)(
@@ -94,10 +108,10 @@ test('changing the selected document discards an earlier relation response', asy
   } finally { view.stop() }
 })
 
-test('overview authority failure is separated from the record-list error', async () => {
+test('authority failure is separated from the record-list error', async () => {
   const view = mountSetup(
     { list: async () => [] },
-    { overview: async () => { throw { $httpStatus: 503 } } },
+    { authority: async () => { throw { $httpStatus: 503 } } },
   )
   try {
     view.state.kb.value = 'kb-a'; await vue.nextTick(); await vue.nextTick()

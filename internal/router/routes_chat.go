@@ -32,6 +32,16 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 	}
 }
 
+// registerQAFeedbackRoutes omits API-key policies. The handlers check JWT
+// identity, current tenant membership, and session ownership.
+func registerQAFeedbackRoutes(r *gin.RouterGroup, h *handler.QAFeedbackHandler) {
+	messages := r.Group("/messages")
+	messages.GET("/:session_id/:id/feedback", h.OwnerFeedback)
+	messages.POST("/:session_id/:id/feedback", h.OwnerFeedback)
+	messages.GET("/feedback", h.InboxFeedback)
+	messages.PUT("/feedback/:id", h.InboxFeedback)
+}
+
 // RegisterSessionRoutes 注册路由。
 //
 // Sessions are per-user resources; the handler enforces user ownership.

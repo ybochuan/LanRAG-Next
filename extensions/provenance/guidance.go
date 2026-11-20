@@ -12,8 +12,16 @@ import (
 
 // GuidanceRequest binds a retry-stable call to a model step when one is available.
 type GuidanceRequest struct {
-	StepID string `json:"step_id"`
-	CallID string `json:"call_id"`
+	StepID              string               `json:"step_id"`
+	CallID              string               `json:"call_id"`
+	ConsumedToolOutputs []ConsumedToolOutput `json:"consumed_tool_outputs,omitempty"`
+}
+
+// ConsumedToolOutput identifies native search output included in the current request.
+type ConsumedToolOutput struct {
+	StepID     string `json:"step_id"`
+	ToolCallID string `json:"tool_call_id"`
+	OutputHash string `json:"output_hash"`
 }
 
 // GuidanceResult returns only the issued ephemeral addition and its bound step.
@@ -28,7 +36,7 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 	if !r.available() {
 		return out, ErrUnavailable
 	}
-	if q.StepID != "" && !id(q.StepID) || !digest(q.CallID) {
+	if q.StepID != "" && !id(q.StepID) || !digest(q.CallID) || len(q.ConsumedToolOutputs) > 128 || q.StepID == "" && len(q.ConsumedToolOutputs) != 0 {
 		return out, ErrInvalid
 	}
 	err = r.db.Write(ctx, func(tx *sql.Tx) error {
@@ -49,16 +57,29 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 				return ErrConflict
 			}
 		}
-		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID, StepID: q.StepID}
+		steps, err := verifiedSearchOutputSteps(ctx, tx, h, q.ConsumedToolOutputs)
+		if err != nil {
+			return err
+		}
+		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID, StepID: q.StepID, ConsumedToolSteps: steps}
 		selection, err := guidance.SelectTx(ctx, tx, scope, q.CallID)
 		if err != nil {
 			return err
 		}
+		if q.StepID != "" {
+			if err := guidance.RecordCheckTx(ctx, tx, scope, selection, r.now()); err != nil {
+				return err
+			}
+		}
 		out = GuidanceResult{Selection: selection, StepID: q.StepID}
-		if selection.Content == "" || q.StepID == "" {
+		if (selection.Content == "" && selection.AnnotationContent == "") || q.StepID == "" {
 			return nil
 		}
-		body, err := json.Marshal(selection.Content)
+		var instruction any = selection.Content
+		if selection.AnnotationContent != "" {
+			instruction = []string{selection.Content, selection.AnnotationPolicy, selection.AnnotationContent}
+		}
+		body, err := json.Marshal(instruction)
 		if err != nil {
 			return err
 		}
@@ -79,4 +100,32 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 		return err
 	})
 	return
+}
+
+// verifiedSearchOutputSteps only exposes successful same-run steps that committed
+// the search tool call ID and output digest. It creates no new lineage facts.
+func verifiedSearchOutputSteps(ctx context.Context, tx *sql.Tx, h RunHandle, outputs []ConsumedToolOutput) ([]string, error) {
+	var steps []string
+	counts := make(map[string]int, len(outputs))
+	for _, output := range outputs {
+		counts[output.ToolCallID]++
+	}
+	for _, output := range outputs {
+		if !id(output.StepID) || !id(output.ToolCallID) || !digest(output.OutputHash) || counts[output.ToolCallID] != 1 {
+			continue
+		}
+		body, _ := json.Marshal([]string{"agent-search-output-v1", output.ToolCallID, output.OutputHash})
+		sum := sha256.Sum256(body)
+		var ok bool
+		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ext_provenance_steps
+ WHERE tenant_id=? AND knowledge_base_id=? AND run_id=? AND step_id=? AND kind='tool' AND state='success' AND output_hash=?)`,
+			args(h.Scope, h.RunID, output.StepID, hex.EncodeToString(sum[:]))...).Scan(&ok)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			steps = append(steps, output.StepID)
+		}
+	}
+	return steps, nil
 }

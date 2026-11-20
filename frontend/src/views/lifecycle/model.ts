@@ -13,6 +13,20 @@ export function annotationsForSave(original:Annotations,fields:Record<'effective
 }
 export function ruleSourceLabel(value:ResolvedRules):string{return value.revision===0?'未配置（永久有效）':value.source.knowledge_base_id?'知识库规则':'租户默认规则'}
 export function validRules(rules:Rules):boolean{return Object.values(rules).length===3&&Object.values(rules).every(n=>Number.isInteger(n)&&n>=0&&n<=36500)}
+// Arrow keys move focus; the button handles activation with Enter or Space.
+export function moveTabFocus(event:KeyboardEvent){
+ if(event.altKey||event.ctrlKey||event.metaKey)return
+ const {key}=event
+ if(key!=='ArrowLeft'&&key!=='ArrowRight'&&key!=='Home'&&key!=='End')return
+ const list=event.currentTarget as HTMLElement
+ const tabs=Array.from(list.querySelectorAll<HTMLButtonElement>('[role="tab"]:not([disabled])'))
+ const index=tabs.indexOf(event.target as HTMLButtonElement)
+ if(index<0)return
+ const forward=(key==='ArrowRight')===(getComputedStyle(list).direction!=='rtl')
+ const next=key==='Home'?0:key==='End'?tabs.length-1:(index+(forward?1:-1)+tabs.length)%tabs.length
+ event.preventDefault()
+ tabs[next]?.focus()
+}
 export function requestFence(){let version=0;return{begin:()=>++version,invalidate:()=>{version++},current:(token:number)=>version===token}}
 // reviewDeliveryLabel names the notification queue state of one overdue
 // reminder. "已投递" means the local callback accepted the reminder; it

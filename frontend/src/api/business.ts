@@ -1,4 +1,4 @@
-import { get, put } from '@/utils/request'
+import { get, post, put } from '@/utils/request'
 import { batchQueryKnowledge, getKnowledgeDetailsCon } from '@/api/knowledge-base'
 import { cached, cacheKey, invalidateCache } from './requestCache'
 import type { FamilyActivity, SuggestionPolicy } from './families'
@@ -13,6 +13,7 @@ export type BusinessAction = 'relation_declare' | 'relation_confirm' | 'relation
   | 'repeal_create' | 'repeal_approve' | 'repeal_cancel'
   | 'clause_create' | 'clause_confirm' | 'clause_resolve' | 'clause_revoke'
   | 'feedback_create' | 'feedback_approve' | 'feedback_reject' | 'feedback_quarantine'
+  | 'feedback_record_only' | 'feedback_needs_evidence'
   | 'feedback_activate' | 'feedback_withdraw' | 'feedback_sample_review'
   | 'guidance_seed' | 'guidance_quarantine_topic'
   | 'revision_create' | 'revision_create_binary' | 'revision_bind_binary' | 'revision_approve' | 'revision_reject' | 'revision_publish'
@@ -42,6 +43,9 @@ export interface BusinessPayload {
   source_clause?: ClauseAnchor; target_clause?: ClauseAnchor
   applies_when?: string; resolution?: string
 }
+export type AnnotationCheckOutcome = 'sent' | 'matched' | 'source_mismatch' | 'cooling_down'
+  | 'awaiting_activation' | 'budget_or_limit' | 'withdrawn' | 'quarantined' | 'guidance_unavailable'
+export interface AnnotationCheck { outcome: AnnotationCheckOutcome; checked_at: string }
 export interface BusinessRecord {
   id: string; revision: number; status: string; text?: string; topic?: string
   risk?: string; ready_at?: string | null; confidence?: number; source?: string
@@ -51,18 +55,23 @@ export interface BusinessRecord {
   effective_at?: string; applied_at?: string | null; effective_from?: string | null; effective_until?: string | null
   source_clause?: ClauseAnchor; target_clause?: ClauseAnchor
   applies_when?: string; resolution?: string; decision_note?: string
-  resolved_by?: string; resolved_at?: string | null; pins_current?: boolean
+  resolved_by?: string; resolved_at?: string | null; pins_current?: boolean; review_reason?: string
   proposed_patch?: string; guidance_ids?: string[]; publication_key?: string
   publish_error?: string; family_id?: string
   record_kind?: 'split_batch' | 'split_part'
   split_id?: string; split_title?: string; split_parts?: SplitPartRecord[]
   feedback_context?: AnswerFeedbackContext
+  rating?: AnswerFeedbackContext['rating']; reason?: string; submitted_at?: string
   reviewed_guidance?: string
   citation_document_ids?: string[]
+  citation_chunks?: FeedbackCitationChunk[]
+  feedback_anchor?: FeedbackCitationChunk
+  annotation_checks?: AnnotationCheck[]
+  evidence_required?: boolean
 }
 export interface BusinessResult { id: string; revision: number; status: string; target_document_id?: string }
 export interface BusinessBody { operation_id: string; expected_revision: number; business: { id?: string; payload: BusinessPayload } }
-export interface RelatedDocument { knowledge_base_id: string; document_id: string; edge_type: string; direction: string; confidence: number }
+export interface RelatedDocument { knowledge_base_id: string; document_id: string; edge_type: string; direction: string; confidence: number; relation_id?: string }
 interface Envelope<T> { success: boolean; data: T; error?: { code?: string } }
 const base = (kb: string) => `/api/v1/knowledge-bases/${encodeURIComponent(kb)}/lifecycle/business/`
 function cacheTenant(){try{return localStorage.getItem('weknora_selected_tenant_id')||localStorage.getItem('weknora_tenant')||''}catch{return ''}}
@@ -78,6 +87,17 @@ export const documentRecords = (kb: string, doc: string, kind: 'relation' | 'rev
     state: kind === 'relation' ? 'workbench-relations' : 'workbench-revisions',
     document_id: doc, page: String(page), page_size: '20', id,
   })}`))
+export interface RelationFilters { edgeType: string; status: string; documentId: string }
+export function relationRecords(kb: string, page: number, filters: RelationFilters, documentId = '', id = '') {
+  const endpoint = documentId || filters.documentId
+  const state = !id && (filters.edgeType || filters.status)
+    ? `workbench-relations:${filters.edgeType}:${filters.status}`
+    : 'workbench-relations'
+  if (!endpoint) return list(kb, 'relation', page, id, state)
+  return unwrap<BusinessRecord[]>(get(`${base(kb)}related?${new URLSearchParams({
+    state, document_id: endpoint, page: String(page), page_size: '20', id,
+  })}`))
+}
 export const documentActivity = (kb:string, doc:string, page:number) =>
   unwrap<FamilyActivity[]>(get(`${base(kb)}related?${new URLSearchParams({
     state:'workbench-activity',document_id:doc,page:String(page),page_size:'20',
@@ -88,25 +108,45 @@ export const write = async (kb: string, action: BusinessAction | FamilyAction, b
   invalidateCache('doc-titles')
   return result
 }
-export interface AnswerFeedbackContext {
-  rating: 'incorrect' | 'suggestion' | 'helpful'
+export type AnswerFeedbackRating = 'like' | 'dislike' | 'supplement' | 'correction'
+export type AnswerFeedbackReason = 'inaccurate' | 'incomplete' | 'missing_sources' | 'other'
+export interface AnswerFeedbackSnapshot {
   question?: string
   answer_excerpt?: string
+  question_truncated?: boolean
+  answer_truncated?: boolean
+  snapshot_restricted?: boolean
+  snapshot_digest?: string
+}
+export interface AnswerFeedbackContext extends AnswerFeedbackSnapshot {
+  rating: AnswerFeedbackRating | 'incorrect' | 'suggestion' | 'helpful'
   suggested_revision?: string
 }
-export interface AnswerFeedbackPayload {
-  session_id: string
-  message_id: string
-  topic: string
-  text: string
-  negative: boolean
-  feedback_context: AnswerFeedbackContext
+export interface FeedbackCitationChunk extends ClauseAnchor {
+  document_id: string
+  version_id: string
+  chunk_index: number
 }
-export const captureAnswerFeedback = (kb: string, operationId: string, payload: AnswerFeedbackPayload) =>
-  unwrap<BusinessResult>(put(`${base(kb)}feedback_capture`, {
-    operation_id: operationId,
-    expected_revision: 0,
-    business: { payload },
+export interface AnswerFeedbackPayload {
+  operation_id: string
+  rating: AnswerFeedbackRating
+  text?: string
+  reason?: AnswerFeedbackReason
+  snapshot_digest: string
+}
+const feedbackInboxPath = '/api/v1/messages/feedback'
+const answerFeedbackPath = (sessionId: string, messageId: string) =>
+  `/api/v1/messages/${encodeURIComponent(sessionId)}/${encodeURIComponent(messageId)}/feedback`
+export const previewAnswerFeedback = (sessionId: string, messageId: string) =>
+  unwrap<AnswerFeedbackSnapshot>(get(answerFeedbackPath(sessionId, messageId)))
+export const captureAnswerFeedback = (sessionId: string, messageId: string, payload: AnswerFeedbackPayload) =>
+  unwrap<BusinessResult>(post(answerFeedbackPath(sessionId, messageId), payload))
+export const listUnscopedFeedback = (page = 1, id = '', state = '') =>
+  unwrap<BusinessRecord[]>(get(`${feedbackInboxPath}?${new URLSearchParams({page:String(page),page_size:'20',id,state})}`))
+export type UnscopedFeedbackAction = 'feedback_record_only' | 'feedback_needs_evidence' | 'feedback_reject'
+export const reviewUnscopedFeedback = (action: UnscopedFeedbackAction, body: BusinessBody) =>
+  unwrap<BusinessResult>(put(`${feedbackInboxPath}/${encodeURIComponent(body.business.id || '')}`, {
+    operation_id: body.operation_id, expected_revision: body.expected_revision, action,
   }))
 export const related = (kb: string, document: string) => unwrap<RelatedDocument[]>(get(`${base(kb)}related?document_id=${encodeURIComponent(document)}`))
 

@@ -9,6 +9,17 @@ import (
 )
 
 func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
+	if (c.Action == "feedback_approve" || c.Action == "feedback_activate") && s != nil && s.db != nil {
+		if !validID(c.ID) || !validID(c.ActorID) || !validID(c.OperationID) || !validID(c.Scope.KnowledgeBaseID) || c.Scope.TenantID == 0 || c.ExpectedRevision < 0 {
+			return Result{}, ErrInvalid
+		}
+		if result, found, err := s.replay(ctx, c); found || err != nil {
+			return result, err
+		}
+		if err := s.prepareQAFeedbackAction(ctx, c); err != nil {
+			return s.replayAfterObservationError(ctx, c, err)
+		}
+	}
 	return s.transact(ctx, c, func(tx *sql.Tx) (Result, error) {
 		p := c.Payload
 		out := Result{ID: c.ID, Revision: c.ExpectedRevision + 1}
@@ -115,6 +126,22 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 			out.ID = p.Topic
 			out.Status = "recovered"
 			return out, nil
+		}
+		f, e := readQAFeedbackReview(ctx, tx, c)
+		if e != nil && e != sql.ErrNoRows {
+			return Result{}, e
+		}
+		if e == nil {
+			switch c.Action {
+			case "feedback_approve":
+				return s.approveQAFeedback(ctx, tx, c, f)
+			case "feedback_record_only", "feedback_needs_evidence", "feedback_reject":
+				return s.recordQADisposition(ctx, tx, c, f, c.Action)
+			case "feedback_activate":
+				if err := s.currentQAPin(ctx, tx, c.Scope, f.anchor); err != nil {
+					return Result{}, err
+				}
+			}
 		}
 		var status, risk, topic, text string
 		var reviewContext bool
@@ -234,7 +261,7 @@ WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=? AND status='active'`
 				return Result{}, e
 			}
 		}
-		_, e := tx.ExecContext(ctx, `UPDATE ext_feedback_staging SET status=?,revision=?,ready_at=? WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, append([]any{out.Status, out.Revision, ready}, args(c.Scope, c.ID)...)...)
+		_, e = tx.ExecContext(ctx, `UPDATE ext_feedback_staging SET status=?,revision=?,ready_at=? WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, append([]any{out.Status, out.Revision, ready}, args(c.Scope, c.ID)...)...)
 		return out, e
 	})
 }
@@ -242,17 +269,18 @@ WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=? AND status='active'`
 // List returns inspectable, scoped management records; it does not inject them into QA.
 func (s *Service) List(ctx context.Context, scopeScope Command) ([]map[string]any, error) {
 	c := scopeScope
-	table, idcol := "ext_feedback_staging", "feedback_id"
-	fields := `json_object('text',text,'topic',topic,'risk',risk,'ready_at',ready_at,'source',CASE WHEN EXISTS (
-SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.tenant_id AND b.knowledge_base_id=ext_feedback_staging.knowledge_base_id AND b.feedback_id=ext_feedback_staging.feedback_id
-) THEN 'qa' ELSE 'manual' END,'sample_decision',COALESCE((SELECT s.decision FROM ext_feedback_sample_reviews s WHERE s.tenant_id=ext_feedback_staging.tenant_id AND s.knowledge_base_id=ext_feedback_staging.knowledge_base_id AND s.feedback_id=ext_feedback_staging.feedback_id),''),'sample_selected_at',COALESCE((SELECT s.selected_at FROM ext_feedback_sample_reviews s WHERE s.tenant_id=ext_feedback_staging.tenant_id AND s.knowledge_base_id=ext_feedback_staging.knowledge_base_id AND s.feedback_id=ext_feedback_staging.feedback_id),''))`
+	var table, idcol, fields string
 	switch c.Action {
+	case "feedback_list", "qa_feedback_list":
+		return s.listFeedback(ctx, c)
 	case "relation_list":
 		table, idcol, fields = relationRecords, "relation_id", "details"
-		if c.Payload.DocumentID != "" {
+		if c.IncludeSupplementDeclarations || c.Payload.DocumentID != "" || c.ListEdgeType == "supplements" || c.ListStatus == "supplement_declared" {
 			table = documentRelationRecords
 		}
-	case "feedback_list":
+		if !validRelationListFilters(c.ListEdgeType, c.ListStatus) {
+			return nil, ErrInvalid
+		}
 	case "guidance_list":
 		table, idcol = "ext_feedback_guidances", "guidance_id"
 		fields = `json_object('text',text,'topic',topic,'source',source,'confidence',confidence)`
@@ -274,12 +302,27 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 	if c.Page < 1 || c.Page > 10000 || c.PageSize < 1 || c.PageSize > 20 {
 		return nil, ErrInvalid
 	}
+	if c.Payload.DocumentID != "" && !validID(c.Payload.DocumentID) {
+		return nil, ErrInvalid
+	}
 	e := s.db.View(ctx, func(tx *sql.Tx) error {
 		where := "tenant_id=? AND knowledge_base_id=?"
 		params := args(c.Scope)
 		if c.Action == "relation_list" {
 			where = "tenant_id=? AND (knowledge_base_id=? OR target_knowledge_base_id=?)"
 			params = append(args(c.Scope), c.Scope.KnowledgeBaseID)
+			if doc := c.Payload.DocumentID; doc != "" {
+				where = "tenant_id=? AND ((knowledge_base_id=? AND document_id=?) OR (target_knowledge_base_id=? AND target_document_id=?))"
+				params = args(c.Scope, doc, c.Scope.KnowledgeBaseID, doc)
+			}
+			if c.ListEdgeType != "" {
+				where += " AND edge_type=?"
+				params = append(params, c.ListEdgeType)
+			}
+			if c.ListStatus != "" {
+				where += " AND status=?"
+				params = append(params, c.ListStatus)
+			}
 		}
 		if c.ID != "" {
 			if !validID(c.ID) {
@@ -291,32 +334,18 @@ SELECT 1 FROM ext_feedback_qa_bindings b WHERE b.tenant_id=ext_feedback_staging.
 			where += " AND json_extract(details,'$.record_kind') <> 'split_part'"
 		}
 		if c.Payload.DocumentID != "" {
-			if !validID(c.Payload.DocumentID) {
-				return ErrInvalid
-			}
 			switch c.Action {
 			case "relation_list":
-				where += " AND (json_extract(details,'$.document_id')=? OR json_extract(details,'$.target_document_id')=?)"
 			case "revision_list":
 				where += ` AND (json_extract(details,'$.source_document_id')=? OR json_extract(details,'$.target_document_id')=?
 OR (json_extract(details,'$.record_kind')='split_batch' AND EXISTS (
  SELECT 1 FROM ext_revision_split_parts p JOIN ext_revision_proposals r USING(tenant_id,knowledge_base_id,proposal_id)
  WHERE p.tenant_id=records.tenant_id AND p.knowledge_base_id=records.knowledge_base_id
  AND p.batch_id=records.proposal_id AND r.status='published' AND r.target_document_id=?)))`
-				params = append(params, c.Payload.DocumentID)
+				params = append(params, c.Payload.DocumentID, c.Payload.DocumentID, c.Payload.DocumentID)
 			default:
 				return ErrInvalid
 			}
-			params = append(params, c.Payload.DocumentID, c.Payload.DocumentID)
-		}
-		if c.Action == "feedback_list" && c.ListStatus != "" {
-			switch c.ListStatus {
-			case "pending_review", "approved", "active", "rejected", "quarantined", "withdrawn":
-			default:
-				return ErrInvalid
-			}
-			where += " AND status=?"
-			params = append(params, c.ListStatus)
 		}
 		params = append(params, c.PageSize, (c.Page-1)*c.PageSize)
 		rows, e := tx.QueryContext(ctx, `SELECT `+idcol+`,status,revision,`+fields+` FROM `+table+` WHERE `+where+` ORDER BY `+idcol+` LIMIT ? OFFSET ?`, params...)
@@ -338,10 +367,6 @@ OR (json_extract(details,'$.record_kind')='split_batch' AND EXISTS (
 			row["id"] = id
 			row["status"] = status
 			row["revision"] = rev
-			if c.Action == "feedback_list" && row["source"] == "qa" && !c.IncludeFeedbackContext {
-				delete(row, "text")
-				delete(row, "topic")
-			}
 			out = append(out, row)
 		}
 		if err := rows.Err(); err != nil {
@@ -350,17 +375,15 @@ OR (json_extract(details,'$.record_kind')='split_batch' AND EXISTS (
 		if err := rows.Close(); err != nil {
 			return err
 		}
+		if c.Action == "relation_list" {
+			return addRelationReviewReasons(ctx, tx, c.Scope.TenantID, s.now(), out)
+		}
 		if c.Action == "revision_list" && c.ID != "" && len(out) == 1 && out[0]["record_kind"] == "split_batch" {
 			parts, err := listSplitParts(ctx, tx, c.Scope, c.ID)
 			if err != nil {
 				return err
 			}
 			out[0]["split_parts"] = parts
-		}
-		if c.Action == "feedback_list" && c.ID != "" && len(out) == 1 && out[0]["source"] == "qa" && c.IncludeFeedbackContext {
-			if err := feedbackReviewContext(ctx, tx, c, out[0]); err != nil {
-				return err
-			}
 		}
 		return nil
 	})
@@ -370,17 +393,17 @@ OR (json_extract(details,'$.record_kind')='split_batch' AND EXISTS (
 // Attachment links are system records; their presence is not a claim that
 // either document is currently retrievable.
 const relationRecords = `(
-SELECT tenant_id,knowledge_base_id,relation_id,status,revision,target_knowledge_base_id,
+SELECT tenant_id,knowledge_base_id,relation_id,status,revision,target_knowledge_base_id,document_id,target_document_id,edge_type,
 json_object('knowledge_base_id',knowledge_base_id,'document_id',document_id,'target_knowledge_base_id',target_knowledge_base_id,'target_document_id',target_document_id,'edge_type',edge_type,'confidence',confidence,'source_version_id',source_version_id,'target_version_id',target_version_id) AS details
 FROM ext_document_relations
 UNION ALL
-SELECT tenant_id,knowledge_base_id,notice_id,status,revision,knowledge_base_id,
+SELECT tenant_id,knowledge_base_id,notice_id,status,revision,knowledge_base_id,document_id,target_document_id,'repeals',
 json_object('document_id',document_id,'target_knowledge_base_id',knowledge_base_id,'target_document_id',target_document_id,'edge_type','repeals',
  'source_version_id',source_version_id,'target_version_id',target_version_id,
  'effective_at',strftime('%Y-%m-%dT%H:%M:%fZ',effective_at_ms/1000.0,'unixepoch'),'applied_at',applied_at)
 FROM ext_repeal_notices
 UNION ALL
-SELECT r.tenant_id,r.knowledge_base_id,r.relation_id,r.status,r.revision,r.knowledge_base_id,
+SELECT r.tenant_id,r.knowledge_base_id,r.relation_id,r.status,r.revision,r.knowledge_base_id,r.document_id,r.target_document_id,r.edge_type,
 json_object('document_id',r.document_id,'target_knowledge_base_id',r.knowledge_base_id,'target_document_id',r.target_document_id,'edge_type',r.edge_type,
  'source_version_id',r.source_version_id,'target_version_id',r.target_version_id,
  'source_clause',json_object('chunk_id',r.source_chunk_id,'content_hash',r.source_content_hash),
@@ -395,7 +418,7 @@ CASE WHEN a.removed_at IS NOT NULL THEN 'attachment_removed'
      WHEN d.document_id IS NULL AND a.retired_at IS NOT NULL THEN 'attachment_retired'
      WHEN d.document_id IS NULL THEN 'linked'
      WHEN a.cleanup_error<>'' THEN 'attachment_cleanup_retry'
-     ELSE 'attachment_cleanup_pending' END,1,a.knowledge_base_id,
+     ELSE 'attachment_cleanup_pending' END,1,a.knowledge_base_id,a.attachment_id,a.parent_document_id,'attachment_of',
 json_object('document_id',a.attachment_id,'target_knowledge_base_id',a.knowledge_base_id,'target_document_id',a.parent_document_id,'edge_type','attachment_of',
  'effective_from',ann.effective_from,'effective_until',ann.effective_until)
 FROM ext_attachment_links a
@@ -411,7 +434,7 @@ WHERE a.attachment_id IS NOT NULL
 const documentRelationRecords = `(
 SELECT * FROM ` + relationRecords + `
 UNION ALL
-SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||f.edge_id,'supplement_declared',d.revision,d.knowledge_base_id,
+SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||f.edge_id,'supplement_declared',d.revision,d.knowledge_base_id,d.document_id,p.parent_document_id,'supplements',
  json_object('knowledge_base_id',d.knowledge_base_id,'document_id',d.document_id,'target_knowledge_base_id',d.knowledge_base_id,'target_document_id',p.parent_document_id,'edge_type','supplements',
  'source_version_id',d.child_version_node_id,'target_version_id',p.parent_version_node_id)
 FROM ext_supplement_current c
@@ -420,7 +443,7 @@ JOIN ext_supplement_parents p USING(tenant_id,knowledge_base_id,document_id,decl
 JOIN ext_supplement_edge_facts f USING(tenant_id,knowledge_base_id,document_id,declaration_id,parent_document_id)
 WHERE d.status='active'
 UNION ALL
-SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||cf.cross_edge_id,'supplement_declared',d.revision,cp.parent_knowledge_base_id,
+SELECT d.tenant_id,d.knowledge_base_id,'supplement:'||cf.cross_edge_id,'supplement_declared',d.revision,cp.parent_knowledge_base_id,d.document_id,cp.parent_document_id,'supplements',
  json_object('knowledge_base_id',d.knowledge_base_id,'document_id',d.document_id,'target_knowledge_base_id',cp.parent_knowledge_base_id,'target_document_id',cp.parent_document_id,'edge_type','supplements',
  'source_version_id',d.child_version_node_id,'target_version_id',cp.parent_version_node_id)
 FROM ext_supplement_current c

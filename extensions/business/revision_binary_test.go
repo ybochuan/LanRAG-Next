@@ -73,6 +73,48 @@ func TestBinaryRevisionBindsUploadedDocumentAndPublishesAtomically(t *testing.T)
 	}
 }
 
+func TestBinaryCreateRecoversReceiptAfterSourceDrift(t *testing.T) {
+	s, db, _ := fixture(t)
+	ctx := context.Background()
+	scope := provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}
+	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{
+		EventID: "source-active", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source",
+		ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seedVersions(t, db, scope)
+	seedBinarySourceEvidence(t, db, scope, `{"body":"original-binary"}`)
+	s.verify = func(_ context.Context, _ provenance.Scope, doc string) (string, error) {
+		return "version-" + doc, nil
+	}
+	create := cmd("revision_create_binary", "create-before-source-drift")
+	create.Payload.DocumentID = "source"
+	proposal, err := s.Execute(ctx, create)
+	if err != nil || proposal.ID == "" {
+		t.Fatalf("create binary proposal: %+v %v", proposal, err)
+	}
+
+	observations := 0
+	s.verify = func(_ context.Context, _ provenance.Scope, _ string) (string, error) {
+		observations++
+		return "version-changed", ErrConflict
+	}
+	got, err := s.Execute(ctx, create)
+	if err != nil || got.ID != proposal.ID || got.Revision != proposal.Revision || observations != 0 {
+		t.Fatalf("recover original receipt: %+v %v (observations: %d)", got, err, observations)
+	}
+	changed := create
+	changed.Payload.DocumentID = "other-source"
+	if _, err := s.Execute(ctx, changed); !errors.Is(err, ErrConflict) || observations != 0 {
+		t.Fatalf("changed payload must conflict before verifying the source: %v", err)
+	}
+	create.OperationID = "new-create-after-source-drift"
+	if _, err := s.Execute(ctx, create); !errors.Is(err, ErrConflict) || observations != 1 {
+		t.Fatalf("new operation must verify the current source: %v (observations: %d)", err, observations)
+	}
+}
+
 func TestBinaryPublishUnknownObservationRetainsSourceAndRetries(t *testing.T) {
 	s, db, _ := fixture(t)
 	ctx := context.Background()

@@ -32,7 +32,7 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup,cleanupPage,cleanupTotal,cleanupFilter,cleanupActionCount,allDocuments,loadMoreDocuments,documentPageError,nextDocumentPage,ruleForm,ruleDirty,ruleOutdated,resetRuleForm,submitRules};`)(
     (id: string) => modules[id], () => ({}), () => 0, () => {}, {}, { activeElement: null, querySelector: () => null }, {},
   ))
   return { state, route, stop: () => scope.stop() }
@@ -115,6 +115,30 @@ test('same-page navigation and history restore the list tab and filters', async 
   } finally { view.stop() }
 })
 
+test('cleanup uses the server filter, effective row status and scope-wide actionable count', async () => {
+  const due = { document_id: 'due', status: 'pending_cleanup', effective_status: 'awaiting_confirmation', can_confirm: true }
+  const requests: Array<[number, string]> = []
+  const view = mountSetup({
+    cleanupList: async (_kb: string, page: number, _pageSize: number, state: string) => {
+      requests.push([page, state])
+      return { tasks: [due], total: 1, actionable: 3 }
+    },
+  }, { kb: 'kb', tab: 'cleanup' })
+  try {
+    await view.state.loadKnowledgeBases()
+    await vue.nextTick()
+    view.state.cleanupFilter.value = 'awaiting_confirmation'
+    requests.length = 0
+    await view.state.loadCleanup(1)
+    assert.deepEqual(requests, [[1, 'awaiting_confirmation']])
+    assert.deepEqual(view.state.cleanupItems.value, [due])
+    assert.equal(view.state.cleanupTotal.value, 1)
+    assert.equal(view.state.cleanupActionCount.value, 3)
+  } finally {
+    view.stop()
+  }
+})
+
 test('a failed cleanup refreshes the task so a retry uses the latest revision', async () => {
   let task = { knowledge_base_id: 'kb', document_id: 'doc', revision: 4, status: 'awaiting_confirmation', can_confirm: true }
   const revisions: number[] = []
@@ -138,6 +162,86 @@ test('a failed cleanup refreshes the task so a retry uses the latest revision', 
     await state.confirmCleanup(state.cleanupItems.value[0])
     assert.deepEqual(revisions, [4, 5])
   } finally { view.stop() }
+})
+
+test('the first document page renders immediately and a failed next page can be retried', async () => {
+  const pages: number[] = []
+  let fail = true
+  const row = (document_id: string) => ({ document_id, annotations: {} })
+  const fixture = mountSetup({ overview: async (_kb: string, page: number) => {
+    pages.push(page)
+    if (page === 2 && fail) { fail = false; throw new Error('fixture unavailable') }
+    const documents = page === 1 ? Array.from({ length: 50 }, (_, index) => row(String(index))) : [row('last')]
+    return { total: 51, page_size: 50, documents, rules: { rules: {} }, can_write: true }
+  } })
+  try {
+    const { state } = fixture
+    await state.loadKnowledgeBases()
+    await vue.nextTick()
+    assert.deepEqual(pages, [1])
+    assert.equal(state.allDocuments.value.length, 50)
+    await state.loadMoreDocuments()
+    assert.equal(state.allDocuments.value.length, 50)
+    assert.ok(state.documentPageError.value)
+    await state.loadMoreDocuments()
+    assert.deepEqual(pages, [1, 2, 2])
+    assert.equal(state.allDocuments.value.at(-1)?.document_id, 'last')
+    assert.equal(state.nextDocumentPage.value, 0)
+  } finally { fixture.stop() }
+})
+
+test('cleanup reaches the 101st task and returns from an emptied last page', async () => {
+  const pages: number[] = []
+  let total = 101
+  const doc = { knowledge_base_id: 'kb', document_id: 'last', revision: 1, can_confirm: true }
+  const fixture = mountSetup({
+    cleanupList: async (_kb: string, page: number) => {
+      pages.push(page)
+      return { total, tasks: page === 3 && total === 101 ? [doc] : [] }
+    },
+    confirmCleanup: async () => { total = 100 },
+  })
+  try {
+    const { state } = fixture
+    await state.loadKnowledgeBases()
+    await vue.nextTick()
+    await state.loadCleanup(3)
+    assert.equal(state.cleanupItems.value[0]?.document_id, 'last')
+    await state.confirmCleanup(doc)
+    assert.deepEqual(pages, [3, 3, 2])
+    assert.equal(state.cleanupPage.value, 2)
+    assert.equal(state.cleanupTotal.value, 100)
+  } finally { fixture.stop() }
+})
+
+test('refresh preserves the rules draft and blocks a stale save until reset', async () => {
+  let revision = 1
+  const writes: number[] = []
+  const rules = () => ({ rules: { effective_delay_days: 0, valid_days: revision * 10, review_days: 0 }, token: String(revision) })
+  const fixture = mountSetup({
+    overview: async () => ({ total: 0, documents: [], rules: rules(), rule_revision: revision, can_write: true }),
+    saveRules: async (_kb: string, expected: number) => { writes.push(expected); return { rules: rules(), rule_revision: revision } },
+  })
+  try {
+    const { state } = fixture
+    await state.loadKnowledgeBases()
+    await vue.nextTick()
+    state.ruleForm.valid_days = 45
+    await state.loadOverview()
+    assert.equal(state.ruleForm.valid_days, 45)
+    assert.equal(state.ruleDirty.value, true)
+    revision = 2
+    await state.loadOverview()
+    assert.equal(state.ruleForm.valid_days, 45)
+    assert.equal(state.ruleOutdated.value, true)
+    await state.submitRules()
+    assert.deepEqual(writes, [])
+    state.resetRuleForm()
+    assert.equal(state.ruleForm.valid_days, 20)
+    state.ruleForm.valid_days = 25
+    await state.submitRules()
+    assert.deepEqual(writes, [2])
+  } finally { fixture.stop() }
 })
 
 test('date conflict reload uses a fresh revision and reapplies only the edited dates', async () => {
@@ -256,8 +360,9 @@ test('cross-KB creation from the target side is blocked with a clear hint', () =
   assert.ok(script.includes("targetSideCrossBlocked"), 'a guard must exist for the target-side entry')
   assert.ok(script.includes("targetSideCrossBlocked.value)return"), 'submit must refuse the blocked entry')
   assert.ok(template.includes('targetSideCrossBlocked ||'), 'the submit button must be disabled')
-  assert.ok(template.includes('跨库关系请前往源文档所在知识库发起'), 'the hint must name where to create cross-KB relations')
-  assert.ok(template.includes('此入口已禁用'), 'the hint must state the entry is disabled')
+  assert.ok(script.includes("fixedDocument?.end==='target'&&!readingRelation(form.edge_type)"), 'only same-library reading relations are offered with a fixed target')
+  assert.ok(template.includes('其他关系请从源文档或文档关联页面创建'), 'the hint must name where to create other relations')
+  assert.ok(template.includes('从正文详情可新增同库补充说明和内容提示'), 'the hint must name the available reading relations')
 })
 
 test('review list supports ascending and descending review_due order', () => {
@@ -280,7 +385,7 @@ test('document list uses WeKnora text colour and shows all documents in a scroll
   assert.ok(file.includes('.document-link :deep(.t-button__text) {'), 'the TDesign button text must wrap instead of being clipped')
   assert.ok(file.includes('white-space:normal;'), 'document names must wrap onto multiple lines')
   assert.ok(file.includes('color:var(--td-text-color-primary);'), 'document names default to WeKnora primary text colour')
-  assert.ok(script.includes('allDocuments.value=rows'), 'all document pages must be accumulated')
+  assert.ok(script.includes('loadMoreDocuments'), 'document pages load on demand')
   assert.ok(template.includes('v-for="doc in sortedDocuments"'), 'table renders the full sorted document set')
   assert.ok(template.includes('<t-select id="lifecycle-state-filter"'), 'the state filter must be a TDesign select')
   assert.ok(template.includes('<t-input id="lifecycle-title-search"'), 'the title search must be a TDesign input')

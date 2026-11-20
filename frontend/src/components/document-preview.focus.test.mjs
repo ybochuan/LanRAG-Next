@@ -17,7 +17,7 @@ async function flush() {
   await nextTick()
 }
 
-function setup(t) {
+function setup(t, disableAutoFocus = false) {
   const scope = effectScope()
   t.after(() => scope.stop())
   const document = { body: {}, activeElement: null }
@@ -31,12 +31,12 @@ function setup(t) {
       calls.push(name)
     },
   })
-  const props = reactive({ active: true, sourceKey: 'artifact:one' })
+  const props = reactive({ active: true, sourceKey: 'artifact:one', disableAutoFocus })
   const docxContainer = ref(null)
   const htmlViewMode = ref('render')
   const isFullscreen = ref(false)
   const state = scope.run(() => vm.runInNewContext(`${focusSource}; ({
-    previewRoot, previewContent, focusPreviewContent, onPreviewFrameLoad,
+    previewRoot, previewContent, focusPreviewContent, onPreviewFrameLoad, toggleHtmlViewMode,
   })`, {
     ref, watch, nextTick, props, document, docxContainer, htmlViewMode, isFullscreen,
     getPreviewSourceKey: () => props.sourceKey,
@@ -130,6 +130,57 @@ test('iframe load retains preview focus without taking it from another input', a
   ctx.document.activeElement = input
   ctx.onPreviewFrameLoad()
   assert.equal(ctx.document.activeElement, input)
+})
+
+test('inline relation previews load and switch files without moving focus from their host', async t => {
+  const ctx = setup(t, true)
+  const trigger = ctx.element('relation disclosure')
+  ctx.document.activeElement = trigger
+  ctx.previewRoot.value = ctx.element('root')
+  await flush()
+  assert.equal(ctx.document.activeElement, trigger)
+
+  ctx.props.sourceKey = 'artifact:two'
+  ctx.htmlViewMode.value = 'source'
+  ctx.previewContent.value = ctx.element('iframe')
+  await flush()
+  ctx.onPreviewFrameLoad()
+  assert.equal(ctx.document.activeElement, trigger)
+  assert.deepEqual(ctx.calls, [])
+
+  ctx.document.activeElement = ctx.previewRoot.value
+  ctx.previewContent.value = ctx.element('rendered content')
+  await flush()
+  ctx.onPreviewFrameLoad()
+  assert.equal(ctx.document.activeElement, ctx.previewRoot.value)
+  assert.deepEqual(ctx.calls, [])
+})
+
+test('inline previews still focus on explicit HTML view and fullscreen changes', async t => {
+  const ctx = setup(t, true)
+  ctx.previewRoot.value = ctx.element('root')
+  await flush()
+  ctx.isFullscreen.value = true
+  await flush()
+  assert.deepEqual(ctx.calls, ['root'])
+  ctx.previewContent.value = ctx.element('content')
+  await flush()
+  assert.deepEqual(ctx.calls, ['root', 'content'])
+
+  for (const update of [() => { ctx.isFullscreen.value = false }, ctx.toggleHtmlViewMode]) {
+    ctx.document.activeElement = ctx.element('toolbar button')
+    update()
+    await flush()
+    assert.equal(ctx.document.activeElement, ctx.previewContent.value)
+  }
+  assert.deepEqual(ctx.calls, ['root', 'content', 'content', 'content'])
+})
+
+test('the inline wrapper loads an active preview with automatic focus disabled', () => {
+  const wrapper = readFileSync(new URL('../views/business/ReadingRelationPreview.vue', import.meta.url), 'utf8')
+  const { descriptor } = parse(wrapper)
+  assert.match(descriptor.template.content, /<DocumentPreview[^>]*\bactive disable-auto-focus\b/)
+  assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: 'ReadingRelationPreview.vue', id: 'relation-preview' }).errors, [])
 })
 
 test('every document scroll target is tabbable and key events keep native behavior', () => {

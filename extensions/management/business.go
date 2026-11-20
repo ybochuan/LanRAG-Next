@@ -13,6 +13,13 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 )
 
+const workbenchRelations = "workbench-relations"
+
+type relatedResult struct {
+	business.Related
+	RelationID string `json:"relation_id,omitempty"`
+}
+
 func businessRead(action string) bool {
 	switch action {
 	case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
@@ -32,16 +39,9 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	if b == nil {
 		b = business.New(s.db, s.sources, time.Now)
 	}
-	var body struct {
-		ID      string           `json:"id"`
-		Payload business.Payload `json:"payload"`
-	}
-	if len(r.Business) > 0 {
-		dec := json.NewDecoder(bytes.NewReader(r.Business))
-		dec.DisallowUnknownFields()
-		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF {
-			return nil, business.ErrInvalid
-		}
+	body, err := decodeBusiness(r.Business)
+	if err != nil {
+		return nil, err
 	}
 	if r.Action == "business_lineage_graph" {
 		return s.lineageGraph(ctx, r, body.ID)
@@ -61,6 +61,18 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	c := business.Command{Scope: provenance.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, ActorID: r.ActorID, Action: strings.TrimPrefix(r.Action, "business_"), OperationID: r.OperationID, ID: body.ID, ExpectedRevision: r.ExpectedRevision, Payload: body.Payload}
 	c.Page = r.Page
 	c.PageSize = r.PageSize
+	relationList := r.State == workbenchRelations
+	if c.Action == "relation_list" || c.Action == "related" {
+		if filters, ok := strings.CutPrefix(r.State, workbenchRelations+":"); ok {
+			typ, status, ok := strings.Cut(filters, ":")
+			if !ok || strings.Contains(status, ":") {
+				return nil, business.ErrInvalid
+			}
+			relationList = true
+			c.ListEdgeType, c.ListStatus = typ, status
+		}
+		c.IncludeSupplementDeclarations = relationList
+	}
 	switch c.Action {
 	case "family_list":
 		return b.Families(ctx, c)
@@ -86,11 +98,11 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 	case "rendition_bind":
 		return s.renditions.Bind(ctx, c.Scope, c.Payload.DocumentID, c.ID)
 	case "related":
-		switch r.State {
-		case "workbench-activity":
+		if r.State == "workbench-activity" {
 			c.Payload.DocumentID = r.DocumentID
 			return b.DocumentActivity(ctx, c)
-		case "workbench-relations", "workbench-revisions":
+		}
+		if relationList || r.State == "workbench-revisions" {
 			if r.DocumentID == "" {
 				return nil, business.ErrInvalid
 			}
@@ -105,10 +117,10 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		out := make([]business.Related, 0, len(rows))
+		out := make([]relatedResult, 0, len(rows))
 		for _, row := range rows {
 			if s.scopes[lifecycle.PolicyScope{TenantID: r.TenantID, KnowledgeBaseID: row.KnowledgeBaseID}] {
-				out = append(out, row)
+				out = append(out, relatedResult{Related: row, RelationID: row.RelationID})
 			}
 		}
 		return out, nil
@@ -122,5 +134,55 @@ func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
 		return b.Publish(ctx, c.Scope, c.ID)
 	default:
 		return b.Execute(ctx, c)
+	}
+}
+
+type businessBody struct {
+	ID      string           `json:"id"`
+	Payload business.Payload `json:"payload"`
+}
+
+func decodeBusiness(raw json.RawMessage) (businessBody, error) {
+	var body businessBody
+	if len(raw) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF {
+			return body, business.ErrInvalid
+		}
+	}
+	return body, nil
+}
+
+func (s *Server) feedbackTenantConfigured(tenant uint64) bool {
+	for scope := range s.scopes {
+		if scope.TenantID == tenant {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) executeQAFeedback(ctx context.Context, r Request, configured bool) (any, error) {
+	body, err := decodeBusiness(r.Business)
+	if err != nil {
+		return nil, err
+	}
+	b := s.business
+	if b == nil {
+		b = business.New(s.db, s.sources, time.Now)
+	}
+	c := business.Command{Scope: provenance.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID},
+		Action: r.Action, ActorID: r.ActorID, OperationID: r.OperationID, ID: body.ID, ExpectedRevision: r.ExpectedRevision, Payload: body.Payload}
+	switch r.Action {
+	case "qa_feedback_submit":
+		return b.SubmitQAFeedback(ctx, c, configured)
+	case "qa_feedback_list":
+		c.Page, c.PageSize, c.ListStatus, c.IncludeFeedbackContext = r.Page, r.PageSize, r.State, r.CanWrite
+		return b.List(ctx, c)
+	case "qa_feedback_review":
+		return b.ReviewQAInbox(ctx, c)
+	default:
+		return nil, business.ErrInvalid
 	}
 }

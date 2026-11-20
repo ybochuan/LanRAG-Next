@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"testing"
+	"time"
+
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 	"github.com/ybochuan/LanRAG-Next/extensions/store"
-	"testing"
-	"time"
 )
 
 func TestTemplateEvidenceUsesTheVerifiedRelationRevision(t *testing.T) {
@@ -104,7 +106,7 @@ func TestNavigationRelationsUseBusinessAuditWithoutGovernanceEdges(t *testing.T)
 	}
 	seedVersions(t, db, scope)
 	s.verify = func(_ context.Context, _ provenance.Scope, doc string) (string, error) { return "version-" + doc, nil }
-	for _, kind := range []string{"cites", "implements", "template_for"} {
+	for _, kind := range []string{"cites", "implements", "template_for", "explains_more", "reading_note"} {
 		c := cmd("relation_declare", "create-"+kind)
 		c.Payload = Payload{DocumentID: "source", TargetDocumentID: "target", EdgeType: kind}
 		relation, err := s.Execute(ctx, c)
@@ -114,6 +116,10 @@ func TestNavigationRelationsUseBusinessAuditWithoutGovernanceEdges(t *testing.T)
 		items, err := s.QueryRelated(ctx, scope, "target")
 		if err != nil || len(items) != 1 || items[0].Direction != "incoming" || items[0].DocumentID != "source" || items[0].EdgeType != kind {
 			t.Fatalf("query %s: %v %v", kind, items, err)
+		}
+		outgoing, err := s.QueryRelated(ctx, scope, "source")
+		if err != nil || len(outgoing) != 1 || outgoing[0].Direction != "outgoing" || outgoing[0].DocumentID != "target" || outgoing[0].EdgeType != kind {
+			t.Fatalf("outgoing %s: %v %v", kind, outgoing, err)
 		}
 		c = cmd("relation_revoke", "revoke-"+kind)
 		c.ID, c.ExpectedRevision = relation.ID, relation.Revision
@@ -129,12 +135,160 @@ func TestNavigationRelationsUseBusinessAuditWithoutGovernanceEdges(t *testing.T)
 		var edges, audits int
 		err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM ext_lineage_edge),
 			(SELECT COUNT(*) FROM ext_business_audit WHERE action IN ('relation_declare','relation_revoke'))`).Scan(&edges, &audits)
-		if err == nil && (edges != 0 || audits != 6) {
+		if err == nil && (edges != 0 || audits != 10) {
 			t.Fatalf("governance edges=%d, audit rows=%d", edges, audits)
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReadingRelationsDoNotFollowChangedOrInactiveDocuments(t *testing.T) {
+	s, db, now := fixture(t)
+	ctx := t.Context()
+	scope := provenance.Scope{TenantID: 7, KnowledgeBaseID: "kb"}
+	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: "source", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	seedVersions(t, db, scope)
+	currentSource := "version-source"
+	s.verify = func(_ context.Context, _ provenance.Scope, doc string) (string, error) {
+		if doc == "source" {
+			return currentSource, nil
+		}
+		return "version-" + doc, nil
+	}
+	for _, kind := range []string{"explains_more", "reading_note"} {
+		c := cmd("relation_declare", "create-"+kind)
+		c.Payload = Payload{DocumentID: "source", TargetDocumentID: "target", EdgeType: kind, TargetKnowledgeBaseID: "other"}
+		if _, err := s.Execute(ctx, c); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("cross-library %s: %v", kind, err)
+		}
+		c.Payload.TargetKnowledgeBaseID = ""
+		if _, err := s.Execute(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.QueryRelated(ctx, scope, "target")
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("registered relations = %v, %v", rows, err)
+	}
+	checkReview := func(want string) {
+		t.Helper()
+		listed, err := s.List(ctx, Command{Scope: scope, Action: "relation_list"})
+		if err != nil || len(listed) != 2 {
+			t.Fatalf("registered records = %v, %v", listed, err)
+		}
+		for _, row := range listed {
+			if row["status"] != "active" || row["review_reason"] != want {
+				t.Fatalf("want active registration with %s, got %v", want, row)
+			}
+		}
+	}
+	setSourceHead := func(head string) {
+		t.Helper()
+		if err := db.Write(ctx, func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO ext_lineage_node VALUES('version-source-next','7','kb','document_version','source','2026-11-02T00:01:00Z')`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`UPDATE ext_document_version_family SET current_version_node_id=? WHERE tenant_id='7' AND knowledge_base_id='kb' AND document_id='source'`, head)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		currentSource = head
+	}
+	setSourceHead("version-source-next")
+	if rows, err = s.QueryRelated(ctx, scope, "target"); err != nil || len(rows) != 0 {
+		t.Fatalf("old-version relations = %v, %v", rows, err)
+	}
+	checkReview("source_version_changed")
+	setSourceHead("version-source")
+
+	deadline := now.Add(time.Hour)
+	if err = lifecycle.NewConfiguration(db).PutAnnotations(ctx, lifecycle.Scope{TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "target"}, lifecycle.Annotations{EffectiveUntil: &deadline}, 0); err != nil {
+		t.Fatal(err)
+	}
+	*now = deadline.Add(time.Nanosecond)
+	if rows, err = s.QueryRelated(ctx, scope, "source"); err != nil || len(rows) != 0 {
+		t.Fatalf("expired relations = %v, %v", rows, err)
+	}
+	checkReview("target_expired")
+	*now = deadline.Add(-time.Nanosecond)
+	if _, err = lifecycle.NewStore(db).Append(ctx, lifecycle.Event{EventID: "source-stale", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source", FromState: lifecycle.Active, ToState: lifecycle.Stale, Reason: "fixture", OccurredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err = s.QueryRelated(ctx, scope, "target"); err != nil || len(rows) != 0 {
+		t.Fatalf("inactive relations = %v, %v", rows, err)
+	}
+	checkReview("source_inactive")
+}
+
+func TestReadingRelationRejectsConcurrentDuplicateAndKeepsHistoricalRows(t *testing.T) {
+	s, db, now := fixture(t)
+	ctx := t.Context()
+	scope := cmd("", "").Scope
+	if _, err := lifecycle.NewStore(db).Append(ctx, lifecycle.Event{
+		EventID: "source", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "source",
+		ToState: lifecycle.Active, Reason: "fixture", OccurredAt: *now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seedVersions(t, db, scope)
+	s.verify = func(_ context.Context, _ provenance.Scope, doc string) (string, error) { return "version-" + doc, nil }
+	for _, kind := range []string{"explains_more", "reading_note"} {
+		t.Run(kind, func(t *testing.T) {
+			type outcome struct {
+				command Command
+				result  Result
+				err     error
+			}
+			start, outcomes := make(chan struct{}), make(chan outcome, 2)
+			for i := range 2 {
+				c := cmd("relation_declare", fmt.Sprintf("declare-%s-%d", kind, i))
+				c.Payload = Payload{DocumentID: "source", TargetDocumentID: "target", EdgeType: kind}
+				go func() {
+					<-start
+					result, err := s.Execute(ctx, c)
+					outcomes <- outcome{c, result, err}
+				}()
+			}
+			close(start)
+			var saved outcome
+			var duplicates int
+			for range 2 {
+				result := <-outcomes
+				if result.err == nil {
+					saved = result
+				} else if errors.Is(result.err, ErrConflict) {
+					duplicates++
+				} else {
+					t.Fatal(result.err)
+				}
+			}
+			if duplicates != 1 || saved.result.ID == "" {
+				t.Fatalf("saved=%+v duplicate conflicts=%d", saved, duplicates)
+			}
+			if replay, err := s.Execute(ctx, saved.command); err != nil || replay != saved.result {
+				t.Fatalf("receipt replay = %+v, %v", replay, err)
+			}
+			// Simulate a duplicate that was registered before the guard was added.
+			if err := db.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.Exec(`INSERT INTO ext_document_relations
+					(tenant_id,knowledge_base_id,relation_id,document_id,target_knowledge_base_id,target_document_id,
+					 source_version_id,target_version_id,edge_type,status,confidence,revision)
+					VALUES('7','kb',?,'source','kb','target','version-source','version-target',?,'active',1,1)`,
+					"historical-"+kind, kind)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			listed, err := s.List(ctx, Command{Scope: scope, Action: "relation_list", ListEdgeType: kind, ListStatus: "active"})
+			if err != nil || len(listed) != 2 {
+				t.Fatalf("historical records = %v, %v", listed, err)
+			}
+		})
 	}
 }
 

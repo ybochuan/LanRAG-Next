@@ -1,6 +1,6 @@
 <template>
-    <div class="main" ref="dropzone" :style="{ '--sidebar-width': `${uiStore.sidebarDisplayWidth}px` }">
-        <Menu></Menu>
+    <div class="main" :class="{'main--workbench':isWorkbench,'main--workbench-narrow':narrowWorkbench}" ref="dropzone" :style="{ '--sidebar-width': `${narrowWorkbench ? uiStore.sidebarWidth : uiStore.sidebarDisplayWidth}px` }">
+        <Menu :compact="narrowWorkbench ? !workbenchSidebarOpen : undefined" @toggle-compact="workbenchSidebarOpen=!workbenchSidebarOpen" />
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
         </div>
@@ -24,7 +24,7 @@
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick, provide, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
@@ -46,6 +46,18 @@ const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 const uiStore = useUIStore();
+const isWorkbench = computed(() => route.name === 'documents')
+const workbenchMedia = window.matchMedia('(max-width: 680px)')
+const narrowWindow = ref(workbenchMedia.matches)
+const narrowWorkbench = computed(() => isWorkbench.value && narrowWindow.value)
+const workbenchSidebarOpen = ref(false)
+function updateWorkbenchWidth(event: MediaQueryListEvent) {
+    narrowWindow.value = event.matches
+}
+watch(narrowWorkbench, () => { workbenchSidebarOpen.value = false })
+watch(() => route.fullPath, () => { workbenchSidebarOpen.value = false })
+onMounted(() => workbenchMedia.addEventListener('change', updateWorkbenchWidth))
+onUnmounted(() => workbenchMedia.removeEventListener('change', updateWorkbenchWidth))
 let ismask = ref(false)
 const { t } = useI18n();
 
@@ -260,6 +272,19 @@ onUnmounted(() => {
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+.main--workbench { min-width: 0; }
+.main--workbench-narrow {
+    position: relative;
+    padding-inline-start: 48px;
+    box-sizing: border-box;
+}
+.main--workbench-narrow > .aside_box {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 8;
 }
 
 /* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */

@@ -1,54 +1,111 @@
 <template>
-  <section class="business-page" :class="{ 'embedded-business': scope }">
-    <header class="page-heading"><div><h2>{{ heading }}</h2><p v-if="!document">{{ subtitle }}</p></div><t-button variant="outline" :loading="loading" :disabled="running" @click="refresh">刷新列表</t-button></header>
+  <section class="business-page" :class="{ 'embedded-business': scope || inboxOnly }">
+    <header class="page-heading">
+      <div><h2>{{ heading }}</h2><p v-if="!scope && !document && !inboxOnly">{{ subtitle }}</p></div>
+      <div class="heading-actions">
+        <t-button variant="outline" :loading="loading" :disabled="writeLocked" @click="refresh">刷新列表</t-button>
+        <t-button v-if="canCreate" :theme="createOpen?'default':'primary'" :variant="createOpen?'outline':'base'" :aria-expanded="createOpen" :aria-controls="createPanelID" :disabled="writeLocked" @click="toggleCreate">{{ createOpen?'收起表单':createLabel }}</t-button>
+      </div>
+    </header>
     <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
     <t-alert v-if="authorityError" theme="warning" class="notice">{{ authorityError }}</t-alert>
     <t-alert v-if="success" theme="success" class="notice">{{ success }}</t-alert>
-    <section v-if="pending&&!running&&!confirmationOpen" class="notice pending" aria-label="待核对操作"><strong>{{ actionLabels[pending.intent.action] }} · 结果待核对</strong><p>已保留本次请求。重试会使用相同操作编号和内容。<template v-if="pending.intent.body.business.id">记录 {{ shortID(pending.intent.body.business.id) }}</template></p><t-button theme="primary" :disabled="!canWrite||loading" @click="perform">重试原请求</t-button><t-button variant="outline" @click="refresh">刷新核对</t-button><t-button variant="text" @click="pending=undefined">我已核对，结束重试</t-button></section>
-    <p v-if="loadingKB" role="status" class="empty">正在载入知识库…</p><p v-else-if="!scope && !knowledgeBases.length" class="empty">还没有可访问的知识库。</p>
-    <template v-if="kb">
-      <div v-if="section==='feedback-governance'" class="sub-tabs" role="tablist" aria-label="反馈视图"><button type="button" role="tab" :aria-selected="feedbackTab==='feedback'" :class="{selected:feedbackTab==='feedback'}" :disabled="running||!!pending" @click="feedbackTab='feedback'">反馈待审</button><button type="button" role="tab" :aria-selected="feedbackTab==='guidance'" :class="{selected:feedbackTab==='guidance'}" :disabled="running||!!pending" @click="feedbackTab='guidance'">指导清单</button></div>
-      <label v-if="kind==='feedback'" class="feedback-status">审核状态
-        <t-select v-model="feedbackStatus" :options="feedbackStatusOptions" :disabled="running||!!pending" />
-      </label>
-      <section v-if="kind==='relation' && !document" class="panel relation-query" aria-labelledby="relation-query-title">
+    <section v-if="pending&&!running&&!confirmationOpen" class="notice pending" aria-label="待核对操作"><strong>{{ actionLabels[pending.intent.action] }} · 结果待核对</strong><p>已保留本次请求。重试会使用相同操作编号和内容。<template v-if="pending.intent.body.business.id">记录 {{ shortID(pending.intent.body.business.id) }}</template></p><t-button theme="primary" :disabled="!canReview||loading" @click="perform">重试原请求</t-button><t-button variant="outline" @click="refresh">刷新核对</t-button><t-button variant="text" @click="pending=undefined">我已核对，结束重试</t-button></section>
+    <template v-if="!inboxOnly"><p v-if="loadingKB" role="status" class="empty">正在载入知识库…</p><p v-else-if="!scope && !knowledgeBases.length" class="empty">还没有可访问的知识库。</p></template>
+    <template v-if="kb || inbox || showInboxTab">
+      <div v-if="section==='feedback-governance' && !inboxOnly && !openedFeedbackId" class="sub-tabs" role="tablist" aria-label="反馈视图" @keydown="moveTabFocus">
+        <t-button v-if="kb" :id="feedbackTabsId+'-feedback'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="feedbackTab==='feedback'" :tabindex="feedbackTab==='feedback'?0:-1" :class="{selected:feedbackTab==='feedback'}" :disabled="writeLocked" @click="feedbackTab='feedback'">反馈记录</t-button>
+        <t-button v-if="kb" :id="feedbackTabsId+'-guidance'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="feedbackTab==='guidance'" :tabindex="feedbackTab==='guidance'?0:-1" :class="{selected:feedbackTab==='guidance'}" :disabled="writeLocked" @click="feedbackTab='guidance'">指导清单</t-button>
+        <t-button v-if="showInboxTab" :id="feedbackTabsId+'-inbox'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="inbox" :tabindex="inbox?0:-1" :class="{selected:inbox}" :disabled="writeLocked" @click="feedbackTab='inbox'">未归属反馈</t-button>
+      </div>
+      <section v-if="kind==='relation'" class="panel relation-query" :aria-labelledby="relationQueryID">
         <div class="section-heading">
-          <h2 id="relation-query-title" ref="queryHeading" tabindex="-1">查询当前有效关联</h2>
-          <RouterLink :to="{ path: '/platform/lineage', query: { kb, mode: 'relations' } }">查看关联图</RouterLink>
+          <h2 :id="relationQueryID" ref="queryHeading" tabindex="-1">{{ document ? '阅读说明' : '查询当前有效关联' }}</h2>
+          <t-button v-if="!document" variant="text" theme="primary" :disabled="writeLocked || navigatingToGraph" @click="openAssociationGraph">查看关联图</t-button>
         </div>
-        <p class="subtle">查询已核验的制度关系。系统登记的附件归属在下方关联记录中查看。</p>
-        <form @submit.prevent="inspectRelated(queryDocument, kb)">
-          <DocumentPicker :key="kb" v-model="queryDocument" :kb="kb" label="查询文档" :selected-title="docName(queryDocument, queryScope||kb)" searchable />
+        <p v-if="!document" class="subtle">查看已核验的制度关系、补充说明和内容提示。附件归属可在下方记录中查看。</p>
+        <form v-if="!document" @submit.prevent="inspectRelated(queryDocument, queryScope||kb)">
+          <DocumentPicker :key="kb" class="query-picker" :model-value="queryDocument" :kb="kb" label="查询文档" :selected-title="docName(queryDocument, queryScope||kb)" searchable @update:model-value="selectQueryDocument" />
           <t-button theme="primary" type="submit" :loading="querying" :disabled="!queryDocument">查询关联</t-button>
         </form>
         <div v-if="querying" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在核对关联…</span></div>
         <t-alert v-if="queryError" theme="error" class="notice">{{ queryError }}</t-alert>
         <template v-if="queryResult">
-          <p role="status">{{ docName(queryDocument, queryScope||kb) }} · {{ queryResult.length }} 条有效关联</p>
-          <ul v-if="queryResult.length" class="relation-results">
-            <li v-for="row in queryResult" :key="row.knowledge_base_id+row.document_id+row.edge_type+row.direction">
-              <span><strong>{{ docName(row.document_id, row.knowledge_base_id) }}</strong><small>{{ row.direction==='incoming'?'关联至当前文档':'当前文档关联至' }} · {{ edgeLabels[row.edge_type] || row.edge_type }} · 评分 {{ row.confidence.toFixed(2) }}<template v-if="row.knowledge_base_id!==kb"> · 跨库 {{ row.knowledge_base_id }}</template></small></span>
-              <t-button variant="text" size="small" :aria-label="`查询 ${docName(row.document_id, row.knowledge_base_id)} 的关联`" @click="inspectRelated(row.document_id, row.knowledge_base_id)">继续查询</t-button>
+          <p role="status">{{ document ? visibleQueryRows.length + ' 份说明或提示' : docName(queryDocument, queryScope||kb) + ' · ' + visibleQueryRows.length + ' 条当前有效关联' }}</p>
+          <ul v-if="visibleQueryRows.length" class="relation-results">
+            <li v-for="(row, index) in visibleQueryRows" :key="resultKey(row,index)" class="relation-result">
+              <div class="relation-result-row">
+                <span>
+                  <strong>{{ docName(row.document_id, row.knowledge_base_id) }}</strong>
+                  <small>{{ resultSentence(row) }}<template v-if="row.edge_type==='related_to'"> · 评分 {{ row.confidence.toFixed(2) }}</template><template v-if="row.knowledge_base_id!==kb"> · {{ knowledgeBases.find(item=>item.id===row.knowledge_base_id)?.name || '其他知识库' }}</template></small>
+                </span>
+                <div class="relation-result-actions">
+                  <t-tag theme="success" variant="light" size="small">当前有效</t-tag>
+                  <t-button v-if="row.direction==='incoming' && readingRelation(row.edge_type)" variant="outline" size="small"
+                    :aria-expanded="expandedRelation===resultKey(row,index)" :aria-controls="relationQueryID+'-preview-'+index"
+                    @click="expandedRelation=expandedRelation===resultKey(row,index)?'':resultKey(row,index)">{{ expandedRelation===resultKey(row,index) ? '收起' : row.edge_type==='reading_note' ? '展开提示' : '展开说明' }}</t-button>
+                  <t-button v-if="scope && !document" variant="text" size="small" @click="emit('open',row.document_id,docName(row.document_id,row.knowledge_base_id),row.knowledge_base_id)">打开文档</t-button>
+                  <t-button v-if="!document" variant="text" size="small" :aria-label="'查询 '+docName(row.document_id,row.knowledge_base_id)+' 的关联'" @click="inspectRelated(row.document_id,row.knowledge_base_id)">继续查询</t-button>
+                </div>
+              </div>
+              <div v-if="row.direction==='incoming' && readingRelation(row.edge_type)" :id="relationQueryID+'-preview-'+index" v-show="expandedRelation===resultKey(row,index)">
+                <ReadingRelationPreview v-if="expandedRelation===resultKey(row,index)" :kb="row.knowledge_base_id" :parent-id="queryDocument" :document-id="row.document_id" :edge-type="row.edge_type" :relation-id="row.relation_id" />
+              </div>
             </li>
           </ul>
-          <t-empty v-else class="empty" description="当前没有满足条件的有效关联。" />
+          <t-empty v-else class="empty" :description="document ? '当前没有可展开的补充说明或内容提示。' : '当前没有满足条件的有效关联。'" />
         </template>
       </section>
-      <div class="workspace-grid">
-        <section class="panel records-panel" aria-label="治理记录">
-          <div class="section-heading"><h2>{{ kind==='relation'?'关联记录':kind==='feedback'?'反馈记录':kind==='guidance'?'指导清单':'修订提案' }}</h2><span class="subtle">本页 {{ records.length }} 项</span></div>
+      <div v-show="canCreate && createOpen" :id="createPanelID" ref="createPanel" class="create-workspace" tabindex="-1">
+       <template v-if="canCreate && createMounted">
+        <label v-if="document && kind==='relation'" class="relation-end">当前文档在关系中的位置
+          <t-select v-model="relationEnd" :options="relationEndOptions" :disabled="writeLocked" />
+        </label>
+        <CreateForm :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="writeLocked" :knowledge-bases="knowledgeBases"
+          :initial-guidance="initialGuidance" :fixed-document="document && (kind==='relation'||kind==='revision') ? {...document,end:kind==='revision'?'source':relationEnd} : undefined"
+          @submit="(action,payload)=>beginWrite(action,payload)" />
+        <BinaryRevisionPanel v-if="kind==='revision'" :kb="kb" :disabled="running||!!pending" @created="refresh" @locked="binaryLocked=$event" />
+       </template>
+      </div>
+      <div v-if="kb || inbox" class="workspace-grid" :class="{'has-record-detail':section!=='feedback-governance' && (detail || detailLoading)}">
+        <section v-show="!openedFeedbackId" ref="recordList" class="panel records-panel"
+          :id="section==='feedback-governance' && !inboxOnly ? feedbackTabsId+'-panel' : undefined"
+          :role="section==='feedback-governance' && !inboxOnly ? 'tabpanel' : undefined"
+          :aria-labelledby="section==='feedback-governance' && !inboxOnly ? feedbackTabsId+'-'+feedbackTab : undefined" aria-label="治理记录">
+          <div class="section-heading"><h2 ref="recordListHeading" tabindex="-1">{{ inbox?'未归属反馈':kind==='relation'?'关联记录':kind==='feedback'?'反馈记录':kind==='guidance'?'指导清单':'修订提案' }}</h2><span class="subtle">本页 {{ records.length }} 项</span></div>
+          <label v-if="kind==='feedback'" class="feedback-status">审核状态
+            <t-select v-model="feedbackStatus" :options="feedbackStatusOptions" :disabled="writeLocked" />
+          </label>
+          <div v-if="kind==='relation'" class="relation-filters">
+            <label>关系类型<t-select v-model="relationFilters.edgeType" :options="relationTypeOptions" :disabled="writeLocked" @update:model-value="applyRelationFilters" /></label>
+            <label>登记状态<t-select v-model="relationFilters.status" :options="relationStatusOptions" :disabled="writeLocked" @update:model-value="applyRelationFilters" /></label>
+            <DocumentPicker v-if="!document" v-model="relationFilters.documentId" :kb="kb" label="任一端文档" include-inactive :disabled="writeLocked" :selected-title="docName(relationFilters.documentId)" @update:model-value="applyRelationFilters" />
+          </div>
           <div v-if="loading" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取记录…</span></div>
-          <div v-else class="record-list"><div v-for="row in records" :key="row.id" class="record-card" :class="{chosen:detail?.id===row.id}" role="button" tabindex="0" @click="openRecord(row)" @keydown.enter="openRecord(row)"><span class="record-top"><strong>{{ recordTitle(row) }}</strong><t-tag variant="light" size="small" :theme="statusTagTheme(row.status)">{{ stateLabel(row) }}</t-tag></span><span v-if="kind==='relation'" class="subtle">{{ docName(row.document_id, row.knowledge_base_id || kb) }} → {{ docName(row.target_document_id, row.target_knowledge_base_id || kb) }}</span><span v-else class="record-summary">{{ row.text||row.proposed_patch }}</span><small>{{ shortID(row.id) }} · 版本 {{ row.revision }}<template v-if="row.ready_at"> · 冷静期至 {{ date(row.ready_at) }}</template></small></div>
+          <div v-if="records.length || !loading" class="record-list">
+            <t-button v-for="row in records" :key="row.id" variant="text" class="record-card" :data-record-id="row.id" :class="{ chosen:detail?.id===row.id, 'feedback-record':kind==='feedback' }" :aria-pressed="section==='feedback-governance' ? undefined : detail?.id===row.id" :disabled="writeLocked" @click="openRecord(row,$event)">
+              <span class="record-top"><strong>{{ recordTitle(row) }}</strong><t-tag variant="light" size="small" :theme="statusTagTheme(row.status)">{{ stateLabel(row) }}</t-tag></span>
+              <span v-if="kind==='relation'" class="subtle">{{ recordSentence(row) }}</span>
+              <span v-else-if="kind!=='feedback'" class="record-summary">{{ row.text||row.proposed_patch }}</span>
+              <small v-if="row.review_reason && kind!=='feedback'" class="review-reason">{{ reviewReason(row.review_reason) }}</small>
+              <small>{{ shortID(row.id) }}<template v-if="row.submitted_at && kind==='feedback'"> · 提交于 {{ date(row.submitted_at) }}</template><template v-else> · 版本 {{ row.revision }}</template><template v-if="row.ready_at"> · 冷静期至 {{ date(row.ready_at) }}</template></small>
+            </t-button>
             <p v-if="!records.length" class="empty">{{ kind==='feedback'&&feedbackStatus ? '此状态下没有反馈。可切到「全部状态」查看其他记录。' : '当前还没有记录。' }}</p>
           </div>
-          <footer class="pagination"><t-button variant="outline" size="small" :disabled="loading||page<=1" @click="movePage(-1)">上一页</t-button><span>第 {{ page }} 页</span><t-button variant="outline" size="small" :disabled="loading||records.length<20" @click="movePage(1)">下一页</t-button></footer>
+          <footer class="pagination"><t-button variant="outline" size="small" :disabled="loading||writeLocked||page<=1" @click="movePage(-1)">上一页</t-button><span>第 {{ page }} 页</span><t-button variant="outline" size="small" :disabled="loading||writeLocked||records.length<20" @click="movePage(1)">下一页</t-button></footer>
         </section>
-        <section v-if="detailLoading" class="panel" role="status">正在核对记录内容…</section>
-        <section v-else-if="detail" class="panel detail-panel" aria-label="记录详情">
-          <div class="section-heading"><h2 ref="detailHeading" tabindex="-1">{{ recordTitle(detail) }}</h2><t-button variant="text" @click="detail=undefined">关闭详情</t-button></div>
-          <t-tag variant="light" :theme="statusTagTheme(detail.status)">{{ stateLabel(detail) }}</t-tag><dl><dt>记录编号</dt><dd><code>{{ detail.id }}</code></dd><dt>当前版本</dt><dd>{{ detail.revision }}</dd><template v-if="detail.topic"><dt>主题</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>风险</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>冷静期至</dt><dd>{{ date(detail.ready_at) }}</dd></template><template v-if="detail.document_id||detail.source_document_id"><dt>源文档</dt><dd>{{ docName(detail.document_id||detail.source_document_id, detail.knowledge_base_id || kb) }}</dd></template><template v-if="detail.target_document_id"><dt>{{ kind==='revision'?'发布的新文档':'关联文档' }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || kb) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>评分</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template><template v-if="detail.edge_type==='attachment_of'&&(detail.effective_from||detail.effective_until)"><dt>主件生效日期</dt><dd>{{ date(detail.effective_from) }}<template v-if="detail.effective_until"> 至 {{ date(detail.effective_until) }}</template></dd></template></dl>
+        <section v-if="openedFeedbackId || detailLoading || detail" class="panel detail-panel" aria-label="记录详情">
+          <div class="section-heading">
+            <h2 ref="detailHeading" tabindex="-1">{{ detail ? recordTitle(detail) : kind==='guidance' ? '指导详情' : '记录详情' }}</h2>
+            <t-button variant="text" :disabled="writeLocked" @click="closeRecord">{{ openedFeedbackId ? '返回列表' : '关闭详情' }}</t-button>
+          </div>
+          <p v-if="detailLoading" role="status">正在核对记录内容…</p>
+          <template v-else-if="detail">
+          <t-tag variant="light" :theme="statusTagTheme(detail.status)">{{ stateLabel(detail) }}</t-tag><dl><dt>记录编号</dt><dd><code>{{ detail.id }}</code></dd><dt>当前版本</dt><dd>{{ detail.revision }}</dd><template v-if="kind==='feedback' && detail.submitted_at"><dt>提交时间</dt><dd>{{ date(detail.submitted_at) }}</dd></template><template v-if="detail.topic && !inbox && !feedbackRestricted(detail)"><dt>主题</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>风险</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>冷静期至</dt><dd>{{ date(detail.ready_at) }}</dd></template><template v-if="(detail.document_id||detail.source_document_id) && !inbox && !feedbackRestricted(detail)"><dt>源文档</dt><dd>{{ docName(detail.document_id||detail.source_document_id, detail.knowledge_base_id || kb) }}</dd></template><template v-if="detail.target_document_id && !inbox && !feedbackRestricted(detail)"><dt>{{ kind==='revision'?'发布的新文档':'关联文档' }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || kb) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>评分</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template><template v-if="detail.edge_type==='attachment_of'&&(detail.effective_from||detail.effective_until)"><dt>主件生效日期</dt><dd>{{ date(detail.effective_from) }}<template v-if="detail.effective_until"> 至 {{ date(detail.effective_until) }}</template></dd></template></dl>
+          <t-alert v-if="detail.review_reason" theme="warning" class="notice">{{ reviewReason(detail.review_reason) }}</t-alert>
           <t-alert v-if="detail.publish_error" theme="info" class="notice" role="status">{{ publicationError(detail.publish_error) }}</t-alert>
-          <template v-if="kind==='feedback' && detail.source==='qa'">
+          <FeedbackDetail v-if="modernFeedback" :key="detail.id+':'+detail.revision" :record="detail" :kb="inbox?'':kb" :can-write="canReview" :locked="writeLocked" :document-name="docName" @approve="beginWrite('feedback_approve',$event,detail)" />
+          <template v-if="kind==='feedback' && !modernFeedback && detail.source==='qa'">
             <section v-if="detail.feedback_context" class="feedback-excerpt">
               <h3>提交的问答摘录</h3>
               <p v-if="detail.feedback_context.question"><strong>问题</strong> {{ detail.feedback_context.question }}</p>
@@ -56,12 +113,12 @@
             </section>
             <div v-if="detail.citation_document_ids?.length">
               <h3>已核验的引用文档</h3>
-              <span v-for="id in detail.citation_document_ids" :key="id" class="doc-link" role="button" tabindex="0" @click="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)" @keydown.enter="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)">{{ docName(id,detail.knowledge_base_id||kb) }}</span>
+              <t-button v-for="id in detail.citation_document_ids" :key="id" variant="text" theme="primary" size="small" @click="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)">{{ docName(id,detail.knowledge_base_id||kb) }}</t-button>
             </div>
           </template>
-          <h3 v-if="detail.text||detail.proposed_patch">{{ kind==='revision'?'完整修订正文':kind==='feedback'?'用户意见':'内容' }}</h3><pre v-if="detail.text||detail.proposed_patch" class="content-preview">{{ detail.text||detail.proposed_patch }}</pre>
-          <template v-if="kind==='feedback' && detail.feedback_context">
-            <p>评价 · {{ ratingLabels[detail.feedback_context.rating] }}</p>
+          <h3 v-if="!modernFeedback && (detail.text||detail.proposed_patch)">{{ kind==='revision'?'完整修订正文':kind==='feedback'?'用户意见':'内容' }}</h3><pre v-if="!modernFeedback && (detail.text||detail.proposed_patch)" class="content-preview">{{ detail.text||detail.proposed_patch }}</pre>
+          <template v-if="kind==='feedback' && !modernFeedback && detail.feedback_context">
+            <p>评价 · {{ feedbackRatings[feedbackRating(detail)] }}</p>
             <template v-if="detail.feedback_context.suggested_revision">
               <h3>用户建议修订</h3><pre class="content-preview">{{ detail.feedback_context.suggested_revision }}</pre>
             </template>
@@ -129,7 +186,7 @@
             <t-button v-if="document?.id===detail.target_document_id && detail.document_id" variant="text"
               @click="$emit('open',detail.document_id,docName(detail.document_id, detail.knowledge_base_id || kb), detail.knowledge_base_id || kb)">打开补充通知</t-button>
           </template>
-          <p v-else-if="kind==='relation'" class="subtle">已确认表示声明已保存；有效关联查询还会核对文档当前状态和版本。</p>
+          <p v-else-if="kind==='relation'" class="subtle">{{ readingRelation(detail.edge_type) ? '两端当前生效且登记版本仍匹配时，读者可以展开文件。换版、停用或撤销后，关联会退出有效查询。' : '登记状态记录治理操作；当前有效查询还会核对两端文档的状态和版本。' }}</p>
           <div v-if="kind==='relation'&&!document&&detail.edge_type!=='repeals'&&!clauseRelation(detail.edge_type)" class="actions">
             <t-button v-if="detail.document_id" variant="text" size="small" @click="inspectRelated(detail.document_id, detail.knowledge_base_id || kb)">查询源文档关联</t-button>
             <t-button v-if="detail.target_document_id" variant="text" size="small" @click="inspectRelated(detail.target_document_id, detail.target_knowledge_base_id || kb)">查询目标文档关联</t-button>
@@ -146,58 +203,71 @@
           </section>
           <p v-else-if="kind==='feedback'&&detail.sample_decision" class="subtle">抽样复核 · {{ sampleLabels[detail.sample_decision] || detail.sample_decision }}</p>
           <t-alert v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" theme="info" class="notice">尚在冷静期，达到上面的时间后可激活指导。</t-alert>
-          <div class="actions"><t-button v-for="action in actionsFor(kind,detail,canWrite,now)" :key="action"
+          <div class="actions"><t-button v-for="action in recordActions" :key="action"
             :theme="PRIMARY_ACTIONS.includes(action)?'primary':'default'"
             :disabled="running||!!pending||(action==='clause_resolve'&&(!clauseDecision||!clauseDecisionNote.trim()))||(action==='feedback_approve'&&!!detail.feedback_context&&!validGuidance)"
             @click="beginWrite(action,actionPayload(action),detail)">{{ actionLabels[action] }}</t-button><t-button v-if="kind==='guidance'&&detail.status==='active'&&canWrite" theme="primary" :disabled="running||!!pending" @click="router.push({path:'/platform/revisions',query:{kb,guidance:detail.id}})">用于修订提案</t-button><t-button variant="outline" :disabled="loading||running" @click="openRecord(detail)">重新载入详情</t-button></div>
-          <p v-if="!canWrite" class="subtle">当前账号仅有查看权限。</p>
+          <p v-if="!canReview" class="subtle">当前账号仅有查看权限。</p>
+          </template>
         </section>
-        <div v-else-if="canWrite && kind!=='feedback'">
-          <label v-if="document && kind==='relation'">当前文档在关系中的位置
-            <t-select v-model="relationEnd" :options="relationEndOptions" />
-          </label>
-          <CreateForm :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="running||!!pending" :knowledge-bases="knowledgeBases"
-            :initial-guidance="initialGuidance" :fixed-document="document && (kind==='relation'||kind==='revision') ? {...document,end:kind==='revision'?'source':relationEnd} : undefined"
-            @submit="(action,payload)=>beginWrite(action,payload)" />
-          <BinaryRevisionPanel v-if="kind==='revision'" :kb="kb" :disabled="running||!!pending" @created="refresh" @locked="emit('locked',$event)" />
-        </div>
-        <p v-else-if="kind==='feedback'" class="subtle">在问答的回答块选择「评价与反馈」，提交后会进入此队列。</p>
-        <section v-else class="panel"><h2>只读查看</h2><p>选择左侧记录查看完整内容。管理操作由知识库所有者、管理员或共享编辑者执行。</p></section>
       </div>
-      <t-button v-if="detail&&canWrite && kind!=='feedback'" class="new-button" theme="primary" :disabled="running||!!pending" @click="detail=undefined">{{ kind==='relation'?'添加关联':kind==='guidance'?'添加种子指导':'创建新提案' }}</t-button>
     </template>
-    <dialog ref="dialog" aria-labelledby="confirmation-title" @cancel.prevent="cancelConfirmation"><h2 id="confirmation-title">{{ pending? actionLabels[pending.intent.action]:'' }}</h2><p>{{ confirmationText }}</p><p v-if="detail" class="subtle">{{ recordTitle(detail) }} · 版本 {{ detail.revision }}</p><label v-if="highRisk" class="check-label"><t-checkbox v-model="secondConfirmation">我已再次核对高风险指导的内容与影响。</t-checkbox></label><div class="actions"><t-button variant="outline" @click="cancelConfirmation">取消</t-button><t-button theme="primary" :disabled="highRisk&&!secondConfirmation" @click="confirmWrite">确认执行</t-button></div></dialog>
+    <dialog ref="dialog" :aria-labelledby="confirmationID" @cancel.prevent="cancelConfirmation">
+      <h2 :id="confirmationID">{{ approvalPin ? '批准分块批注' : pending ? actionLabels[pending.intent.action] : '' }}</h2>
+      <p>{{ confirmationText }}</p>
+      <p v-if="detail" class="subtle">{{ recordTitle(detail) }} · 版本 {{ detail.revision }}</p>
+      <template v-if="approvalPin && pending">
+        <dl><dt>批注锚点</dt><dd>{{ docName(approvalPin.document_id) }} · 分块 #{{ approvalPin.chunk_index }}</dd></dl>
+        <h3>适用场景</h3><p class="confirmation-text">{{ pending.intent.body.business.payload.applies_when }}</p>
+        <h3>审核批注</h3><p class="confirmation-text">{{ pending.intent.body.business.payload.text }}</p>
+      </template>
+      <label v-if="highRisk" class="check-label"><t-checkbox v-model="secondConfirmation">我已再次核对高风险指导的内容与影响。</t-checkbox></label>
+      <div class="actions"><t-button variant="outline" @click="cancelConfirmation">取消</t-button><t-button theme="primary" :disabled="highRisk&&!secondConfirmation" @click="confirmWrite">确认执行</t-button></div>
+    </dialog>
   </section>
 </template>
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { authority } from '@/api/lifecycle'
 import * as api from '@/api/business'
 import ClauseEvidence from './ClauseEvidence.vue'
+import FeedbackDetail from './FeedbackDetail.vue'
 import CreateForm from './CreateForm.vue'
 import BinaryRevisionPanel from './BinaryRevisionPanel.vue'
 import DocumentPicker from './DocumentPicker.vue'
-import { requestFence } from '../lifecycle/model'
+import ReadingRelationPreview from './ReadingRelationPreview.vue'
+import { moveTabFocus, requestFence } from '../lifecycle/model'
 import { useI18n } from 'vue-i18n'
-import { actionLabels, actionsFor, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, httpStatus, sampleReviewPending, shortID, statusLabels, type WriteIntent } from './model'
+import { actionLabels, actionsFor, associationQueryKeys, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, feedbackRating, feedbackRatings, feedbackRestricted, feedbackTriageActions, httpStatus, isAnswerFeedback, isInboxAction, readingRelation, relationReviewLabels, relationSentence, sampleReviewPending, shortID, statusLabels, type WriteIntent } from './model'
 
-const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
+const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean;inboxOnly?:boolean}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
 const { t }=useI18n()
 const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string]}>()
 const sections=[{key:'associations',labelKey:'workbench.business.associations'},{key:'feedback-governance',labelKey:'workbench.business.feedback'},{key:'revisions',labelKey:'workbench.business.revisions'}]
 const riskLabels:Record<string,string>={low:'低风险',medium:'中风险',high:'高风险'}
 const heading=computed(()=>{const hit=sections.find(v=>v.key===props.section);return hit?t(hit.labelKey):t('workbench.business.fallback')})
 const subtitle=computed(()=>props.section==='associations'?t('workbench.business.subAssociations'):props.section==='revisions'?t('workbench.business.subRevisions'):t('workbench.business.subFeedback'))
-const feedbackTab=ref<'feedback'|'guidance'>('feedback')
-const feedbackStatus=ref('pending_review')
-// TDesign option list and tag colouring for the feedback status filter.
-const feedbackStatusOptions=[{label:'待审核',value:'pending_review'},{label:'待生效',value:'approved'},{label:'已生效',value:'active'},{label:'已驳回',value:'rejected'},{label:'已隔离',value:'quarantined'},{label:'已撤回',value:'withdrawn'},{label:'全部状态',value:''}]
-const statusTagTheme=(status:string)=>({active:'success',approved:'primary',pending_review:'warning',scheduled:'primary',rejected:'danger',quarantined:'danger',failed:'danger'} as Record<string,string>)[status]||'default'
+const feedbackTabsId=useId()
+const feedbackTab=ref<'feedback'|'guidance'|'inbox'>(props.inboxOnly?'inbox':'feedback')
+const inboxDenied=ref(false)
+const showInboxTab=computed(()=>props.section==='feedback-governance' && auth.isLoggedIn && auth.hasRole('admin') && !inboxDenied.value)
+const inbox=computed(()=>showInboxTab.value && feedbackTab.value==='inbox')
+const feedbackStatus=ref('')
+const feedbackStatusOptions=computed(()=>[
+  {label:'全部状态',value:''},
+  ...['pending_review','needs_evidence','received','record_only','rejected',...(inbox.value?[]:['approved','active','quarantined','withdrawn'])]
+    .map(value=>({label:value==='approved'?'待生效':statusLabels[value],value})),
+])
+const statusTagTheme=(status:string)=>({active:'success',approved:'primary',pending_review:'warning',needs_evidence:'warning',scheduled:'primary',rejected:'danger',quarantined:'danger',failed:'danger'} as Record<string,string>)[status]||'default'
 const clauseDecisionOptions=computed(()=>[{label:'请选择处理方式',value:''},...Object.entries(clauseDecisions).map(([value,label])=>({label:String(label),value}))])
 const sampleDecisionOptions=[{label:'通过',value:'passed'},{label:'失败（隔离）',value:'failed'}]
+const relationFilters=ref<api.RelationFilters>({edgeType:'',status:'',documentId:''})
+const relationTypeOptions=[{label:'全部关系类型',value:''},...Object.entries(edgeLabels).map(([value,label])=>({value,label}))]
+const relationStatusOptions=[{label:'全部登记状态',value:''},...['candidate','pending_review','active','scheduled','needs_review','revoked','awaiting_resolution','resolved','applied','linked','attachment_cleanup_pending','attachment_cleanup_retry','attachment_removed','attachment_retired','supplement_declared'].map(value=>({value,label:value==='active'?'已登记或已确认':statusLabels[value]}))]
+const reviewReason=(reason:string)=>relationReviewLabels[reason] || '关联当前适用性待核对'
 const relationEndOptions=[{label:'源文档',value:'source'},{label:'关联文档',value:'target'}]
 // Actions that render as the primary TDesign button.
 const PRIMARY_ACTIONS=['revision_publish','split_approve','feedback_activate','feedback_approve','relation_confirm','clause_confirm','clause_resolve']
@@ -206,26 +276,120 @@ const sampleDecision=ref<'passed'|'failed'>('passed')
 const sampleNote=ref('')
 const sampleLabels:Record<string,string>={pending:'待复核',passed:'已通过',failed:'已隔离'}
 const validGuidance=computed(()=>!!reviewedGuidance.value.trim() && new TextEncoder().encode(reviewedGuidance.value.trim()).length<=720)
-const ratingLabels={incorrect:'内容有误',suggestion:'改进建议',helpful:'有帮助'}
-const kind=computed<api.BusinessKind>(()=>props.section==='associations'?'relation':props.section==='revisions'?'revision':feedbackTab.value)
+const kind=computed<api.BusinessKind>(()=>props.section==='associations'?'relation':props.section==='revisions'?'revision':feedbackTab.value==='guidance'?'guidance':'feedback')
 const relationEnd=ref<'source'|'target'>('source')
 const initialGuidance=computed(()=>typeof route.query.guidance==='string'?route.query.guidance:undefined)
+const createOpen=ref(false),createMounted=ref(false),createPanel=ref<HTMLElement>(),createPanelID=useId()
+const binaryLocked=ref(false)
 const knowledgeBases=ref<{id:string;name:string}[]>([]),kb=ref(''),loadingKB=ref(true),canWrite=ref(false)
 const records=ref<api.BusinessRecord[]>([]),detail=ref<api.BusinessRecord>(),detailLoading=ref(false),page=ref(1),loading=ref(false),running=ref(false),error=ref(''),authorityError=ref(''),success=ref(''),formVersion=ref(0)
+const openedFeedbackId=ref('')
+const recordList=ref<HTMLElement>(),recordListHeading=ref<HTMLElement>()
+const canReview=computed(()=>inbox.value || (!props.inboxOnly && feedbackTab.value!=='inbox' && canWrite.value))
+const modernFeedback=computed(()=>kind.value==='feedback' && !!detail.value && (inbox.value || feedbackRestricted(detail.value) || isAnswerFeedback(detail.value)))
+const recordActions=computed(()=>{
+  const row=detail.value
+  if (!row || !canReview.value) return []
+  if (inbox.value || (modernFeedback.value && ['pending_review','needs_evidence','received'].includes(row.status))) return feedbackTriageActions(row)
+  return actionsFor(kind.value,row,canWrite.value,now.value)
+})
+const canCreate=computed(()=>!!kb.value && canWrite.value && kind.value!=='feedback')
+const createLabel=computed(()=>kind.value==='relation'?'新增关联':kind.value==='guidance'?'添加种子指导':'创建修订提案')
+const writeLocked=computed(()=>running.value || !!pending.value || binaryLocked.value)
+function showCreate(open:boolean){
+  createOpen.value=open
+  if(open)createMounted.value=true
+}
+async function toggleCreate(){
+  if(!canCreate.value || writeLocked.value)return
+  showCreate(!createOpen.value)
+  if(createOpen.value){await nextTick();createPanel.value?.focus()}
+}
 const titles=ref(new Map<string,string>()),detailHeading=ref<HTMLElement>(),dialog=ref<HTMLDialogElement>(),confirmationOpen=ref(false),secondConfirmation=ref(false),highRisk=ref(false)
-const pending=ref<{kb:string;intent:WriteIntent;detailID?:string}>(),confirmationText=ref(''),now=ref(Date.now())
+const pending=ref<{kb:string;inbox?:boolean;intent:WriteIntent;detailID?:string}>(),confirmationText=ref(''),now=ref(Date.now())
+const confirmationID=useId()
+const approvalPin=computed(()=>{
+  if(pending.value?.intent.action!=='feedback_approve')return
+  const pin=pending.value.intent.body.business.payload.source_clause
+  return detail.value?.citation_chunks?.find(chunk=>chunk.chunk_id===pin?.chunk_id && chunk.content_hash===pin?.content_hash)
+})
 const clauseDecision=ref(''),clauseDecisionNote=ref('')
 const queryDocument=ref(''),queryScope=ref(''),queryResult=ref<api.RelatedDocument[]>(),queryError=ref(''),querying=ref(false)
 const crossTitles=ref(new Map<string,string>())
 const docKey=(scope:string,id:string)=>scope+'\u0000'+id
-const queryHeading=ref<HTMLElement>()
+const queryHeading=ref<HTMLElement>(),relationQueryID=useId(),expandedRelation=ref('')
+const navigatingToGraph=ref(false)
+const routeText=(key:typeof associationQueryKeys[number])=>typeof route.query[key]==='string'?route.query[key] as string:''
+
+async function openAssociationGraph(){
+  if(!kb.value || writeLocked.value || navigatingToGraph.value)return
+  navigatingToGraph.value=true
+  const fromKB=kb.value,graphKB=queryScope.value||fromKB,documentID=queryDocument.value
+  const query={
+    kb:fromKB,view:'associations',relationDocument:documentID||undefined,relationKB:documentID&&graphKB!==fromKB?graphKB:undefined,
+    relationType:relationFilters.value.edgeType||undefined,relationStatus:relationFilters.value.status||undefined,
+    relationEndpoint:relationFilters.value.documentId||undefined,relationPage:page.value>1?String(page.value):undefined,
+  }
+  const scroll=queryHeading.value?.closest('main.lifecycle-page')?.scrollTop||0
+  try{
+    const failure=await router.replace({name:'documents',query,state:{associationScroll:scroll},force:true})
+    if(failure)return
+    await router.push({name:'documents',query:{...query,kb:graphKB,view:'lineage',mode:'relations',node:documentID||undefined,associationFrom:fromKB}})
+  }finally{navigatingToGraph.value=false}
+}
+
+async function restoreAssociation(){
+  const scope=kb.value
+  if(!props.document && route.query.view==='associations' && route.query.kb===scope){
+    const edgeType=routeText('relationType'),status=routeText('relationStatus'),requestedPage=Number(routeText('relationPage'))
+    relationFilters.value={
+      edgeType:relationTypeOptions.some(option=>option.value===edgeType)?edgeType:'',
+      status:relationStatusOptions.some(option=>option.value===status)?status:'',
+      documentId:routeText('relationEndpoint'),
+    }
+    page.value=Number.isInteger(requestedPage)&&requestedPage>0&&requestedPage<=10000?requestedPage:1
+    queryScope.value=routeText('relationKB')||scope
+    queryDocument.value=routeText('relationDocument')
+  }
+  const version=generation
+  const scroll=router.options.history.state.associationScroll
+  await Promise.all([loadRecords(),props.document ? loadDocumentReadingRelations() : queryRelated()])
+  await nextTick()
+  if(version===generation && !props.document && typeof scroll==='number' && route.query.view==='associations'){
+    const scroller=queryHeading.value?.closest('main.lifecycle-page')
+    if(scroller)scroller.scrollTop=scroll
+  }
+}
+const visibleQueryRows=computed(()=>{
+  const rows=queryResult.value||[]
+  return props.document ? rows.filter(row=>row.direction==='incoming' && readingRelation(row.edge_type)) : rows
+})
+const resultKey=(row:api.RelatedDocument,index:number)=>JSON.stringify([row.relation_id||index,row.knowledge_base_id,row.document_id,row.edge_type,row.direction])
 const listFence=requestFence(),detailFence=requestFence(),kbFence=requestFence(),queryFence=requestFence(),catalogFence=requestFence()
 let generation=0
 const timer=setInterval(()=>{now.value=Date.now()},30_000)
 const docName=(id?:string, scope=kb.value)=>id?((scope===kb.value?titles.value.get(id):crossTitles.value.get(docKey(scope,id)))||`文档 ${shortID(id)}`):'—'
-const stateLabel=(row:api.BusinessRecord)=>kind.value==='relation'&&row.status==='active'?'已确认':statusLabels[row.status]||row.status
+function stateLabel(row:api.BusinessRecord){
+  if(kind.value==='relation'){
+    if(row.pins_current===false && ['active','awaiting_resolution','resolved'].includes(row.status))return '条款适用性待复核'
+    if(row.status==='active')return row.edge_type==='related_to' ? '已确认' : '已登记'
+  }
+  return statusLabels[row.status]||row.status
+}
+function resultSentence(row:api.RelatedDocument){
+  const current=props.document?.title||docName(queryDocument.value,queryScope.value||kb.value)
+  const peer=docName(row.document_id,row.knowledge_base_id)
+  return row.direction==='incoming' ? relationSentence(row.edge_type,peer,current) : relationSentence(row.edge_type,current,peer)
+}
+function recordSentence(row:api.BusinessRecord){
+  return relationSentence(row.edge_type,docName(row.document_id,row.knowledge_base_id||kb.value),docName(row.target_document_id,row.target_knowledge_base_id||kb.value))
+}
 function recordTitle(row:api.BusinessRecord){
   if(kind.value==='relation')return edgeLabels[row.edge_type||'']||'文档关联'
+  if(kind.value==='feedback'){
+    const rating=feedbackRatings[feedbackRating(row)]
+    return isAnswerFeedback(row)||feedbackRestricted(row)||inbox.value ? rating||'问答反馈' : row.topic||rating||'反馈'
+  }
   if(kind.value!=='revision')return row.topic||'未命名主题'
   if(row.record_kind==='split_batch')return `拆分 · ${docName(row.source_document_id, row.knowledge_base_id || kb.value)}`
   if(row.record_kind==='split_part')return row.split_title||'拆分分件'
@@ -234,7 +398,10 @@ function recordTitle(row:api.BusinessRecord){
 const publicationError=(code:string)=>code==='binary_source_upload_required'?'源文档是上传文件：请上传修订后的正式源文件。本条目保留为修订建议。':code==='binary_source_version_changed'?'目标修订文件版本已变化，请重新绑定后再发布。':code==='remote_identity_mismatch'?'已找到的远端文档与本次发布不匹配，请先核对发布记录。':'上次发布尚未确认完成，可核对并继续发布；不会直接重复创建文档。'
 
 function readRecords(scope:string, recordKind:api.BusinessKind, number:number, id=''){
-  if(props.document && (recordKind==='relation'||recordKind==='revision')) return api.documentRecords(scope,props.document.id,recordKind,number,id)
+  if(inbox.value)return api.listUnscopedFeedback(number,id,id?'':feedbackStatus.value)
+  if(!scope || props.inboxOnly || feedbackTab.value==='inbox')return Promise.resolve([])
+  if(recordKind==='relation')return api.relationRecords(scope,number,relationFilters.value,props.document?.id,id)
+  if(props.document && recordKind==='revision') return api.documentRecords(scope,props.document.id,recordKind,number,id)
   return api.list(scope,recordKind,number,id,recordKind==='feedback'&&!id?feedbackStatus.value:'')
 }
 function actionPayload(action:api.BusinessAction):api.BusinessPayload{
@@ -245,13 +412,17 @@ function actionPayload(action:api.BusinessAction):api.BusinessPayload{
 }
 
 async function loadRecordTitles(rows:api.BusinessRecord[]){
+  if(inbox.value)return
   const byScope=new Map<string,string[]>()
   const add=(scope:string|undefined,id:string|undefined)=>{if(scope&&id)byScope.set(scope,[...(byScope.get(scope)||[]),id])}
   for(const row of rows){
+    if(feedbackRestricted(row))continue
     add(row.knowledge_base_id||kb.value,row.document_id||row.source_document_id)
     add(row.target_knowledge_base_id||kb.value,row.target_document_id)
     for(const part of row.split_parts||[])add(kb.value,part.target_document_id)
     for(const id of row.citation_document_ids||[])add(kb.value,id)
+    for(const chunk of row.citation_chunks||[])add(kb.value,chunk.document_id)
+    add(kb.value,row.feedback_anchor?.document_id)
   }
   await Promise.all([...byScope].map(([scope,ids])=>loadTitles(ids,scope)))
 }
@@ -264,9 +435,17 @@ async function loadTitles(ids:string[], scope=kb.value){
   try{const values=await api.documentTitles(scope,missing);if(version!==generation)return;for(const [id,title] of Object.entries(values)){if(scope===kb.value)titles.value.set(id,title);else crossTitles.value.set(docKey(scope,id),title)}}catch{}
 }
 async function loadRecords(){
-  const token=listFence.begin(),scope=kb.value,recordKind=kind.value;if(!scope)return;loading.value=true;error.value=''
-  try{const rows=await readRecords(scope,recordKind,page.value);if(listFence.current(token)){records.value=rows;void loadRecordTitles(rows)}}
-  catch(e){if(listFence.current(token)){records.value=[];detail.value=undefined;error.value=businessError(e);if(httpStatus(e)===403)canWrite.value=false}}
+  const token=listFence.begin(),scope=kb.value,recordKind=kind.value,tenantQueue=inbox.value
+  if(!tenantQueue&&(!scope||props.inboxOnly||feedbackTab.value==='inbox'))return
+  loading.value=true;error.value=''
+  try{
+    const rows=await readRecords(scope,recordKind,page.value)
+    if(!listFence.current(token))return
+    records.value=rows
+    const endpoint=recordKind==='relation' && !props.document ? relationFilters.value.documentId : ''
+    if(recordKind!=='feedback')await Promise.all([loadRecordTitles(rows),endpoint ? loadTitles([endpoint],scope) : undefined])
+  }
+  catch(e){if(listFence.current(token)){records.value=[];error.value=readError(e,tenantQueue);if(httpStatus(e)===403){clearRecordDetail();if(!tenantQueue)canWrite.value=false}}}
   finally{if(listFence.current(token))loading.value=false}
 }
 async function loadAuthority(){
@@ -275,20 +454,78 @@ async function loadAuthority(){
   try{const value=await authority(scope);if(!kbFence.current(token))return;canWrite.value=value.can_write}
   catch(e){if(kbFence.current(token))authorityError.value=`权限信息暂不可用：${businessError(e)}。记录列表仍可查看。`}
 }
-function refresh(){if(!kb.value){void loadKBs();return}const selected=detail.value;void loadAuthority();void loadRecords();if(selected)void openRecord(selected);if(kind.value==='relation'&&queryDocument.value)void queryRelated()}
-function movePage(delta:number){page.value+=delta;void loadRecords()}
-async function openRecord(row:api.BusinessRecord){
-  const token=detailFence.begin(),scope=kb.value,recordKind=kind.value;error.value='';detailLoading.value=true
-  try{const found=(await readRecords(scope,recordKind,1,row.id))[0];if(!detailFence.current(token))return;if(!found){detail.value=undefined;error.value='该记录已不可访问，请刷新列表。';return}detail.value=found;await nextTick();detailHeading.value?.focus()
-    void loadRecordTitles([found])
-  }catch(e){if(detailFence.current(token)){detail.value=undefined;error.value=businessError(e)}}finally{if(detailFence.current(token))detailLoading.value=false}
+function readError(error:unknown, tenantQueue:boolean){
+  return tenantQueue && httpStatus(error)===403 ? '当前账号没有未归属反馈的处理权限。' : businessError(error)
+}
+function refresh(){
+  if(!kb.value&&!inbox.value){void loadKBs();return}
+  if(!inbox.value)void loadAuthority()
+  if(openedFeedbackId.value){void openRecord({id:openedFeedbackId.value});return}
+  const selected=detail.value
+  void loadRecords()
+  if(selected)void openRecord(selected)
+  if(kind.value==='relation'&&queryDocument.value)void queryRelated()
+}
+function clearRecordDetail(){
+  openedFeedbackId.value=''
+  detailFence.invalidate()
+  detail.value=undefined
+  detailLoading.value=false
+}
+let recordTrigger:HTMLElement|undefined
+async function closeRecord(){
+  const returnId=openedFeedbackId.value
+  const version=generation
+  clearRecordDetail()
+  await nextTick()
+  if(version!==generation || openedFeedbackId.value)return
+  if(returnId){
+    const trigger=[...(recordList.value?.querySelectorAll<HTMLElement>('[data-record-id]')||[])]
+      .find(candidate=>candidate.dataset.recordId===returnId)
+    const focusTarget=trigger||recordListHeading.value
+    focusTarget?.focus()
+  }else recordTrigger?.focus()
+}
+function applyRelationFilters(){
+  if(writeLocked.value)return
+  clearRecordDetail()
+  page.value=1
+  void loadRecords()
+}
+function movePage(delta:number){if(writeLocked.value)return;clearRecordDetail();page.value+=delta;void loadRecords()}
+async function openRecord(row:Pick<api.BusinessRecord,'id'>,event?:MouseEvent){
+  if(!inbox.value&&(!kb.value||props.inboxOnly||feedbackTab.value==='inbox'))return
+  const trigger=event?.currentTarget
+  if(trigger && trigger instanceof HTMLElement)recordTrigger=trigger
+  const drillDown=props.section==='feedback-governance'
+  if(drillDown)openedFeedbackId.value=row.id
+  const token=detailFence.begin(),scope=kb.value,recordKind=kind.value,tenantQueue=inbox.value
+  error.value='';detail.value=undefined;detailLoading.value=true
+  if(drillDown&&trigger){
+    await nextTick()
+    if(!detailFence.current(token))return
+    detailHeading.value?.focus()
+  }
+  try{
+    const found=(await readRecords(scope,recordKind,1,row.id)).find(candidate=>candidate.id===row.id)
+    if(!detailFence.current(token))return
+    if(!found){error.value='该记录已不可访问，请刷新列表。';return}
+    detail.value=found
+    detailLoading.value=false
+    await nextTick()
+    if(!drillDown && trigger && detailFence.current(token) && trigger===globalThis.document.activeElement)detailHeading.value?.focus()
+    if(detailFence.current(token))void loadRecordTitles([found])
+  }catch(e){if(detailFence.current(token))error.value=readError(e,tenantQueue)}finally{if(detailFence.current(token))detailLoading.value=false}
 }
 async function beginWrite(action:api.BusinessAction,payload:api.BusinessPayload,row?:api.BusinessRecord){
-  if(!canWrite.value||running.value||pending.value||detailLoading.value)return
-  try{pending.value={kb:kb.value,intent:buildIntent(action,row,payload,crypto.randomUUID()),detailID:row?.split_id}}
+  if(!canReview.value||writeLocked.value||detailLoading.value||(inbox.value&&!isInboxAction(action)))return
+  try{pending.value={kb:kb.value,inbox:inbox.value,intent:buildIntent(action,row,payload,crypto.randomUUID()),detailID:row?.split_id}}
   catch(e){error.value=(e as Error).message;return}
   highRisk.value=action==='feedback_activate'&&row?.risk==='high';secondConfirmation.value=false
   confirmationText.value=action==='revision_publish'?'发布将创建新的有效版本，并让原文档退出检索。请确认已审阅完整修订正文。':action==='feedback_approve'?'批准后仍需等待对应风险的冷静期。':action==='feedback_activate'?'激活后，审核定稿将用于符合条件的后续问答。':action==='guidance_seed'?'种子指导将直接加入指导清单；请确认内容已经人工核对。':'请确认已审阅记录，并执行这项状态变更。'
+  if(action==='feedback_record_only')confirmationText.value='仅保存此反馈供核对。此操作不会发布指导。'
+  if(action==='feedback_needs_evidence')confirmationText.value='将此反馈标记为待补证。核对来源后可再处理。'
+  if(action==='feedback_reject'&&modernFeedback.value)confirmationText.value='驳回此反馈。此操作不会发布指导。'
   if(action==='split_approve')confirmationText.value='请确认已审阅全部分件正文。批准后锁定名单和内容，并允许逐份发布。'
   if(action==='repeal_approve')confirmationText.value=`请核对废止通知与旧制度。批准后将于 ${date(row?.effective_at)} 执行，旧制度归档并退出普通检索。若已到该时点，将立即执行。`
   if(action==='repeal_cancel')confirmationText.value='撤回此计划后，系统将停止执行这条废止计划。'
@@ -306,19 +543,29 @@ async function confirmWrite(){
   dialog.value?.close();confirmationOpen.value=false;await perform()
 }
 async function perform(){
-  const command=pending.value;if(!command||running.value||command.kb!==kb.value||!canWrite.value)return
+  const command=pending.value
+  if(!command||running.value||command.kb!==kb.value||!!command.inbox!==inbox.value||!canReview.value)return
+  const {action,body}=command.intent
+  if(command.inbox&&!isInboxAction(action))return
   const version=generation;running.value=true;error.value='';success.value=''
-  try{const result=await api.write(command.kb,command.intent.action,command.intent.body);if(version!==generation)return
+  try{
+    const result=await (command.inbox && isInboxAction(action) ? api.reviewUnscopedFeedback(action,body) : api.write(command.kb,action,body))
+    if(version!==generation)return
     emit('changed')
-    pending.value=undefined;success.value=`${actionLabels[command.intent.action]}已完成，当前状态：${stateLabel(result)}。`;if(command.intent.action.endsWith('_create')||command.intent.action==='guidance_seed'||command.intent.action==='relation_declare')formVersion.value++
+    pending.value=undefined;success.value=`${actionLabels[command.intent.action]}已完成，当前状态：${stateLabel(result)}。`;if(command.intent.action.endsWith('_create')||command.intent.action==='guidance_seed'||command.intent.action==='relation_declare'){
+      showCreate(false);formVersion.value++
+    }
     if(kind.value==='relation'&&queryDocument.value)void queryRelated()
-    await loadRecords();if(version!==generation)return;await openRecord({id:command.detailID||result.id,revision:result.revision,status:result.status})
-  }catch(e){if(version===generation){error.value=businessError(e);if([400,403,404,409].includes(httpStatus(e)||0))pending.value=undefined;if(httpStatus(e)===403)canWrite.value=false}}
+    await loadRecords()
+    if(version!==generation)return
+    if(props.section!=='feedback-governance'||openedFeedbackId.value)await openRecord({id:command.detailID||result.id})
+  }catch(e){if(version===generation){if([400,403,404,409].includes(httpStatus(e)||0))pending.value=undefined;if(httpStatus(e)===403){if(command.inbox){inboxDenied.value=true}else canWrite.value=false}error.value=readError(e,!!command.inbox)}}
   finally{if(version===generation)running.value=false}
 }
 function clearRelatedResult(){
   queryFence.invalidate()
   queryResult.value=undefined
+  expandedRelation.value=''
   queryError.value=''
   querying.value=false
 }
@@ -326,22 +573,34 @@ async function queryRelated(){
   const scope=queryScope.value||kb.value,id=queryDocument.value
   if(!scope||!id||kind.value!=='relation')return
   const token=queryFence.begin()
+  const title=loadTitles([id],scope)
   querying.value=true
   queryError.value=''
   queryResult.value=undefined
+  expandedRelation.value=''
   try{
     const rows=await api.related(scope,id)
     if(!queryFence.current(token))return
     queryResult.value=rows
-    await loadTitles([id],scope)
     const byScope=new Map<string,string[]>()
-    for(const row of rows)byScope.set(row.knowledge_base_id,[...(byScope.get(row.knowledge_base_id)||[]),row.document_id])
-    for(const [rowScope,docs] of byScope)if(rowScope!==scope)await loadTitles(docs,rowScope)
+    for(const row of rows){
+      const rowScope=row.knowledge_base_id||scope
+      const docs=byScope.get(rowScope)||[]
+      docs.push(row.document_id)
+      byScope.set(rowScope,docs)
+    }
+    await Promise.all([...byScope].map(([rowScope,docs])=>loadTitles(docs,rowScope)))
   }catch(e){
     if(queryFence.current(token))queryError.value=businessError(e)
   }finally{
+    await title
     if(queryFence.current(token))querying.value=false
   }
+}
+function selectQueryDocument(id:string){
+  queryScope.value=kb.value
+  queryDocument.value=id
+  clearRelatedResult()
 }
 function inspectRelated(id:string, scope=kb.value){
   if(!id)return
@@ -350,9 +609,13 @@ function inspectRelated(id:string, scope=kb.value){
   queryHeading.value?.focus()
   void queryRelated()
 }
-function resetScope(){generation++;listFence.invalidate();detailFence.invalidate();kbFence.invalidate();clearRelatedResult();records.value=[];detail.value=undefined;detailLoading.value=false;pending.value=undefined;running.value=false;page.value=1;canWrite.value=false;titles.value.clear();crossTitles.value.clear();error.value='';authorityError.value='';success.value='';queryDocument.value='';queryScope.value='';dialog.value?.close();confirmationOpen.value=false}
+function resetScope(){clearRecordDetail();loading.value=false;showCreate(false);createMounted.value=false;binaryLocked.value=false;relationFilters.value={edgeType:'',status:'',documentId:''};recordTrigger=undefined;generation++;listFence.invalidate();detailFence.invalidate();kbFence.invalidate();clearRelatedResult();records.value=[];detail.value=undefined;detailLoading.value=false;pending.value=undefined;running.value=false;page.value=1;canWrite.value=false;titles.value.clear();crossTitles.value.clear();error.value='';authorityError.value='';success.value='';queryDocument.value='';queryScope.value='';dialog.value?.close();confirmationOpen.value=false}
 async function loadKBs(){
-  const token=catalogFence.begin();kb.value=props.scope||'';resetScope();knowledgeBases.value=[];loadingKB.value=true
+  const token=catalogFence.begin(),nextScope=props.scope||''
+  const sameScope=kb.value===nextScope
+  resetScope();kb.value=nextScope;knowledgeBases.value=[];loadingKB.value=true
+  if(props.inboxOnly){loadingKB.value=false;if(inbox.value)void loadRecords();return}
+  if(sameScope&&nextScope)void loadScope()
   try{
     const response=await listKnowledgeBases();if(!catalogFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[]
     if(props.scope)return
@@ -360,18 +623,48 @@ async function loadKBs(){
   }
   catch{if(catalogFence.current(token))error.value='无法载入可访问的知识库，请检查登录状态后重试。'}finally{if(catalogFence.current(token))loadingKB.value=false}
 }
-watch(kb,()=>{resetScope();if(kb.value){void loadAuthority();void loadRecords()}})
+function loadScope(){
+  if(!kb.value&&!inbox.value)return
+  if(kb.value&&!inbox.value)void loadAuthority()
+  if(kind.value==='relation')void restoreAssociation()
+  else void loadRecords()
+}
+watch(kb,()=>{resetScope();loadScope()})
+watch(()=>props.document?.id,loadDocumentReadingRelations)
+function loadDocumentReadingRelations(){
+  if(!props.document || kind.value!=='relation' || !kb.value)return
+  queryScope.value=kb.value
+  queryDocument.value=props.document.id
+  return queryRelated()
+}
 watch(() => props.canWrite, value => { if (value !== undefined) { canWrite.value = value; authorityError.value = '' } })
-watch(kind,()=>{queryDocument.value='';clearRelatedResult();if(!kb.value)return;listFence.invalidate();detailFence.invalidate();records.value=[];detail.value=undefined;page.value=1;error.value='';loading.value=false;void loadRecords()})
-watch(feedbackStatus,()=>{detailFence.invalidate();detail.value=undefined;detailLoading.value=false;page.value=1;void loadRecords()})
+watch([kind,inbox],()=>{
+  showCreate(false);createMounted.value=false;queryDocument.value='';clearRelatedResult()
+  listFence.invalidate();clearRecordDetail();records.value=[];page.value=1;error.value='';success.value='';loading.value=false
+  if(!inbox.value && !props.inboxOnly && kb.value)void loadAuthority()
+  if(kind.value==='feedback' && !feedbackStatusOptions.value.some(option=>option.value===feedbackStatus.value))feedbackStatus.value=''
+  else void loadRecords()
+})
+watch(feedbackStatus,()=>{listFence.invalidate();clearRecordDetail();page.value=1;void loadRecords()})
+watch(showInboxTab,allowed=>{
+  if(!allowed&&feedbackTab.value==='inbox'){
+    resetScope()
+    if(!props.inboxOnly)feedbackTab.value='feedback'
+  }
+},{flush:'sync'})
 watch(queryDocument,clearRelatedResult,{flush:'sync'})
 watch([()=>detail.value?.id,()=>detail.value?.revision],()=>{clauseDecision.value='';clauseDecisionNote.value='';reviewedGuidance.value=detail.value?.reviewed_guidance || ''})
-watch(()=>auth.effectiveTenantId,()=>void loadKBs())
+watch(()=>auth.effectiveTenantId,()=>{
+  if(!props.inboxOnly)feedbackTab.value='feedback'
+  inboxDenied.value=false
+  void loadKBs()
+},{flush:'sync'})
 watch(()=>route.query.kb,value=>{if(!props.scope&&typeof value==='string'&&knowledgeBases.value.some(v=>v.id===value))kb.value=value})
 watch(()=>props.scope,()=>void loadKBs())
-watch([running,pending],()=>emit('locked',running.value||!!pending.value))
-function allowNavigation(){if(running.value||pending.value){error.value='本次操作仍待核对，请先重试原请求，或核对后选择“结束重试”。';return false}return true}
-function beforeUnload(event:BeforeUnloadEvent){if(running.value||pending.value){event.preventDefault();event.returnValue=''}}
+watch(writeLocked,value=>emit('locked',value))
+watch([kb,initialGuidance],()=>{if(kb.value && kind.value==='revision' && initialGuidance.value)showCreate(true)})
+function allowNavigation(){if(writeLocked.value){error.value='本次操作仍待核对，请先重试原请求，或核对后选择“结束重试”。';return false}return true}
+function beforeUnload(event:BeforeUnloadEvent){if(writeLocked.value){event.preventDefault();event.returnValue=''}}
 onBeforeRouteLeave(allowNavigation)
 onBeforeRouteUpdate(allowNavigation)
 onMounted(()=>{window.addEventListener('beforeunload',beforeUnload);void loadKBs()})
@@ -379,8 +672,31 @@ onBeforeUnmount(()=>{generation++;catalogFence.invalidate();listFence.invalidate
 </script>
 <style scoped>
 .embedded-business { height:auto; overflow:visible; padding:0; background:transparent; }
-.embedded-business .page-heading { margin-bottom:12px; }
-.feedback-status { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.business-page .page-heading { flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.business-page .page-heading h2 { margin:0; }
+.heading-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.business-page .workspace-grid:not(.has-record-detail) { grid-template-columns:minmax(0,1fr); }
+.create-workspace { display:grid; gap:12px; margin-block:12px; }
+.create-workspace > :deep(.panel + .panel) { margin-top:0; }
+.relation-end { max-width:240px; }
+.business-page .relation-query form { align-items:end; gap:12px; }
+.business-page .relation-query form > .t-button { justify-self:start; align-self:start; margin-top:25px; }
+.query-picker { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.query-picker :deep(.subtle),.query-picker :deep(.notice),.query-picker :deep(.wb-loading) { grid-column:1/-1; margin:0; }
+@media (max-width:700px) {
+  .query-picker { grid-template-columns:minmax(0,1fr); }
+  .business-page .relation-query form { grid-template-columns:minmax(0,1fr); }
+  .business-page .relation-query form > .t-button { margin-top:0; }
+}
+.relation-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr)); gap:12px; align-items:start; margin-block:12px; }
+.relation-filters > label { display:grid; gap:4px; }
+.review-reason { color:var(--td-warning-color); }
+.business-page .record-card { height:auto; white-space:normal; align-items:stretch; }
+.record-card :deep(.t-button__text) { display:grid; width:100%; gap:4px; overflow:visible; white-space:normal; text-align:start; }
+.business-page .feedback-record { grid-template-columns:minmax(0,1fr); justify-items:stretch; }
+.business-page .feedback-status { display:flex; flex-direction:row; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+.feedback-status :deep(.t-select) { width:auto; min-width:140px; }
+.confirmation-text { white-space:pre-wrap; overflow-wrap:anywhere; }
 .feedback-guidance { display:grid; gap:6px; }
 .feedback-excerpt p { white-space:pre-wrap; overflow-wrap:anywhere; }
 @media(max-width:1050px) { .embedded-business .workspace-grid { grid-template-columns:1fr; } }

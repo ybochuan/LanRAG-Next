@@ -57,6 +57,28 @@ type SourceInput struct {
 	AgentSearch bool `json:"agent_search,omitempty"`
 }
 
+// ConsumedToolOutput identifies a successful native search result in this model request.
+type ConsumedToolOutput struct {
+	StepID     string `json:"step_id"`
+	ToolCallID string `json:"tool_call_id"`
+	OutputHash string `json:"output_hash"`
+}
+
+type consumedToolOutputsKey struct{}
+
+// WithConsumedToolOutputs supplies verified request-local tool results to the generation hook.
+func WithConsumedToolOutputs(ctx context.Context, outputs []ConsumedToolOutput) context.Context {
+	if len(outputs) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, consumedToolOutputsKey{}, outputs)
+}
+
+func consumedToolOutputsFromContext(ctx context.Context) []ConsumedToolOutput {
+	outputs, _ := ctx.Value(consumedToolOutputsKey{}).([]ConsumedToolOutput)
+	return outputs
+}
+
 type sourceStep struct {
 	OperationID string `json:"operation_id"`
 	Kind        string `json:"kind"`
@@ -72,6 +94,7 @@ type sourceStepResult struct {
 	Outcome     string `json:"outcome"`
 	InputHash   string `json:"input_hash"`
 	OutputHash  string `json:"output_hash"`
+	AnnotationDelivery string `json:"annotation_delivery,omitempty"`
 }
 type sourceFinish struct {
 	OperationID      string `json:"operation_id"`
@@ -289,17 +312,17 @@ func RecordSourceInput(ctx context.Context, e SourceInput) error {
 // FinishSourceStep records actual encoded request/output hashes. Unknown is
 // monotonic in Host; a transport failure must never replay the underlying call.
 func FinishSourceStep(ctx context.Context, input, output []byte, outcome string) error {
-	return finishSourceStepHashes(ctx, SourceHash(input), SourceHash(output), outcome, uuid.NewString())
+	return finishSourceStepHashes(ctx, SourceHash(input), SourceHash(output), outcome, uuid.NewString(), "")
 }
 
-func finishSourceStepHashes(ctx context.Context, input, output, outcome, operation string) error {
+func finishSourceStepHashes(ctx context.Context, input, output, outcome, operation, annotationDelivery string) error {
 	h, ok := SourceRunFromContext(ctx)
 	step, _ := ctx.Value(sourceStepKey{}).(string)
 	if !ok || !sourceID(step) {
 		return ErrUnattributed
 	}
 	var result struct{}
-	return sourceCall(ctx, "/provenance/runs/steps", sourceRequest{Scope: h.Scope, Handle: &h, Action: "finish", Result: &sourceStepResult{operation, step, outcome, input, output}}, &result)
+	return sourceCall(ctx, "/provenance/runs/steps", sourceRequest{Scope: h.Scope, Handle: &h, Action: "finish", Result: &sourceStepResult{OperationID: operation, StepID: step, Outcome: outcome, InputHash: input, OutputHash: output, AnnotationDelivery: annotationDelivery}}, &result)
 }
 
 // SourceCall holds only request-local transport digests. Host owns all run facts.
@@ -309,6 +332,7 @@ type SourceCall struct {
 	inputHash string
 	output    hash.Hash
 	operation string
+	annotationDelivery string
 	err       error
 }
 
@@ -395,7 +419,25 @@ func (c *SourceCall) Finish(outcome string) error {
 	if c.err != nil || c.ctx.Err() != nil {
 		outcome = "error"
 	}
-	return finishSourceStepHashes(context.WithoutCancel(c.ctx), c.inputHash, hex.EncodeToString(c.output.Sum(nil)), outcome, c.operation)
+	return finishSourceStepHashes(context.WithoutCancel(c.ctx), c.inputHash, hex.EncodeToString(c.output.Sum(nil)), outcome, c.operation, c.annotationDelivery)
+}
+
+// FinishAgentSearch commits the normalized call ID and exact recorded output.
+// Only an acknowledged successful tool step yields a model-input receipt.
+func (c *SourceCall) FinishAgentSearch(callID string) (ConsumedToolOutput, error) {
+	if c == nil || c.output == nil || !sourceID(callID) {
+		return ConsumedToolOutput{}, c.Finish("success")
+	}
+	if c.err != nil || c.ctx.Err() != nil {
+		return ConsumedToolOutput{}, c.Finish("error")
+	}
+	step, _ := c.ctx.Value(sourceStepKey{}).(string)
+	outputHash := hex.EncodeToString(c.output.Sum(nil))
+	committedHash := SourceFieldHash([]string{"agent-search-output-v1", callID, outputHash})
+	if err := finishSourceStepHashes(context.WithoutCancel(c.ctx), c.inputHash, committedHash, "success", c.operation, ""); err != nil {
+		return ConsumedToolOutput{}, err
+	}
+	return ConsumedToolOutput{StepID: step, ToolCallID: callID, OutputHash: outputHash}, nil
 }
 
 // FinishSourceRun is called at the actual execution terminal, not HTTP return.

@@ -72,9 +72,13 @@ func (s *Service) revision(ctx context.Context, c Command) (Result, error) {
 		if !validID(c.Payload.DocumentID) || len(c.Payload.GuidanceIDs) > 3 || c.Payload.Text != "" || c.Payload.TargetDocumentID != "" {
 			return Result{}, ErrInvalid
 		}
+		// Recover the committed proposal before observing a source that may have changed.
+		if receipt, replayed, err := s.replay(ctx, c); replayed || err != nil {
+			return receipt, err
+		}
 		source, e = s.verify(ctx, c.Scope, c.Payload.DocumentID)
 		if e != nil {
-			return Result{}, e
+			return s.replayAfterObservationError(ctx, c, e)
 		}
 	}
 	return s.transact(ctx, c, func(tx *sql.Tx) (Result, error) {

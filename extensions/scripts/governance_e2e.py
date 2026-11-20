@@ -381,6 +381,136 @@ def main():
                 return row is not None and bool(row[0])
             startup.until(unrelated_deleted, 30)
             emit("[DOCUMENT-FEEDBACK] PASS: shared excerpt, reviewed wording, controlled activation and exact citation match")
+        if os.environ.get("AGENTRAG_ANCHORED_FEEDBACK_E2E") == "1":
+            review_route = "/knowledge-bases/" + kb["id"] + "/lifecycle/business/"
+            quick_id = "/agents/builtin-quick-answer"
+            quick = http.api("GET", quick_id)["data"]
+            quick_update = {"name": quick["name"], "description": quick.get("description", ""), "config": quick["config"]}
+            original_sessions = dict(sessions)
+
+            def feedback_route(kind, response):
+                match = re.search(r'"assistant_message_id"\s*:\s*"([^"]+)"', response)
+                if not match:
+                    raise RuntimeError("feedback test question returned no native answer id")
+                message = match[1]
+
+                def saved():
+                    with sqlite3.connect((work / "core.db").as_uri() + "?mode=ro", uri=True) as db:
+                        return db.execute("SELECT 1 FROM messages WHERE id=? AND is_completed=1 AND length(trim(content))>0", (message,)).fetchone()
+
+                startup.until(saved, 10)
+                return "/messages/" + sessions[kind] + "/" + message + "/feedback"
+
+            def ask_for_feedback(phase):
+                sessions.pop("rag", None)
+                code, response, _ = ask(phase, False)
+                if code != 200 or any(data.get("response_type") == "error" for _, data in helpers.sse_records(response)):
+                    raise RuntimeError("feedback test question failed before it could produce a saved answer: " + phase)
+                return feedback_route("rag", response)
+
+            default_feedback = ask_for_feedback("rag-annotation-default-active")
+            snapshot = http.api("GET", default_feedback)["data"]
+            if "how many reviewers" not in snapshot.get("question", "") or model.old_answer not in snapshot.get("answer_excerpt", ""):
+                raise RuntimeError("default Quick QA feedback preview missed the saved question or answer")
+            vote = {"operation_id": uuid.uuid4().hex, "rating": "dislike", "reason": "missing_sources"}
+            if snapshot.get("snapshot_digest"):
+                vote["snapshot_digest"] = snapshot["snapshot_digest"]
+            rating = http.api("POST", default_feedback, vote)["data"]
+            if rating["status"] != "received" or http.api("POST", default_feedback, vote)["data"] != rating:
+                raise RuntimeError("default Quick QA feedback did not return an idempotent rating receipt")
+            unbound = http.api("GET", review_route + "feedback_list?id=" + rating["id"])["data"]
+            if len(unbound) != 1 or unbound[0].get("citation_chunks"):
+                raise RuntimeError("unattributed default answer received a publishable anchor")
+            emit("[ANSWER-RATING] PASS: default Quick QA accepted owner feedback on a saved answer without a sealed run")
+
+            exact_config = dict(quick["config"], enable_rewrite=False, enable_query_expansion=False,
+                                rerank_model_id="", multi_turn_enabled=False)
+            http.api("PUT", quick_id, dict(quick_update, config=exact_config))
+            exact_feedback = ask_for_feedback("rag-annotation-exact-active")
+            exact_snapshot = http.api("GET", exact_feedback)["data"]
+            comment = {"operation_id": uuid.uuid4().hex, "rating": "correction", "text": "OPENCOMMENT" + secrets.token_hex(8)}
+            if exact_snapshot.get("snapshot_digest"):
+                comment["snapshot_digest"] = exact_snapshot["snapshot_digest"]
+            receipt = http.api("POST", exact_feedback, comment)["data"]
+            listing = http.api("GET", review_route + "feedback_list")["data"]
+            summary = next(row for row in listing if row["id"] == receipt["id"])
+            if summary.get("feedback_context") or summary.get("citation_chunks") or summary.get("text") or "annotation_checks" in summary:
+                raise RuntimeError("feedback list exposed private content before opening the record")
+            detail = http.api("GET", review_route + "feedback_list?id=" + receipt["id"])["data"][0]
+            if receipt["status"] != "pending_review" or detail["feedback_context"].get("question") != exact_snapshot.get("question") or detail.get("text") != comment["text"]:
+                raise RuntimeError("opened feedback did not contain its server-derived snapshot and correction")
+            pins = detail.get("citation_chunks", [])
+            if not pins or any(pin["document_id"] != doc["id"] or not pin.get("version_id") for pin in pins):
+                raise RuntimeError("verified cited chunk was unavailable for review")
+            pin = pins[0]
+            annotation = "ANCHOREDGUIDE" + secrets.token_hex(12)
+            condition = "Answering the reviewer count in this clause"
+            def payload(revision, data):
+                return {"operation_id": uuid.uuid4().hex, "expected_revision": revision,
+                        "business": {"id": receipt["id"], "payload": data}}
+            anchor = {key: pin[key] for key in ("chunk_id", "content_hash")}
+            review = {"text": annotation, "applies_when": condition, "source_clause": anchor}
+            bad_anchor = dict(anchor, content_hash="0" * 64)
+            status, _ = http.call("PUT", http.base_url + "/api/v1" + review_route + "feedback_approve",
+                                  payload(receipt["revision"], dict(review, source_clause=bad_anchor)))
+            if status not in (400, 409):
+                raise RuntimeError("review accepted a non-matching chunk hash")
+            approved = http.api("PUT", review_route + "feedback_approve", payload(receipt["revision"], review))["data"]
+            if approved["status"] != "approved":
+                raise RuntimeError("chunk annotation bypassed its cooling period")
+            def diagnostic(expected):
+                def observed():
+                    record = http.api("GET", review_route + "feedback_list?id=" + receipt["id"])["data"][0]
+                    recent = record.get("annotation_checks", [])
+                    return recent and recent[0].get("outcome") == expected and set(recent[0]) == {"outcome", "checked_at"}
+                startup.until(observed, 5)
+
+            _, _, cooling = ask("rag-annotation-cooling-active", False)
+            if annotation in cooling:
+                raise RuntimeError("cooling annotation reached a real model call")
+            diagnostic("cooling_down")
+            with sqlite3.connect(work / "ext.db") as db:
+                db.execute("UPDATE ext_feedback_staging SET ready_at='2020-01-01T00:00:00Z' WHERE feedback_id=?", (receipt["id"],))
+            active = http.api("PUT", review_route + "feedback_activate", payload(approved["revision"], {}))["data"]
+            def check_annotation(phase, agent=False):
+                sessions.pop("agent" if agent else "rag", None)
+                status, response, captured = ask(phase, agent)
+                if status != 200 or model.old_answer not in response:
+                    raise RuntimeError("matching source did not produce an answer: " + phase)
+                prompts = [json.loads(body) for name, body in model.prompts if name == phase]
+                guided = [messages for messages in prompts if annotation in json.dumps(messages)]
+                if status != 200 or len(guided) != 1 or comment["text"] in captured:
+                    raise RuntimeError("matching chunk did not receive only the reviewed annotation")
+                messages = guided[0]
+                system = messages[0].get("content", "")
+                if messages[0].get("role") != "system" or annotation not in system or condition not in system or "答案采用批注的事实" not in system:
+                    raise RuntimeError("reviewed annotation did not reach the leading system message with its applicability rule")
+                if agent and not any(m.get("role") == "tool" and body_canary in m.get("content", "") for m in messages):
+                    raise RuntimeError("Agent annotation was issued without the current matching search result")
+
+            if active["status"] != "active":
+                raise RuntimeError("annotation did not activate")
+            check_annotation("rag-annotation-matching-active")
+            diagnostic("sent")
+            check_annotation("agent-search-annotation-matching-active", agent=True)
+            http.api("PUT", quick_id, quick_update)
+            sessions.pop("rag", None)
+            _, _, default_after_activation = ask("rag-annotation-default-after-activation", False)
+            if annotation in default_after_activation:
+                raise RuntimeError("unverified default Quick QA received an exact-source annotation")
+            http.api("PUT", quick_id, dict(quick_update, config=exact_config))
+            revoked = http.api("PUT", review_route + "feedback_withdraw", payload(active["revision"], {}))["data"]
+            for kind in ("rag", "agent"):
+                sessions.pop(kind, None)
+                phase = "agent-search-annotation-withdrawn-active" if kind == "agent" else "rag-annotation-withdrawn-active"
+                status, response, after_withdrawal = ask(phase, kind == "agent")
+                if status != 200 or model.old_answer not in response or revoked["status"] != "withdrawn" or annotation in after_withdrawal:
+                    raise RuntimeError("withdrawn annotation still reached a new model call")
+            diagnostic("withdrawn")
+            http.api("PUT", quick_id, quick_update)
+            sessions.clear()
+            sessions.update(original_sessions)
+            emit("[ANCHORED-FEEDBACK] PASS: exact versioned citation, scoped priority in Quick QA and Agent, cooling, default-proof boundary and withdrawal")
         status, response, captured = ask("rag-fallback-active", False)
         if status != 200 or desc_canary not in captured or model.old_answer not in response:
             raise RuntimeError("active fallback description positive control failed")
@@ -391,6 +521,14 @@ def main():
             if status != 200 or model.tool_step != 1 or marker not in captured or model.old_answer not in response or not any(marker in output for phase,output in model.tool_outputs if phase=="agent-"+action+"-active"):
                 raise RuntimeError("active Agent " + action + " positive control failed")
             emit("[AGENT-" + action.upper() + "-ACTIVE] PASS: real tool ran and permitted source reached actual follow-up prompt")
+            if action == "search" and os.environ.get("AGENTRAG_ANCHORED_FEEDBACK_E2E") == "1":
+                agent_feedback = feedback_route("agent", response)
+                agent_snapshot = http.api("GET", agent_feedback)["data"]
+                agent_rating = http.api("POST", agent_feedback, {"operation_id": uuid.uuid4().hex,
+                    "rating": "like", "snapshot_digest": agent_snapshot["snapshot_digest"]})["data"]
+                if agent_rating["status"] != "received":
+                    raise RuntimeError("persisted Agent answer did not accept a rating")
+                emit("[AGENT-ANSWER-RATING] PASS: owner submitted feedback on a completed Agent answer")
             if action == "search" and os.environ.get("AGENTRAG_QA_FEEDBACK_E2E") == "1":
                 answer = re.search(r'"assistant_message_id"\s*:\s*"([^"]+)"', response)
                 if not answer or not any(phase == "agent-search-active" and body_canary in passages for phase, passages in model.rerank_inputs):

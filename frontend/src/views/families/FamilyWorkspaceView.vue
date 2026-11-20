@@ -1,8 +1,11 @@
 <template>
   <section class="business-page family-workspace" :class="{ 'embedded-family': scope }">
     <header class="page-heading">
-      <div><h2>{{ initialView==='suggestions' ? $t('workbench.family.suggestions') : $t('workbench.family.title') }}</h2><p v-if="!documentId">{{ $t('workbench.family.subtitle') }}</p></div>
-      <t-button variant="outline" :loading="busy" :disabled="locked" @click="refresh">刷新</t-button>
+      <div><h2>{{ initialView==='suggestions' ? $t('workbench.family.suggestions') : $t('workbench.family.title') }}</h2><p v-if="!scope && !documentId">{{ $t('workbench.family.subtitle') }}</p></div>
+      <div ref="familyActionsBar" class="family-actions">
+        <t-button variant="outline" :loading="busy" :disabled="locked" @click="refresh">刷新</t-button>
+        <t-button v-if="canWrite && kb && initialView!=='suggestions'" :theme="createOpen?'default':'primary'" :variant="createOpen?'outline':'base'" :aria-expanded="createOpen" data-create-family :disabled="locked" @click="createOpen=!createOpen">{{ createOpen?'收起创建表单':'创建版本族' }}</t-button>
+      </div>
     </header>
     <section class="scope-bar" aria-label="工作范围">
       <label v-if="!scope">知识库<t-select v-model="kb" :options="kbOptions" :disabled="catalogBusy || locked" class="kb-select" /></label>
@@ -14,7 +17,7 @@
       <t-tag v-if="kb" :theme="canWrite?'primary':'default'" variant="light" size="small">{{ canWrite ? '可管理' : '只读' }}</t-tag>
     </section>
     <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
-    <t-alert v-if="notice" theme="success" class="notice">{{ notice }}</t-alert>
+    <t-alert v-if="notice" theme="success" class="notice" role="status">{{ notice }}</t-alert>
     <section v-if="pending && !saving" class="notice pending" aria-label="待核对操作">
       <p>结果待核对。重试将沿用同一操作编号和提交内容。</p>
       <t-button theme="primary" :disabled="!canWrite" @click="perform">重试原请求</t-button>
@@ -23,7 +26,7 @@
     <div v-if="catalogBusy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取知识库…</span></div>
     <t-empty v-else-if="!scope && !bases.length" class="empty" description="还没有可访问的知识库。" />
     <template v-if="kb">
-      <form v-if="canWrite && initialView!=='suggestions'" class="panel family-create" @submit.prevent="createFamily">
+      <form v-if="canWrite && createOpen && initialView!=='suggestions'" class="panel family-create" @submit.prevent="createFamily">
         <label>新版本族名称<t-input v-model="newLabel" :maxlength="120" placeholder="例如：员工手册" :disabled="locked" /></label>
         <t-button theme="primary" type="submit" :disabled="locked || !newLabel">创建版本族</t-button>
       </form>
@@ -31,26 +34,29 @@
       <section v-if="family" class="panel family-header">
         <div class="section-heading"><h2>{{ family.label }}</h2><span class="subtle">族修订 {{ family.revision }}</span></div>
         <p v-if="family.published_document_id">
-          当前发布件 · <span class="doc-link" role="button" tabindex="0" :aria-disabled="locked" @click="locked||openDocument(family.published_document_id)" @keydown.enter="locked||openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</span>
+          当前发布件 · <t-button variant="text" size="small" class="doc-link" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</t-button>
           <RouterLink v-if="family.published_version_node_id" :to="{path:'/platform/lineage',query:{kb,mode:'version-ancestry',id:family.published_version_node_id}}">版本历史</RouterLink>
         </p>
         <p v-else>尚未确认发布头。</p>
         <t-alert v-if="family.published_document_id && family.published_head_availability==='missing'" theme="error" class="notice" role="alert">当前发布件在原生文档中不可用。请从当前成员中选择新的发布头并显式确认恢复。</t-alert>
       </section>
-      <nav v-if="visibleTabs.length > 1" class="sub-tabs" aria-label="文档族视图">
-        <button v-for="item in visibleTabs" :key="item.key" type="button" :class="{selected:tab===item.key}"
-          :aria-pressed="tab===item.key" :disabled="locked || (!familyId && item.key!=='unassigned')"
-          @click="tab=item.key">{{ $t(item.labelKey) }}</button>
-      </nav>
-      <div class="workspace-grid">
-        <section class="panel" :aria-label="currentTabLabel">
+      <div v-if="visibleTabs.length > 1" class="sub-tabs" role="tablist" aria-label="文档族视图" @keydown="moveTabFocus">
+        <t-button v-for="item in visibleTabs" :id="familyTabsId+'-'+item.key" :key="item.key" role="tab" :aria-controls="familyTabsId+'-panel'" variant="text" :class="{selected:tab===item.key}"
+          :aria-selected="tab===item.key" :tabindex="(familyId ? tab===item.key : item.key==='unassigned') ? 0 : -1" :disabled="locked || (!familyId && item.key!=='unassigned')"
+          @click="tab=item.key">{{ $t(item.labelKey) }}</t-button>
+      </div>
+      <div v-if="activeFamilyAction" class="family-panel-toolbar">
+        <t-button variant="outline" :aria-expanded="familyActionOpen" :disabled="locked" @click="familyActionOpen=!familyActionOpen">{{ familyActionOpen ? '收起操作' : activeFamilyAction }}</t-button>
+      </div>
+      <div class="workspace-grid" :class="{'family-with-actions':documentId || (familyActionOpen && activeFamilyAction)}">
+        <section class="panel" :id="familyTabsId+'-panel'" :role="visibleTabs.length>1 ? 'tabpanel' : undefined" :aria-labelledby="visibleTabs.length>1 ? familyTabsId+'-'+tab : undefined" :aria-label="currentTabLabel">
           <div v-if="busy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取工作台…</span></div>
           <template v-else>
             <template v-if="tab==='members' || tab==='removed' || tab==='unassigned'">
               <p v-if="tab==='unassigned'" class="subtle">已建立观察记录且尚未归族的文档。新入库的生效文档也可通过右侧搜索加入。</p>
               <ul v-if="members.length" class="family-items">
                 <li v-for="row in members" :key="row.document_id">
-                  <span class="doc-link" role="button" tabindex="0" :aria-disabled="locked" @click="locked||openDocument(row.document_id)" @keydown.enter="locked||openDocument(row.document_id)">{{ title(row.document_id) }}</span>
+                  <t-button variant="text" size="small" class="doc-link" :disabled="locked" @click="openDocument(row.document_id)">{{ title(row.document_id) }}</t-button>
                   <t-tag v-if="row.state" variant="light" size="small" :theme="lifecycleTagTheme(row.state)">{{ lifecycleLabel(row.state) }}</t-tag>
                   <small v-if="row.removed_at">移出于 {{ date(row.removed_at) }} · {{ row.reason === 'member_removed' ? '成员移出' : row.reason }}</small>
                   <t-button v-if="canWrite && family && tab==='unassigned'" variant="outline" size="small" :disabled="locked" @click="addMember(row.document_id)">加入本族</t-button>
@@ -122,7 +128,7 @@
         </section>
         <FamilyDocumentPanel v-if="documentId" :key="kb+':'+documentId" :kb="kb" :document-id="documentId" :title="title(documentId)"
           :can-write="canWrite" :disabled="saving || !!pending" :knowledge-bases="bases" @close="documentId=''" @saved="loadView" @busy="documentBusy=$event" />
-        <section v-else-if="canWrite && family && (tab==='members' || tab==='unassigned')" class="panel">
+        <section v-else-if="familyActionOpen && canWrite && family && (tab==='members' || tab==='unassigned')" class="panel">
           <h2>加入成员</h2>
           <t-button v-if="documentId && familyId!==currentFamily" variant="outline" :disabled="locked" @click="addMember(documentId)">将当前文档加入此族</t-button>
           <form @submit.prevent="addMember(addId)">
@@ -130,7 +136,7 @@
             <t-button theme="primary" type="submit" :disabled="locked || !addId">加入本族</t-button>
           </form>
         </section>
-        <section v-else-if="canWrite && family && tab==='replacements'" class="panel">
+        <section v-else-if="familyActionOpen && canWrite && family && tab==='replacements'" class="panel">
           <h2>登记下一次更替</h2>
           <p>选择本族的两份生效主件。批准且达到生效时间后，旧件退出普通检索。</p>
           <form @submit.prevent="createReplacement">
@@ -157,7 +163,7 @@
             </template>
           </template>
         </section>
-        <section v-else-if="canWrite && family && tab==='relations'" class="panel">
+        <section v-else-if="familyActionOpen && canWrite && family && tab==='relations'" class="panel">
           <h2>新增关联</h2>
           <label>本族成员
             <t-select v-model="relationMember" :options="relationMemberOptions" :disabled="locked" />
@@ -178,7 +184,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { authority, type LifecycleState } from '@/api/lifecycle'
@@ -189,7 +195,7 @@ import { useI18n } from 'vue-i18n'
 import { actionLabels, actionsFor, buildIntent, date, edgeLabels, httpStatus, shortID, statusLabels } from '../business/model'
 import CreateForm from '../business/CreateForm.vue'
 import DocumentPicker from '../business/DocumentPicker.vue'
-import { requestFence, stateLabels } from '../lifecycle/model'
+import { moveTabFocus, requestFence, stateLabels } from '../lifecycle/model'
 import FamilyDocumentPanel from './FamilyDocumentPanel.vue'
 import FamilySuggestionPanel from './FamilySuggestionPanel.vue'
 
@@ -202,6 +208,7 @@ const tabs: {key:api.FamilyTab; labelKey:string}[] = [
   {key:'activity',labelKey:'workbench.family.tabs.activity'}, {key:'suggestions',labelKey:'workbench.family.tabs.suggestions'},
 ]
 const { t } = useI18n()
+const familyTabsId=useId()
 const currentTabLabel = computed(() => {
   const hit = tabs.find(item => item.key === tab.value)
   return hit ? t(hit.labelKey) : ''
@@ -243,6 +250,13 @@ const familyOptions=computed(()=>{
 const familyPage = ref(1), page = ref(1), tab = ref<api.FamilyTab>(props.initialView || 'members')
 const catalogBusy = ref(false), listBusy = ref(false), busy = ref(false), canWrite = ref(false)
 const error = ref(''), notice = ref(''), newLabel = ref(''), addId = ref('')
+const createOpen=ref(false),familyActionOpen=ref(false),familyActionsBar=ref<HTMLElement>()
+const activeFamilyAction=computed(()=>{
+  if(!canWrite.value || !family.value || documentId.value)return ''
+  if(tab.value==='members'||tab.value==='unassigned')return '加入成员'
+  if(tab.value==='replacements')return '编辑替代计划'
+  return tab.value==='relations'?'新增关联':''
+})
 const documentId = ref(''), documentBusy = ref(false), removing = ref(''), removalReason = ref('')
 const oldDocument = ref(''), newDocument = ref(''), effectiveAt = ref('')
 // TDesign DatePicker uses a space-separated value; the ref keeps the shape that
@@ -553,6 +567,7 @@ async function perform() {
   saving.value = true
   error.value = ''
   notice.value = ''
+  let createdFamily=false
   try {
     while (queue.length) {
       const command = queue[0]!
@@ -564,6 +579,8 @@ async function perform() {
       else notice.value = `${activityLabel(command.action)}已记录。`
       if (command.action==='family_create') {
         newLabel.value = ''
+        createOpen.value=false
+        createdFamily=true
         familyId.value = result.id
         tab.value = 'members'
       }
@@ -587,7 +604,13 @@ async function perform() {
       if (code===403) canWrite.value = false
     } else error.value = '服务暂不可用。可重试原请求。'
   } finally {
-    if (kb.value===scope) saving.value = false
+    if (kb.value===scope) {
+      saving.value=false
+      if(createdFamily){
+        await nextTick()
+        if(document.activeElement===document.body)familyActionsBar.value?.querySelector<HTMLElement>('[data-create-family]')?.focus()
+      }
+    }
   }
 }
 
@@ -598,6 +621,7 @@ watch(kb,()=>{
   family.value=undefined; familyId.value=''; familyPage.value=1; families.value=[]; canWrite.value=false
   pending.value=undefined; batch.value=undefined; saving.value=false; names.value={}; crossNames.value.clear(); error.value=''; notice.value=''
   documentId.value=''; documentBusy.value=false; removing.value=''; addId.value=''; newLabel.value=''
+  createOpen.value=false;familyActionOpen.value=false
   recoverDocument.value=''; recoverReason.value=''
   if (kb.value) void loadFamilies(true)
 })
@@ -608,7 +632,7 @@ watch(familyId,()=>{
   oldDocument.value=''; newDocument.value=''; effectiveAt.value=''; page.value=1
 })
 watch(tab,()=>{ page.value=1; removing.value='' })
-watch([kb,familyId,tab],resetHistory)
+watch([kb,familyId,tab],()=>{familyActionOpen.value=false;resetHistory()})
 watch([kb,familyId,tab,page,memberPage],loadView,{flush:'post'})
 watch(()=>auth.effectiveTenantId,loadCatalog)
 watch(locked,value=>emit('locked',value))
@@ -623,7 +647,12 @@ onBeforeUnmount(()=>{clearTimeout(scanPoll); catalogFence.invalidate(); listFenc
 
 <style scoped>
 .embedded-family { height:auto; overflow:visible; padding:0; background:transparent; }
-.embedded-family .workspace-grid { grid-template-columns:1fr; }
+.family-workspace .page-heading { flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.family-workspace .page-heading h2 { margin:0; }
+.family-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.family-panel-toolbar { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.family-workspace .workspace-grid:not(.family-with-actions) { grid-template-columns:minmax(0,1fr); }
+.embedded-family .workspace-grid { grid-template-columns:minmax(0,1fr); }
 .family-create { display:flex; align-items:end; gap:1rem; margin-bottom:1rem; }
 .family-create label { flex:1; }
 .family-header { margin-bottom:1rem; }
