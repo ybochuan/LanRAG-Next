@@ -12,7 +12,11 @@ import (
 func RecordCheckTx(ctx context.Context, tx *sql.Tx, s Scope, selection Selection, now time.Time) error {
 	tenant := scopeArgs(s)[0]
 	steps, _ := json.Marshal(s.ConsumedToolSteps)
-	items, err := json.Marshal(selection.Items)
+	selected := append([]Item{}, selection.Items...)
+	for _, entry := range selection.CorrectionItems {
+		selected = append(selected, Item{ID: entry.ID, Revision: entry.Revision})
+	}
+	items, err := json.Marshal(selected)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
+	"time"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
 )
 
 const prefix = "【回答指导】\n"
@@ -67,7 +71,10 @@ type Scope struct {
 	RunID           string
 	StepID          string
 	// ConsumedToolSteps contains verified search steps used by this model request.
-	ConsumedToolSteps []string
+	ConsumedToolSteps  []string
+	CorrectionEvidence bool
+	Query              string
+	Now                time.Time
 }
 
 // Item pins an issued instruction to its governance revision.
@@ -79,12 +86,14 @@ type Item struct {
 // Selection carries ordinary guidance and verified source annotation data.
 // Units charges UTF-8 bytes and framing for each nonempty section.
 type Selection struct {
-	CallID            string `json:"call_id"`
-	Content           string `json:"content"`
-	AnnotationContent string `json:"annotation_content,omitempty"`
-	AnnotationPolicy  string `json:"annotation_policy,omitempty"`
-	Items             []Item `json:"items"`
-	Units             int    `json:"units"`
+	CallID            string                 `json:"call_id"`
+	Content           string                 `json:"content"`
+	AnnotationContent string                 `json:"annotation_content,omitempty"`
+	AnnotationPolicy  string                 `json:"annotation_policy,omitempty"`
+	CorrectionContent string                 `json:"correction_content,omitempty"`
+	CorrectionItems   []corrections.Identity `json:"correction_items,omitempty"`
+	Items             []Item                 `json:"items"`
+	Units             int                    `json:"units"`
 }
 
 func (s *Selection) appendText(text string, annotation bool) {
@@ -137,9 +146,10 @@ func SelectTx(ctx context.Context, tx *sql.Tx, s Scope, callID string) (Selectio
 	steps, _ := json.Marshal(s.ConsumedToolSteps)
 	rows, err := tx.QueryContext(ctx, `SELECT g.guidance_id,g.revision,g.text,`+isSourceAnnotation+` FROM ext_feedback_guidances g
 WHERE g.tenant_id=? AND g.knowledge_base_id=? AND g.status='active'`+qaSourceMatch+anchoredSourceMatch+`
+AND (NOT ? OR NOT `+isSourceAnnotation+`)
 AND (SELECT count(*) FROM ext_guidance_call_items i JOIN ext_guidance_calls c USING(tenant_id,knowledge_base_id,run_id,call_id)
  WHERE i.tenant_id=g.tenant_id AND i.knowledge_base_id=g.knowledge_base_id AND i.guidance_id=g.guidance_id AND c.user_id=? AND c.session_id=?)<2
-ORDER BY g.confidence DESC,g.created_at,g.guidance_id`, tenant, s.KnowledgeBaseID, s.RunID, s.StepID, s.RunID, s.StepID, string(steps), s.UserID, s.SessionID)
+ORDER BY g.confidence DESC,g.created_at,g.guidance_id`, tenant, s.KnowledgeBaseID, s.RunID, s.StepID, s.RunID, s.StepID, string(steps), s.CorrectionEvidence, s.UserID, s.SessionID)
 	if err != nil {
 		return out, err
 	}
@@ -150,6 +160,16 @@ ORDER BY g.confidence DESC,g.created_at,g.guidance_id`, tenant, s.KnowledgeBaseI
 		if err := rows.Scan(&item.ID, &item.Revision, &text, &annotation); err != nil {
 			rows.Close()
 			return out, err
+		}
+		if annotation {
+			active, err := corrections.LegacyAvailableTx(ctx, tx, correctionScope(s), s.Now, item.ID)
+			if err != nil {
+				rows.Close()
+				return out, err
+			}
+			if !active {
+				continue
+			}
 		}
 		if text == "" {
 			continue
@@ -168,6 +188,9 @@ ORDER BY g.confidence DESC,g.created_at,g.guidance_id`, tenant, s.KnowledgeBaseI
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
+		return out, err
+	}
+	if err := addCorrections(ctx, tx, s, &out, nil); err != nil {
 		return out, err
 	}
 	raw, err = json.Marshal(out)
@@ -202,8 +225,22 @@ func currentTx(ctx context.Context, tx *sql.Tx, s Scope, selection Selection) (b
 		if err != nil {
 			return false, err
 		}
+		if annotation {
+			if s.CorrectionEvidence {
+				return false, nil
+			}
+			if active, err := corrections.LegacyAvailableTx(ctx, tx, correctionScope(s), s.Now, item.ID); err != nil || !active {
+				return false, err
+			}
+		}
 		current.appendText(text, annotation)
 	}
-	return current.Content == selection.Content && current.AnnotationContent == selection.AnnotationContent &&
+	if len(selection.CorrectionItems) != 0 {
+		if err := addCorrections(ctx, tx, s, &current, selection.CorrectionItems); err != nil {
+			return false, err
+		}
+	}
+	return current.CorrectionContent == selection.CorrectionContent && slices.Equal(current.CorrectionItems, selection.CorrectionItems) &&
+		current.Content == selection.Content && current.AnnotationContent == selection.AnnotationContent &&
 		current.AnnotationPolicy == selection.AnnotationPolicy && current.Units == selection.Units, nil
 }

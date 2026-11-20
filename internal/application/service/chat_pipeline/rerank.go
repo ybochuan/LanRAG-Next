@@ -157,7 +157,12 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			"top_score":    diag.TopScore,
 			"threshold":    diag.EffectiveThreshold,
 		})
-		return ErrSearchNothing
+		if len(chatManage.CorrectionCandidates) == 0 {
+			return ErrSearchNothing
+		}
+		// Reviewed reverse hits enter the merge independently. Keep ranked-out
+		// ordinary hits out of the merge fallback.
+		chatManage.SearchResult = nil
 	}
 	// Rerank drops candidates before FILTER_TOP_K ever runs: threshold
 	// rejection, the MaxCandidates cap and the MMR top-k all hide passage

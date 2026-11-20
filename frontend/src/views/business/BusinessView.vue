@@ -61,10 +61,14 @@
         <label v-if="document && kind==='relation'" class="relation-end">当前文档在关系中的位置
           <t-select v-model="relationEnd" :options="relationEndOptions" :disabled="writeLocked" />
         </label>
-        <CreateForm :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="writeLocked" :knowledge-bases="knowledgeBases"
-          :initial-guidance="initialGuidance" :fixed-document="document && (kind==='relation'||kind==='revision') ? {...document,end:kind==='revision'?'source':relationEnd} : undefined"
+        <p v-if="correctionSourceLoading" role="status" class="subtle">正在核对勘误和源文档…</p>
+        <t-alert v-if="correctionSourceError" role="alert" theme="error" class="notice">{{ correctionSourceError }}
+          <t-button variant="text" size="small" @click="loadCorrectionSource">重新核对</t-button>
+        </t-alert>
+        <CreateForm v-if="!correctionEntry || correctionSource?.type==='manual'" :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="writeLocked" :knowledge-bases="knowledgeBases"
+          :initial-guidance="initialGuidance" :initial-correction="correctionSource" :fixed-document="document && (kind==='relation'||kind==='revision') ? {...document,end:kind==='revision'?'source':relationEnd} : undefined"
           @submit="(action,payload)=>beginWrite(action,payload)" />
-        <BinaryRevisionPanel v-if="kind==='revision'" :kb="kb" :disabled="running||!!pending" @created="refresh" @locked="binaryLocked=$event" />
+        <BinaryRevisionPanel v-if="kind==='revision' && (!correctionEntry || correctionSource?.type==='file')" :kb="kb" :disabled="running||!!pending" :initial-correction="correctionSource" @created="refresh" @locked="binaryLocked=$event" />
        </template>
       </div>
       <div v-if="kb || inbox" class="workspace-grid" :class="{'has-record-detail':section!=='feedback-governance' && (detail || detailLoading)}">
@@ -230,7 +234,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { listKnowledgeBases } from '@/api/knowledge-base'
+import { getKnowledgeDetails, listKnowledgeBases } from '@/api/knowledge-base'
 import { authority } from '@/api/lifecycle'
 import * as api from '@/api/business'
 import ClauseEvidence from './ClauseEvidence.vue'
@@ -279,6 +283,17 @@ const validGuidance=computed(()=>!!reviewedGuidance.value.trim() && new TextEnco
 const kind=computed<api.BusinessKind>(()=>props.section==='associations'?'relation':props.section==='revisions'?'revision':feedbackTab.value==='guidance'?'guidance':'feedback')
 const relationEnd=ref<'source'|'target'>('source')
 const initialGuidance=computed(()=>typeof route.query.guidance==='string'?route.query.guidance:undefined)
+const correctionEntry=computed(()=>kind.value==='revision' && !props.document &&
+ ['correctionDocument','correctionVersion','correctionRevision'].some(key=>key in route.query))
+const initialCorrection=computed<api.CorrectionRevisionReference|undefined>(()=>{
+ const { correctionDocument, correctionVersion, correctionRevision }=route.query
+ const revision=typeof correctionRevision==='string'?Number(correctionRevision):0
+ if(!correctionEntry.value||!initialGuidance.value||typeof correctionDocument!=='string'||!correctionDocument||
+   typeof correctionVersion!=='string'||!correctionVersion||!Number.isSafeInteger(revision)||revision<1)return undefined
+ return {id:initialGuidance.value,revision,document_id:correctionDocument,version_id:correctionVersion}
+})
+const correctionSource=ref<api.CorrectionRevisionSource>(),correctionSourceError=ref(''),correctionSourceLoading=ref(false)
+const correctionSourceFence=requestFence()
 const createOpen=ref(false),createMounted=ref(false),createPanel=ref<HTMLElement>(),createPanelID=useId()
 const binaryLocked=ref(false)
 const knowledgeBases=ref<{id:string;name:string}[]>([]),kb=ref(''),loadingKB=ref(true),canWrite=ref(false)
@@ -662,13 +677,43 @@ watch(()=>auth.effectiveTenantId,()=>{
 watch(()=>route.query.kb,value=>{if(!props.scope&&typeof value==='string'&&knowledgeBases.value.some(v=>v.id===value))kb.value=value})
 watch(()=>props.scope,()=>void loadKBs())
 watch(writeLocked,value=>emit('locked',value))
-watch([kb,initialGuidance],()=>{if(kb.value && kind.value==='revision' && initialGuidance.value)showCreate(true)})
+async function loadCorrectionSource(){
+  const token=correctionSourceFence.begin(),scope=kb.value,correction=initialCorrection.value
+  correctionSource.value=undefined
+  correctionSourceError.value=''
+  correctionSourceLoading.value=false
+  if(!correctionEntry.value||!scope||!canWrite.value)return
+  if(!correction||route.query.kb!==scope){
+    correctionSourceError.value='无法核对所选勘误的知识库和版本。'
+    return
+  }
+  correctionSourceLoading.value=true
+  try{
+    const title=await api.verifyCorrectionRevision(scope,correction)
+    if(!correctionSourceFence.current(token))return
+    const response=await getKnowledgeDetails(encodeURIComponent(correction.document_id))
+    if(!correctionSourceFence.current(token))return
+    const row=response.data
+    if(!response.success||row?.id!==correction.document_id||row.knowledge_base_id!==scope)throw new Error('correction_source_unavailable')
+    if(row.type==='manual' && row.metadata?.status==='publish')correctionSource.value={...correction,title,type:'manual'}
+    else if(row.type==='file')correctionSource.value={...correction,title,type:'file'}
+    else correctionSourceError.value='此源文档类型不支持正式修订。'
+  }catch{
+    if(correctionSourceFence.current(token))correctionSourceError.value='无法核对所选勘误的效力和源文档。'
+  }finally{
+    if(correctionSourceFence.current(token))correctionSourceLoading.value=false
+  }
+}
+watch([kb,initialGuidance,correctionEntry,initialCorrection],()=>{
+  if(kb.value && kind.value==='revision' && (initialGuidance.value||correctionEntry.value))showCreate(true)
+})
+watch([kb,canWrite,correctionEntry,initialCorrection,()=>route.query.kb,()=>auth.effectiveTenantId],loadCorrectionSource,{flush:'sync'})
 function allowNavigation(){if(writeLocked.value){error.value='本次操作仍待核对，请先重试原请求，或核对后选择“结束重试”。';return false}return true}
 function beforeUnload(event:BeforeUnloadEvent){if(writeLocked.value){event.preventDefault();event.returnValue=''}}
 onBeforeRouteLeave(allowNavigation)
 onBeforeRouteUpdate(allowNavigation)
 onMounted(()=>{window.addEventListener('beforeunload',beforeUnload);void loadKBs()})
-onBeforeUnmount(()=>{generation++;catalogFence.invalidate();listFence.invalidate();detailFence.invalidate();kbFence.invalidate();queryFence.invalidate();clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload)})
+onBeforeUnmount(()=>{generation++;correctionSourceFence.invalidate();catalogFence.invalidate();listFence.invalidate();detailFence.invalidate();kbFence.invalidate();queryFence.invalidate();clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload)})
 </script>
 <style scoped>
 .embedded-business { height:auto; overflow:visible; padding:0; background:transparent; }

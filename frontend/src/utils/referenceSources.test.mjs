@@ -6,6 +6,7 @@ import {
   getDomainFromUrl,
   normalizeReferenceUrl,
   resolveReferenceHighlightKey,
+  resolveReferenceSource,
 } from './referenceSources.ts'
 
 test('buildReferenceList separates web and document references', () => {
@@ -52,6 +53,17 @@ test('buildReferenceList aggregates chunks from the same document', () => {
   assert.deepEqual(items[0].chunkIds, ['chunk-1', 'chunk-2'])
   assert.match(items[0].content || '', /refund rules/)
   assert.match(items[0].content || '', /shipping rules/)
+})
+
+test('merged document cards preserve correction citations and passage links select the exact chunk', () => {
+  const first = { id: 'correction-a', revision: 1, document_id: 'doc', version_id: 'v1', chunk_id: 'chunk-a' }
+  const second = { id: 'correction-b', revision: 2, document_id: 'doc', version_id: 'v1', chunk_id: 'chunk-b' }
+  const refs = [
+    { id: 'chunk-a', knowledge_id: 'doc', knowledge_base_id: 'kb', correction_items: [first] },
+    { id: 'chunk-b', knowledge_id: 'doc', knowledge_base_id: 'kb', correction_items: [second] },
+  ]
+  assert.deepEqual(buildReferenceList(refs)[0].correctionItems, [first, second])
+  assert.deepEqual(resolveReferenceSource(refs, { chunkId: 'chunk-b', knowledgeBaseId: 'kb' }).correctionItems, [second])
 })
 
 test('buildReferenceList opens a document at its first chunk with positions', () => {

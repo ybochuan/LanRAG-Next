@@ -13,19 +13,31 @@
   <t-empty v-if="loadingKB" class="empty" role="status" description="正在加载知识库…" />
   <t-empty v-else-if="!knowledgeBases.length && !error && !standaloneFeedback" class="empty" description="还没有可访问的知识库。创建或加入知识库后即可管理文档。" />
   <t-empty v-else-if="!kb && !standaloneFeedback && knowledgeBases.length" class="empty" description="请选择一个知识库。" />
-  <t-button v-if="canOpenStandaloneFeedback && !standaloneFeedback" variant="outline" @click="showWorkspace('feedback-governance')">未归属反馈</t-button>
-  <BusinessView v-if="standaloneFeedback" section="feedback-governance" inbox-only @locked="viewLocked=$event" />
-  <template v-if="kb">
+  <t-button v-if="canOpenStandaloneFeedback && workspaceView!=='feedback-materials'" variant="outline" @click="showFeedbackReview">未归属反馈</t-button>
+  <template v-if="kb || standaloneFeedback">
    <div class="tabs" role="tablist" aria-label="工作台视图" @keydown="moveTabFocus">
-    <t-button v-for="item in tabs" variant="text" :tabindex="!workspaceView && tab===item.key ? 0 : -1" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :aria-controls="`panel-${item.key}`" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">
+    <t-button v-for="item in kb ? tabs : []" variant="text" :tabindex="!workspaceView && tab===item.key ? 0 : -1" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :aria-controls="`panel-${item.key}`" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">
      {{ $t(item.labelKey) }}<t-tag v-if="item.key==='cleanup' && cleanupActionCount" theme="warning" size="small" variant="light" class="tab-count" :aria-label="cleanupActionCount+' 项待处理'">{{ cleanupActionCount }}</t-tag>
     </t-button>
-    <t-button v-for="item in workspaceTabs" variant="text" aria-controls="panel-workspace" :tabindex="workspaceView===item.key ? 0 : -1" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ $t(item.labelKey) }}</t-button>
+    <t-button v-for="item in workspaceTabs.filter(tab => kb || tab.key==='feedback-materials')" variant="text" aria-controls="panel-workspace" :tabindex="workspaceView===item.key ? 0 : -1" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ $t(item.labelKey) }}</t-button>
    </div>
    <section v-if="workspaceView" id="panel-workspace" role="tabpanel" :aria-labelledby="'tab-workspace-'+workspaceView">
     <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" :can-write="data?.can_write" @changed="loadAll" @locked="viewLocked=$event" />
-    <LineageView v-else-if="workspaceView==='lineage'" :key="kb+String(route.query.mode)+String(route.query.node||route.query.id)" :scope="kb" @open="openWorkspaceDocument" />
-    <BusinessView v-else-if="workspaceView==='associations'||workspaceView==='feedback-governance'||workspaceView==='revisions'" :key="kb+workspaceView" :section="(workspaceView as 'associations'|'feedback-governance'|'revisions')" :scope="kb" :can-write="data?.can_write" @locked="viewLocked=$event" @open="openBusinessDocument" />
+    <LineageView v-else-if="workspaceView==='lineage'" :key="kb+String(route.query.mode)+String(route.query.node||route.query.id)" :scope="kb" @open="openWorkspaceDocument" @correction="openVersionCorrections" />
+    <template v-else-if="workspaceView==='feedback-materials'">
+     <div class="tabs feedback-tabs" role="tablist" :aria-label="$t('workbench.workspace.feedbackMaterials')" @keydown="moveTabFocus">
+      <t-button id="tab-correction-documents" role="tab" aria-controls="panel-correction-documents" variant="text" :aria-selected="!feedbackReview" :tabindex="feedbackReview ? -1 : 0" :class="{selected:!feedbackReview}" :disabled="viewLocked" @click="showFeedbackMaterials">{{ $t('workbench.workspace.correctionDocuments') }}</t-button>
+      <t-button id="tab-feedback-review" role="tab" aria-controls="panel-feedback-review" variant="text" :aria-selected="feedbackReview" :tabindex="feedbackReview ? 0 : -1" :class="{selected:feedbackReview}" :disabled="viewLocked" @click="showFeedbackReview">{{ $t('workbench.workspace.feedbackGovernance') }}</t-button>
+     </div>
+     <section v-if="feedbackReview" id="panel-feedback-review" role="tabpanel" aria-labelledby="tab-feedback-review">
+      <BusinessView :key="kb+String(feedbackInboxOnly)" section="feedback-governance" :scope="kb || undefined" :can-write="data?.can_write" :inbox-only="feedbackInboxOnly" @locked="viewLocked=$event" @open="openBusinessDocument" />
+     </section>
+     <section v-else id="panel-correction-documents" role="tabpanel" aria-labelledby="tab-correction-documents">
+      <CorrectionWorkspace v-if="kb" :scope="kb" :knowledge-bases="knowledgeBases" @open="openWorkspaceDocument" />
+      <t-empty v-else description="当前没有可访问的知识库。" />
+     </section>
+    </template>
+    <BusinessView v-else-if="workspaceView==='associations'||workspaceView==='revisions'" :key="kb+workspaceView" :section="workspaceView" :scope="kb" :can-write="data?.can_write" @locked="viewLocked=$event" @open="openBusinessDocument" />
    </section>
    <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
@@ -138,6 +150,7 @@
      </div>
      <t-button variant="text" shape="square" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
     </header>
+    <t-button v-if="detail" variant="outline" :disabled="detailLocked" :loading="openingCorrections" @click="openCurrentVersionCorrections">反馈文档</t-button>
     <nav class="detail-tabs" aria-label="文档详情标签">
      <div v-for="group in detailGroups" :key="group.label" class="detail-tab-group" role="group" :aria-label="group.label">
       <span class="detail-tab-label" aria-hidden="true">{{ group.label }}</span>
@@ -173,7 +186,7 @@
       <BusinessView :key="selectedKB+':'+selectedID+':'+supplementRevision" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="associations" @open="openRelatedDocument" @locked="childLocked=$event" />
       <SupplementEditor :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" :parent-busy="childLocked" :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="supplementSaved" />
      </template>
-     <LineageView v-else-if="detailTab==='graph'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document-id="selectedID" @open="openGraphDocument" />
+     <LineageView v-else-if="detailTab==='graph'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document-id="selectedID" @open="openGraphDocument" @correction="openVersionCorrections" />
      <template v-else-if="detailTab==='audit'">
       <h3>生命周期事件</h3>
       <ol v-if="detail.events.length" class="timeline"><li v-for="event in detail.events" :key="event.event_id">
@@ -191,7 +204,7 @@
       <t-button variant="outline" size="small" :disabled="activityBusy || activityPage<=1" @click="activityPage--">上一页</t-button>
       <t-button variant="outline" size="small" :disabled="activityBusy || activity.length<20" @click="activityPage++">下一页</t-button>
      </div>
-      <t-button variant="outline" @click="closeDocument(); showWorkspace('feedback-governance')">查看反馈审核</t-button>
+      <t-button variant="outline" @click="closeDocument(); showFeedbackReview()">查看反馈审核</t-button>
      </template>
      <BusinessView v-else-if="detailTab==='revisions'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="revisions" @locked="childLocked=$event" />
     </template>
@@ -206,6 +219,8 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 import { useI18n } from 'vue-i18n'
 import { documentActivity, documentTitle, type BusinessAction } from '@/api/business'
 import type { FamilyActivity } from '@/api/families'
+import { loadLineageGraph } from '@/api/lineage'
+import { correctionRoute } from '../feedback/model'
 import { actionLabels, httpStatus, statusLabels } from '../business/model'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import * as api from '@/api/lifecycle'
@@ -220,15 +235,13 @@ const kbOptions=computed(()=>knowledgeBases.value.map(item=>({label:item.name,va
 const stateOptions=computed(()=>[{label:t('workbench.list.allStates'),value:''},...states.map(state=>({label:stateLabels[state],value:state}))])
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
+const CorrectionWorkspace = defineAsyncComponent(() => import('../feedback/CorrectionWorkspace.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
 const tabs=[{key:'documents',labelKey:'workbench.tabs.documents'},{key:'cleanup',labelKey:'workbench.tabs.cleanup'},{key:'reviews',labelKey:'workbench.tabs.reviews'},{key:'rules',labelKey:'workbench.tabs.rules'}] as const
-// Every workspace view the router accepts is reachable from the top tab bar.
-// The URL keeps its ?view= contract, so old links and bookmarks still land
-// on the same view; only the missing entry points are added.
 const workspaceTabs=[
   {key:'families',labelKey:'workbench.workspace.families'},
  {key:'associations',labelKey:'workbench.workspace.associations'},
- {key:'feedback-governance',labelKey:'workbench.workspace.feedbackGovernance'},
+ {key:'feedback-materials',labelKey:'workbench.workspace.feedbackMaterials'},
  {key:'revisions',labelKey:'workbench.workspace.revisions'},
  {key:'lineage',labelKey:'workbench.workspace.lineage'},
 ] as const
@@ -242,7 +255,8 @@ const route=useRoute(), router=useRouter()
 const { t }=useI18n()
 const workspaceView=computed(()=>{
  const view=route.query.view
- return view==='families'||view==='lineage'||view==='associations'||view==='feedback-governance'||view==='revisions' ? view : ''
+ if(view==='feedback-governance')return 'feedback-materials'
+ return view==='families'||view==='lineage'||view==='associations'||view==='feedback-materials'||view==='revisions' ? view : ''
 })
 const auth=useAuthStore()
 const kbFence=requestFence()
@@ -253,7 +267,9 @@ const listTitle=(value:unknown)=>typeof value==='string'?value:''
 const tab=ref(listTab(route.query.tab))
 const kb=ref(''),knowledgeBases=ref<{id:string;name:string}[]>([]),loadingKB=ref(true)
 const canOpenStandaloneFeedback=computed(()=>!loadingKB.value&&!kb.value&&auth.isLoggedIn&&auth.hasRole('admin'))
-const standaloneFeedback=computed(()=>canOpenStandaloneFeedback.value&&workspaceView.value==='feedback-governance')
+const feedbackReview=computed(()=>route.query.view==='feedback-governance'||route.query.feedbackTab==='review')
+const feedbackInboxOnly=computed(()=>!kb.value||route.query.inbox==='1')
+const standaloneFeedback=computed(()=>canOpenStandaloneFeedback.value&&workspaceView.value==='feedback-materials')
 const filter=ref(listState(route.query.state))
 const titleQuery=ref(listTitle(route.query.title))
 const data=ref<api.Overview>(),busy=ref(false),error=ref('')
@@ -499,11 +515,35 @@ function syncListQuery(){
  void router.replace({name:'documents',query:listQuery()})
 }
 function syncScopeQuery(){
- if(workspaceView.value)void router.replace({name:'documents',query:{...route.query,kb:kb.value}})
+ if(workspaceView.value==='feedback-materials'&&!feedbackReview.value){
+  void router.replace({name:'documents',query:{kb:kb.value,view:'feedback-materials'}})
+ }else if(workspaceView.value)void router.replace({name:'documents',query:{...route.query,kb:kb.value}})
  else syncListQuery()
 }
 function showList(value:ListTab){void router.push({name:'documents',query:listQuery(value)})}
 function showWorkspace(value:(typeof workspaceTabs)[number]['key']){void router.push({name:'documents',query:{kb:kb.value,view:value}})}
+function showFeedbackMaterials(){showWorkspace('feedback-materials')}
+function showFeedbackReview(){
+ void router.push({name:'documents',query:{kb:kb.value,view:'feedback-materials',feedbackTab:'review'}})
+}
+const openingCorrections=ref(false)
+async function openCurrentVersionCorrections(){
+ const scope=selectedKB.value,id=selectedID.value
+ if(!scope||!id||openingCorrections.value)return
+ openingCorrections.value=true
+ let version=''
+ try{
+  const graph=await loadLineageGraph(scope,'version-ancestry',id)
+  version=graph.nodes.find(node=>node.type==='document_version'&&node.document_id===id&&node.current&&(!node.knowledge_base_id||node.knowledge_base_id===scope))?.id||''
+ }catch{}finally{openingCorrections.value=false}
+ if(selectedID.value!==id||selectedKB.value!==scope)return
+ openVersionCorrections(scope,id,version,detailCanWrite.value&&detail.value?.snapshot.current.state!=='active')
+}
+function openVersionCorrections(scope:string,id:string,version:string,history=false){
+ if(selectedID.value){closeDocument();if(selectedID.value)return}
+ const to=version ? correctionRoute(scope,id,version,undefined,history?'all':'active') : {name:'documents',query:{view:'feedback-materials',kb:scope,sourceDocument:id}}
+ void router.push(to)
+}
 function openWorkspaceDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'life',kbOverride)}
 function openGraphDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'graph',kbOverride)}
 function openRelatedDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'relations',kbOverride)}
@@ -615,7 +655,7 @@ watch(()=>route.query,query=>{
  titleQuery.value=listTitle(query.title)
  kb.value=scopeFromQuery(query.kb)
 })
-watch([workspaceView,standaloneFeedback],()=>{viewLocked.value=false})
+watch([workspaceView,feedbackReview,standaloneFeedback],()=>{viewLocked.value=false})
 function allowNavigation(){return !detailLocked.value && !viewLocked.value}
 onBeforeRouteLeave(allowNavigation)
 onBeforeRouteUpdate(allowNavigation)
@@ -624,6 +664,7 @@ onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.in
 </script>
 
 <style scoped>
+.feedback-tabs { overflow-x:auto; }
 .annex-tag { margin-left:6px; }
 .annex-original { display:block; color:var(--td-text-color-secondary); font-size:var(--td-font-size-body-small); margin-top:2px; }
 .drawer-meta { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }

@@ -197,6 +197,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 
 	// Merge results from both searches
 	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
+	chatManage.CorrectionCandidates = p.correctionSearchResults(ctx, chatManage, decision.KnowledgeIDs)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 	chatManage.SearchResult = filterBridgeResults(chatManage.SearchResult, decision.KnowledgeIDs, decision.ExcludedDocumentIDs)
 
@@ -212,7 +213,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		"error_count":    len(errs),
 	})
 
-	if len(chatManage.SearchResult) == 0 {
+	if len(chatManage.SearchResult) == 0 && len(chatManage.CorrectionCandidates) == 0 {
 		if err, ok := errs["chunk_search"]; ok {
 			return err
 		}

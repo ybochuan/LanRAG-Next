@@ -16,6 +16,7 @@ import sqlite3
 import subprocess
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -34,6 +35,8 @@ class Model:
         self.family_embedding_inputs = []
         self.tool_outputs = []
         self.tool_step = 0
+        self.query = ""
+        self.agent_requests = []
         self.doc_id = ""
         self.old_answer = "ANSWERONLY" + secrets.token_hex(12)
         self.no_match = "NOMATCH" + secrets.token_hex(12)
@@ -67,14 +70,25 @@ class Model:
                 return
             if messages:
                 model.prompts.append((model.phase, json.dumps(messages, ensure_ascii=False)))
-            if handler.path.endswith("/embeddings") and model.phase.startswith("rag-fallback"):
+            if handler.path.endswith("/embeddings") and model.phase.startswith(("rag-fallback", "rag-materials-reverse")):
                 inputs=request.get("input",[])
                 if not isinstance(inputs,list): inputs=[inputs]
                 handler.send_response(200);handler.send_header("Content-Type","application/json");handler.end_headers()
                 handler.wfile.write(json.dumps({"object":"list","data":[{"object":"embedding","index":i,"embedding":[-0.1]*8} for i in range(len(inputs))],"model":"governance-embedding","usage":{"prompt_tokens":1,"total_tokens":1}}).encode())
                 return
+            if model.phase.startswith("rag-materials-reverse") and ("rewrite_query" in json.dumps(messages) or "rewritten_query" in json.dumps(messages)):
+                model.respond(handler, {"content": json.dumps({"rewrite_query": model.query, "intent": "kb_search", "entities": []})}, "stop", bool(request.get("stream")))
+                return
+            if model.phase == "rag-materials-followup-active" and ("rewrite_query" in json.dumps(messages) or "rewritten_query" in json.dumps(messages)):
+                model.respond(handler, {"content": json.dumps({"rewrite_query": "AGENTRAG_E2E_MARKER how many reviewers are required?", "intent": "follow_up", "entities": []})}, "stop", bool(request.get("stream")))
+                return
             if model.phase.startswith("rag-fallback") and ("rewrite_query" in json.dumps(messages) or "rewritten_query" in json.dumps(messages)):
                 model.respond(handler, {"content": json.dumps({"rewrite_query": model.no_match, "intent": "kb_search", "entities": []})}, "stop", bool(request.get("stream")))
+                return
+            if request.get("tools") and model.phase.startswith("agent-search-materials"):
+                model.agent_requests.append((model.phase, request.get("tool_choice"), messages))
+                model.base.generation_calls += 1
+                model.respond(handler, {"content": helpers.ANSWER + " " + model.old_answer}, "stop", bool(request.get("stream")))
                 return
             if request.get("tools") and model.phase.startswith("agent-"):
                 action = model.phase.split("-")[1]
@@ -203,19 +217,30 @@ def main():
         host = start_host()
         body_canary = "BODYONLY" + secrets.token_hex(12)
         desc_canary = "DESCONLY" + secrets.token_hex(12)
-        boundary = "gov-" + nonce
+        def upload_text(filename, text):
+            boundary = "gov-" + uuid.uuid4().hex
+            payload = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: text/plain\r\n\r\n{text}\r\n--{boundary}--\r\n').encode()
+            request = urllib.request.Request(http.base_url + "/api/v1/knowledge-bases/" + kb["id"] + "/knowledge/file", data=payload, headers={"Authorization": "Bearer " + http.token, "Content-Type": "multipart/form-data; boundary=" + boundary}, method="POST")
+            with http.opener.open(request, timeout=30) as response:
+                uploaded = json.load(response)["data"]
+            startup.until(lambda: http.api("GET", "/knowledge/" + uploaded["id"])["data"]["parse_status"] == "completed", 30)
+            return uploaded
+
         text = ("AGENTRAG_E2E_MARKER. Two reviewers are required. " + body_canary + " ") * 6
-        payload = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="gov.txt"\r\nContent-Type: text/plain\r\n\r\n{text}\r\n--{boundary}--\r\n').encode()
-        request = urllib.request.Request(http.base_url + "/api/v1/knowledge-bases/" + kb["id"] + "/knowledge/file", data=payload, headers={"Authorization": "Bearer " + http.token, "Content-Type": "multipart/form-data; boundary=" + boundary}, method="POST")
-        with http.opener.open(request, timeout=30) as response:
-            doc = json.load(response)["data"]
-        startup.until(lambda: http.api("GET", "/knowledge/" + doc["id"])["data"]["parse_status"] == "completed")
+        publication_mode = os.environ.get("AGENTRAG_CORRECTION_PUBLICATION_E2E", "")
+        if publication_mode == "manual":
+            doc = http.api("POST", "/knowledge-bases/" + kb["id"] + "/knowledge/manual", {
+                "title": "Reimbursement policy", "content": text, "status": "publish",
+            })["data"]
+            startup.until(lambda: http.api("GET", "/knowledge/" + doc["id"])["data"]["parse_status"] == "completed", 30)
+        else:
+            doc = upload_text("gov.txt", text)
         # Independent test-only metadata input; never changes production data.
         with sqlite3.connect(work / "core.db") as db:
             db.execute("UPDATE knowledges SET description=? WHERE id=?", (desc_canary, doc["id"]))
-        def state():
+        def state(document_id=doc["id"]):
             with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
-                row = db.execute("SELECT state FROM ext_lifecycle_current WHERE document_id=?", (doc["id"],)).fetchone()
+                row = db.execute("SELECT state FROM ext_lifecycle_current WHERE document_id=?", (document_id,)).fetchone()
                 return row[0] if row else None
         startup.until(lambda: state() == "active", 20)
         if os.environ.get("AGENTRAG_BINARY_E2E") == "1":
@@ -253,7 +278,7 @@ def main():
             emit("[M5-BINARY] PASS: native uploaded file bound to binary revision and published atomically")
         model.doc_id, model.kb_id = doc["id"], kb["id"]
         sessions = {}
-        def ask(phase, agent, document_id=None):
+        def ask(phase, agent, document_id=None, query=None):
             model.phase = phase; model.tool_step = 0
             kind = "agent" if agent else "rag"
             target = document_id or doc["id"]
@@ -266,10 +291,13 @@ def main():
             generation_offset=model.base.generation_calls
             endpoint="/agent-chat/" if agent else "/knowledge-chat/"
             payload={"query": "Retrieve AGENTRAG_E2E_MARKER: how many reviewers are required?", "knowledge_base_ids": [kb["id"]], "knowledge_ids": [target], "agent_enabled": agent, "agent_id": "builtin-smart-reasoning" if agent else "builtin-quick-answer", "web_search_enabled": False, "summary_model_id": models[0], "disable_title": True}
+            if query is not None:
+                payload["query"] = query
             if phase.startswith("rag-repeal-"):
                 payload["query"] = "RETENTIONDEADLINE"
             if phase.startswith("agent-archive-"):
                 payload["query"] = "仅查阅已经失效的历史条款 AGENTRAG_E2E_MARKER，提醒我它是否仍有效。"
+            model.query = payload["query"]
             request=urllib.request.Request(http.base_url+"/api/v1"+endpoint+sessions[kind],data=json.dumps(payload).encode(),headers={"Authorization":"Bearer "+http.token,"Content-Type":"application/json","X-Request-ID":"gov-e2e-"+phase+"-"+nonce},method="POST")
             fragments=[];status=0
             with http.opener.open(request,timeout=90) as stream:
@@ -412,39 +440,24 @@ def main():
             snapshot = http.api("GET", default_feedback)["data"]
             if "how many reviewers" not in snapshot.get("question", "") or model.old_answer not in snapshot.get("answer_excerpt", ""):
                 raise RuntimeError("default Quick QA feedback preview missed the saved question or answer")
-            vote = {"operation_id": uuid.uuid4().hex, "rating": "dislike", "reason": "missing_sources"}
-            if snapshot.get("snapshot_digest"):
-                vote["snapshot_digest"] = snapshot["snapshot_digest"]
-            rating = http.api("POST", default_feedback, vote)["data"]
-            if rating["status"] != "received" or http.api("POST", default_feedback, vote)["data"] != rating:
-                raise RuntimeError("default Quick QA feedback did not return an idempotent rating receipt")
-            unbound = http.api("GET", review_route + "feedback_list?id=" + rating["id"])["data"]
-            if len(unbound) != 1 or unbound[0].get("citation_chunks"):
-                raise RuntimeError("unattributed default answer received a publishable anchor")
-            emit("[ANSWER-RATING] PASS: default Quick QA accepted owner feedback on a saved answer without a sealed run")
-
-            exact_config = dict(quick["config"], enable_rewrite=False, enable_query_expansion=False,
-                                rerank_model_id="", multi_turn_enabled=False)
-            http.api("PUT", quick_id, dict(quick_update, config=exact_config))
-            exact_feedback = ask_for_feedback("rag-annotation-exact-active")
-            exact_snapshot = http.api("GET", exact_feedback)["data"]
-            comment = {"operation_id": uuid.uuid4().hex, "rating": "correction", "text": "OPENCOMMENT" + secrets.token_hex(8)}
-            if exact_snapshot.get("snapshot_digest"):
-                comment["snapshot_digest"] = exact_snapshot["snapshot_digest"]
-            receipt = http.api("POST", exact_feedback, comment)["data"]
+            comment = {"operation_id": uuid.uuid4().hex, "rating": "correction", "text": "OPENCOMMENT" + secrets.token_hex(8),
+                       "snapshot_digest": snapshot["snapshot_digest"]}
+            receipt = http.api("POST", default_feedback, comment)["data"]
+            if http.api("POST", default_feedback, comment)["data"] != receipt:
+                raise RuntimeError("default Quick QA feedback did not return an idempotent correction receipt")
             listing = http.api("GET", review_route + "feedback_list")["data"]
             summary = next(row for row in listing if row["id"] == receipt["id"])
             if summary.get("feedback_context") or summary.get("citation_chunks") or summary.get("text") or "annotation_checks" in summary:
                 raise RuntimeError("feedback list exposed private content before opening the record")
             detail = http.api("GET", review_route + "feedback_list?id=" + receipt["id"])["data"][0]
-            if receipt["status"] != "pending_review" or detail["feedback_context"].get("question") != exact_snapshot.get("question") or detail.get("text") != comment["text"]:
+            if receipt["status"] != "pending_review" or detail["feedback_context"].get("question") != snapshot.get("question") or detail.get("text") != comment["text"]:
                 raise RuntimeError("opened feedback did not contain its server-derived snapshot and correction")
             pins = detail.get("citation_chunks", [])
             if not pins or any(pin["document_id"] != doc["id"] or not pin.get("version_id") for pin in pins):
                 raise RuntimeError("verified cited chunk was unavailable for review")
             pin = pins[0]
             annotation = "ANCHOREDGUIDE" + secrets.token_hex(12)
-            condition = "Answering the reviewer count in this clause"
+            condition = "For the reviewers headcount in this clause"
             def payload(revision, data):
                 return {"operation_id": uuid.uuid4().hex, "expected_revision": revision,
                         "business": {"id": receipt["id"], "payload": data}}
@@ -465,52 +478,179 @@ def main():
                     return recent and recent[0].get("outcome") == expected and set(recent[0]) == {"outcome", "checked_at"}
                 startup.until(observed, 5)
 
-            _, _, cooling = ask("rag-annotation-cooling-active", False)
-            if annotation in cooling:
-                raise RuntimeError("cooling annotation reached a real model call")
+            sessions.pop("rag", None)
+            status, response, cooling = ask("rag-annotation-cooling-active", False)
+            if status != 200 or model.old_answer not in response or annotation in cooling:
+                raise RuntimeError("cooling annotation control failed")
             diagnostic("cooling_down")
             with sqlite3.connect(work / "ext.db") as db:
                 db.execute("UPDATE ext_feedback_staging SET ready_at='2020-01-01T00:00:00Z' WHERE feedback_id=?", (receipt["id"],))
             active = http.api("PUT", review_route + "feedback_activate", payload(approved["revision"], {}))["data"]
-            def check_annotation(phase, agent=False):
-                sessions.pop("agent" if agent else "rag", None)
-                status, response, captured = ask(phase, agent)
+            def check_annotation(phase, agent=False, new_session=True, query=None):
+                if new_session:
+                    sessions.pop("agent" if agent else "rag", None)
+                status, response, captured = ask(phase, agent, query=query)
                 if status != 200 or model.old_answer not in response:
                     raise RuntimeError("matching source did not produce an answer: " + phase)
+                saved_answer = feedback_route("agent" if agent else "rag", response).split("/")[-2]
+                with sqlite3.connect((work / "core.db").as_uri() + "?mode=ro", uri=True) as db:
+                    saved_refs = db.execute("SELECT knowledge_references FROM messages WHERE id=?", (saved_answer,)).fetchone()[0]
+                saved_refs = json.dumps(json.loads(saved_refs or "[]"))
+                if receipt["id"] not in saved_refs or pin["version_id"] not in saved_refs:
+                    raise RuntimeError("saved answer did not preserve the exact correction and source version: " + phase)
                 prompts = [json.loads(body) for name, body in model.prompts if name == phase]
-                guided = [messages for messages in prompts if annotation in json.dumps(messages)]
+                guided = [messages for messages in prompts if messages
+                          and "【已审核勘误】\n" in messages[-1].get("content", "")
+                          and annotation in messages[-1]["content"].split("【已审核勘误】\n", 1)[1]]
                 if status != 200 or len(guided) != 1 or comment["text"] in captured:
-                    raise RuntimeError("matching chunk did not receive only the reviewed annotation")
+                    raise RuntimeError("matching chunk did not receive only the reviewed correction: " + phase)
                 messages = guided[0]
                 system = messages[0].get("content", "")
-                if messages[0].get("role") != "system" or annotation not in system or condition not in system or "答案采用批注的事实" not in system:
-                    raise RuntimeError("reviewed annotation did not reach the leading system message with its applicability rule")
+                evidence = messages[-1].get("content", "")
+                if messages[0].get("role") != "system" or annotation in system or "【已审核勘误】" not in system:
+                    raise RuntimeError("trusted correction policy was missing or its system message included the evidence body")
+                if messages[-1].get("role") != "user" or condition not in evidence or "【已审核勘误】" not in evidence:
+                    raise RuntimeError("reviewed correction did not follow native evidence with its applicability data")
+                reference_events = [data for _, data in helpers.sse_records(response) if data.get("response_type") == "references"]
+                if not any(receipt["id"] in json.dumps(data) and pin["chunk_id"] in json.dumps(data) for data in reference_events):
+                    raise RuntimeError("answer stream did not include the reviewed correction and original chunk: " + phase)
                 if agent and not any(m.get("role") == "tool" and body_canary in m.get("content", "") for m in messages):
                     raise RuntimeError("Agent annotation was issued without the current matching search result")
+                return prompts, messages
 
             if active["status"] != "active":
                 raise RuntimeError("annotation did not activate")
-            check_annotation("rag-annotation-matching-active")
+            default_prompts, guided_default = check_annotation("rag-annotation-default-matching-active")
+            rewrites = [messages for messages in default_prompts
+                        if "rewrite_query" in json.dumps(messages) or "rewritten_query" in json.dumps(messages)]
+            if len(rewrites) != 1 or annotation in json.dumps(rewrites) or body_canary not in json.dumps(guided_default):
+                raise RuntimeError("default Quick QA did not separate query rewrite from verified answer generation")
             diagnostic("sent")
-            check_annotation("agent-search-annotation-matching-active", agent=True)
+            parallel_marker = "PARALLELEVIDENCE" + secrets.token_hex(12)
+            model.phase = "upload-parallel-source"
+            other = upload_text("gov-parallel.txt", ("AGENTRAG_E2E_MARKER. Parallel clause. " + parallel_marker + " ") * 7)
+            startup.until(lambda: state(other["id"]) == "active", 20)
+            status, response, other_source = ask("rag-annotation-mismatch-active", False, other["id"])
+            if status != 200 or model.old_answer not in response or parallel_marker not in other_source or body_canary in other_source or annotation in other_source:
+                raise RuntimeError("Quick QA did not exercise a different exact source in the same knowledge base")
+            diagnostic("source_mismatch")
+            document_route = review_route + "correction_document?" + urllib.parse.urlencode({"document_id": doc["id"], "version_id": pin["version_id"]})
+            page = http.api("GET", review_route + "correction_documents")["data"]
+            if page.get("total") != 1 or page["items"][0]["active_count"] != 1 or page["items"][0]["version_id"] != pin["version_id"]:
+                raise RuntimeError("workbench did not show a single versioned correction document")
+            materials = http.api("GET", document_route)["data"]
+            if len(materials["items"]) != 1 or annotation not in materials["markdown"] or comment["text"] in json.dumps(materials):
+                raise RuntimeError("version preview did not contain exclusively the published correction")
+            if os.environ.get("AGENTRAG_CORRECTION_ACL_E2E") == "1":
+                reader = helpers.HTTP(http.base_url)
+                reader_account = {"username": "reader_" + nonce, "email": "reader-" + nonce + "@example.invalid",
+                                  "password": helpers.new_password()}
+                reader.api("POST", "/auth/register", reader_account)
+                auth = reader.api("POST", "/auth/login", {key: reader_account[key] for key in ("email", "password")})
+                reader.token = auth["token"]
+                reader_tenant = auth["active_tenant"]["id"]
+                if reader_tenant == kb["tenant_id"]:
+                    raise RuntimeError("reader fixture requires a distinct workspace")
+
+                def deny_reader(route):
+                    code, body = reader.call("GET", http.base_url + "/api/v1" + route)
+                    if code not in (403, 404) or annotation in body or comment["text"] in body:
+                        raise RuntimeError("unauthorized reader received correction material")
+
+                for route in (review_route + "correction_documents", document_route):
+                    deny_reader(route)
+                org = http.api("POST", "/organizations", {"name": "Correction readers"})["data"]
+                http.api("POST", "/organizations/" + org["id"] + "/invite", {"tenant_id": reader_tenant, "role": "viewer"})
+                shares_route = "/knowledge-bases/" + kb["id"] + "/shares"
+                share = http.api("POST", shares_route, {"organization_id": org["id"], "permission": "viewer"})["data"]
+                listed = reader.api("GET", review_route + "correction_documents")["data"]
+                readable = reader.api("GET", document_route)["data"]
+                if listed["total"] != 1 or readable["active_count"] != 1 or annotation not in readable["markdown"] or comment["text"] in json.dumps(readable):
+                    raise RuntimeError("shared reader did not receive only the published correction projection")
+                deny_reader(document_route + "&state=all")
+                status, body = http.call("DELETE", http.base_url + "/api/v1" + shares_route + "/" + share["id"])
+                if status not in (200, 204):
+                    raise RuntimeError("could not revoke the fixture’s read share")
+                for route in (review_route + "correction_documents", document_route):
+                    deny_reader(route)
+                emit("[FEEDBACK-MATERIALS-ACL] PASS: access denied cross-tenant, active detail and counts via viewer share, private history denied, unchanged reader token denied after unsharing")
+            check_annotation("rag-materials-reverse-active", query=annotation)
+            if any(phase == "rag-materials-reverse-active" and body_canary in passages for phase, passages in model.rerank_inputs):
+                raise RuntimeError("reverse recall positive did not exclude ordinary source retrieval")
+            check_annotation("rag-materials-first-active")
+            check_annotation("rag-materials-second-active", new_session=False, query="How many reviewers does AGENTRAG_E2E_MARKER require?")
+            followup_prompts, _ = check_annotation("rag-materials-followup-active", new_session=False, query="And the headcount?")
+            if model.old_answer in json.dumps(followup_prompts) or "How many reviewers does AGENTRAG_E2E_MARKER require?" not in json.dumps(followup_prompts):
+                raise RuntimeError("follow-up did not reuse the prior user question exclusively")
+            status, response, unrelated_prompts = ask("rag-materials-other-topic-active", False, query="Where is the finance desk?")
+            if status != 200 or annotation in unrelated_prompts:
+                raise RuntimeError("unrelated topic consumed the previous correction")
+            check_annotation("rag-materials-fifth-active", new_session=False)
+            diagnostic("sent")
+            natural_query = "Under the reimbursement policy, how many reviewers are required?"
+            check_annotation("agent-search-materials-matching-active", agent=True, query=natural_query)
+            first_agent_request = next((item for item in model.agent_requests if item[0] == "agent-search-materials-matching-active"), None)
+            if not first_agent_request or first_agent_request[1] is not None or not any(message.get("role") == "tool" for message in first_agent_request[2]):
+                raise RuntimeError("Agent did not obtain native search evidence before the first provider generation")
             http.api("PUT", quick_id, quick_update)
-            sessions.pop("rag", None)
-            _, _, default_after_activation = ask("rag-annotation-default-after-activation", False)
-            if annotation in default_after_activation:
-                raise RuntimeError("unverified default Quick QA received an exact-source annotation")
-            http.api("PUT", quick_id, dict(quick_update, config=exact_config))
+            if publication_mode in ("manual", "binary"):
+                def publish_action(action, data=None, proposal=None):
+                    command = {"operation_id": uuid.uuid4().hex, "expected_revision": proposal["revision"] if proposal else 0,
+                               "business": {"payload": data or {}}}
+                    if proposal:
+                        command["business"]["id"] = proposal["id"]
+                    return http.api("PUT", review_route + action, command)["data"]
+
+                def original_chunk():
+                    with sqlite3.connect((work / "core.db").as_uri() + "?mode=ro", uri=True) as db:
+                        return db.execute("SELECT content FROM chunks WHERE id=?", (pin["chunk_id"],)).fetchone()
+
+                original = original_chunk()
+                revised_marker = "REVISIONEVIDENCE" + secrets.token_hex(12)
+                new_text = f"# Reimbursement policy\n\nAGENTRAG_E2E_MARKER. Three reviewers are required. {revised_marker}"
+                source = {"document_id": doc["id"], "guidance_ids": [receipt["id"]]}
+                model.phase = "upload-formal-revision"
+                if publication_mode == "manual":
+                    proposal = publish_action("revision_create", dict(source, text=new_text))
+                    proposal = publish_action("revision_approve", proposal=proposal)
+                else:
+                    proposal = publish_action("revision_create_binary", source)
+                    proposal = publish_action("revision_approve", proposal=proposal)
+                    uploaded = upload_text("gov-revised.txt", new_text)
+                    startup.until(lambda: state(uploaded["id"]) == "active", 20)
+                    proposal = publish_action("revision_bind_binary", {"target_document_id": uploaded["id"]}, proposal)
+                deadline = time.monotonic() + 60
+                while proposal["status"] != "published":
+                    proposal = publish_action("revision_publish", proposal=proposal)
+                    if proposal["status"] != "published":
+                        if proposal["status"] != "publishing" or time.monotonic() >= deadline:
+                            raise RuntimeError("correction-linked revision did not complete native publication")
+                        time.sleep(0.3)
+                target = proposal.get("target_document_id")
+                if not target or target == doc["id"] or state() != "superseded" or state(target) != "active" or not original or original_chunk() != original:
+                    raise RuntimeError("formal correction publication did not switch versions and preserve the original")
+                archived = http.api("GET", document_route + "&state=all")["data"]
+                if archived["active_count"] != 0 or archived["items"][0]["id"] != receipt["id"] or annotation not in archived["markdown"]:
+                    raise RuntimeError("former version correction was not available to the authorized reviewer as history")
+                status, _, captured = ask("rag-annotation-retired", False)
+                if status != 200 or body_canary in captured or annotation in captured:
+                    raise RuntimeError("retired source or its correction still reached a new model call")
+                status, response, captured = ask("rag-correction-published-active", False, target)
+                if status != 200 or model.old_answer not in response or revised_marker not in captured or body_canary in captured or annotation in captured or receipt["id"] in response:
+                    raise RuntimeError("new version did not supply the active answer evidence independently of the old correction")
+                emit("[FEEDBACK-MATERIALS-PUBLISH] PASS: " + publication_mode + " active correction -> formal revision -> native indexing -> new version evidence; original bytes unchanged and authorized old correction archived")
+                return 0
             revoked = http.api("PUT", review_route + "feedback_withdraw", payload(active["revision"], {}))["data"]
             for kind in ("rag", "agent"):
-                sessions.pop(kind, None)
-                phase = "agent-search-annotation-withdrawn-active" if kind == "agent" else "rag-annotation-withdrawn-active"
-                status, response, after_withdrawal = ask(phase, kind == "agent")
-                if status != 200 or model.old_answer not in response or revoked["status"] != "withdrawn" or annotation in after_withdrawal:
+                phase = "agent-search-materials-withdrawn-active" if kind == "agent" else "rag-annotation-withdrawn-active"
+                status, response, after_withdrawal = ask(phase, kind == "agent", query=natural_query if kind == "agent" else None)
+                if status != 200 or model.old_answer not in response or revoked["status"] != "withdrawn" or annotation in after_withdrawal or receipt["id"] in response:
                     raise RuntimeError("withdrawn annotation still reached a new model call")
             diagnostic("withdrawn")
             http.api("PUT", quick_id, quick_update)
             sessions.clear()
             sessions.update(original_sessions)
-            emit("[ANCHORED-FEEDBACK] PASS: exact versioned citation, scoped priority in Quick QA and Agent, cooling, default-proof boundary and withdrawal")
+            emit("[FEEDBACK-MATERIALS] PASS: version preview, correction-only recall, native citations, five default Quick QA turns, same-session withdrawal and Agent")
         status, response, captured = ask("rag-fallback-active", False)
         if status != 200 or desc_canary not in captured or model.old_answer not in response:
             raise RuntimeError("active fallback description positive control failed")
@@ -563,17 +703,21 @@ def main():
             quick = http.api("GET", "/agents/builtin-quick-answer")["data"]
             quick_update = {"name": quick["name"], "description": quick.get("description", ""), "config": quick["config"]}
             original_sessions = dict(sessions)
+            def wait_for_guided_run(response):
+                answer = re.search(r'"assistant_message_id"\s*:\s*"([^"]+)"', response)
+                if not answer:
+                    raise RuntimeError("guidance turn lacks a native answer ID")
+                def guided_run_sealed():
+                    with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
+                        row = db.execute("SELECT r.state,count(g.step_id) FROM ext_provenance_runs r LEFT JOIN ext_guidance_step_inputs g USING(tenant_id,knowledge_base_id,run_id) WHERE json_extract(r.payload_json,'$.identity.attempt_id')=? GROUP BY r.run_id", (answer[1],)).fetchone()
+                        return row and row[0] == "sealed" and row[1] > 0
+                startup.until(guided_run_sealed, 10)
+
             sessions.pop("rag", None)
             status, response, captured = ask("rag-guidance-default", False)
             if status != 200 or instruction not in captured or foreign in captured:
                 raise RuntimeError("default Quick QA did not receive authorized guidance")
-            answer = re.search(r'"assistant_message_id"\s*:\s*"([^"]+)"', response)
-            if not answer:
-                raise RuntimeError("default Quick QA guidance turn lacks an answer ID")
-            with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
-                run_state, = db.execute("SELECT state FROM ext_provenance_runs WHERE json_extract(payload_json,'$.identity.attempt_id')=?", (answer[1],)).fetchone()
-            if run_state != "unattributed":
-                raise RuntimeError("guidance incorrectly completed default Quick QA provenance")
+            wait_for_guided_run(response)
             exact_config = dict(quick["config"], enable_rewrite=False, enable_query_expansion=False, rerank_model_id="", multi_turn_enabled=False)
             http.api("PUT", "/agents/builtin-quick-answer", dict(quick_update, config=exact_config))
             for kind in ("rag", "agent"):
@@ -582,14 +726,7 @@ def main():
                 status, response, captured = ask(phase, kind == "agent")
                 if status != 200 or instruction not in captured or foreign in captured:
                     raise RuntimeError(kind + " did not receive only the authorized active guidance")
-                answer = re.search(r'"assistant_message_id"\s*:\s*"([^"]+)"', response)
-                if not answer:
-                    raise RuntimeError(kind + " guidance turn lacks a native answer ID")
-                def guided_run_sealed():
-                    with sqlite3.connect((work / "ext.db").as_uri() + "?mode=ro", uri=True) as db:
-                        row = db.execute("SELECT r.state,count(g.step_id) FROM ext_provenance_runs r LEFT JOIN ext_guidance_step_inputs g USING(tenant_id,knowledge_base_id,run_id) WHERE json_extract(r.payload_json,'$.identity.attempt_id')=? GROUP BY r.run_id", (answer[1],)).fetchone()
-                        return row and row[0] == "sealed" and row[1] > 0
-                startup.until(guided_run_sealed, 10)
+                wait_for_guided_run(response)
             for index in (1, 2):
                 http.api("PUT", route + "feedback_create", {"expected_revision": 0, "operation_id": "guide-negative-" + str(index), "business": {"payload": {"topic": topic, "text": "Quarantine this test instruction", "negative": True}}})
             status, _, captured = ask("rag-guidance-quarantined", False)
@@ -603,7 +740,7 @@ def main():
                 max_uses, = db.execute("SELECT max(n) FROM (SELECT count(*) n FROM ext_guidance_call_items i JOIN ext_guidance_calls c USING(tenant_id,knowledge_base_id,run_id,call_id) GROUP BY i.tenant_id,i.knowledge_base_id,c.user_id,c.session_id,i.guidance_id)").fetchone()
                 if max_budget > 800 or max_uses > 2 or db.execute("PRAGMA foreign_key_check").fetchone():
                     raise RuntimeError("guidance session budget or referential integrity failed")
-            emit("[M5-GUIDANCE] PASS: default Quick QA received guidance and remained unattributed; exact RAG and Agent sealed; foreign/quarantined instructions omitted; persistent budgets respected")
+            emit("[M5-GUIDANCE] PASS: default Quick QA, exact RAG and Agent received authorized guidance and sealed; foreign/quarantined instructions omitted; persistent budgets respected")
         startup.until(lambda: provenance_counts()[0] >= 5 and provenance_counts()[1] >= 5 and provenance_counts()[2] > 0, 5)
         with sqlite3.connect(work / "ext.db") as db:
             unknown = db.execute("SELECT count(*) FROM ext_provenance_runs WHERE state='unattributed'").fetchone()[0]
@@ -642,7 +779,9 @@ def main():
         emit("[LIFECYCLE] PASS: real startup sweep active -> stale from annotation input")
         for phase, agent in [("rag-stale", False), ("rag-fallback-stale", False)] + [("agent-" + action + "-stale", True) for action in ("search", "read", "list")]:
             status, response, captured = ask(phase, agent)
-            if status != 200 or any(marker in captured for marker in (body_canary, desc_canary, model.old_answer)):
+            if status != 200:
+                raise RuntimeError(phase + " did not complete: HTTP " + str(status))
+            if any(marker in captured for marker in (body_canary, desc_canary, model.old_answer)):
                 raise RuntimeError(phase + " leaked body/description/old-answer canary")
             if any(body_canary in inputs or desc_canary in inputs for label,inputs in model.rerank_inputs if label==phase):
                 raise RuntimeError(phase+" leaked revoked content to reranker")

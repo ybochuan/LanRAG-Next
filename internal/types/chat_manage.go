@@ -186,14 +186,16 @@ type PipelineState struct {
 	// History (a first turn) is not fetched again by a later stage.
 	HistoryLoaded bool `json:"-"`
 
-	SearchResult     []*SearchResult `json:"-"`
-	RerankResult     []*SearchResult `json:"-"`
-	MergeResult      []*SearchResult `json:"-"`
-	Entity           []string        `json:"-"`
-	EntityKBIDs      []string        `json:"-"`
-	GraphResult      *GraphData      `json:"-"`
-	UserContent      string          `json:"-"`
-	RenderedContexts string          `json:"-"`
+	SearchResult []*SearchResult `json:"-"`
+	RerankResult []*SearchResult `json:"-"`
+	MergeResult  []*SearchResult `json:"-"`
+	// CorrectionCandidates are current original rows found by reviewed wording.
+	CorrectionCandidates []*SearchResult `json:"-"`
+	Entity               []string        `json:"-"`
+	EntityKBIDs          []string        `json:"-"`
+	GraphResult          *GraphData      `json:"-"`
+	UserContent          string          `json:"-"`
+	RenderedContexts     string          `json:"-"`
 	// ContextImages are retrieved images, as data URIs, shown to a vision
 	// chat model beside the contexts they belong to; see INTO_CHAT_MESSAGE.
 	ContextImages []string `json:"-"`

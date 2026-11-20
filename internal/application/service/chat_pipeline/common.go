@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -116,12 +117,38 @@ func withPromptCacheMetadata(
 	return types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
 }
 
+type freshKnowledgeHistoryKey struct{}
+
+// WithFreshKnowledgeHistory keeps only user questions in the history of a KB turn.
+func WithFreshKnowledgeHistory(ctx context.Context) context.Context {
+	return context.WithValue(ctx, freshKnowledgeHistoryKey{}, true)
+}
+
+func freshKnowledgeHistory(ctx context.Context) bool {
+	_, tracked := extensionbridge.SourceRunFromContext(ctx)
+	return tracked || ctx.Value(freshKnowledgeHistoryKey{}) == true
+}
+
+func historyHasOnlyQuestions(ctx context.Context, history []*types.History) bool {
+	if len(history) > 0 && !freshKnowledgeHistory(ctx) {
+		return false
+	}
+	for _, turn := range history {
+		if turn == nil || turn.Answer != "" || len(turn.KnowledgeReferences) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // AppendHistoryMessages appends prior Q&A rounds in chronological order.
 // History is already filtered and truncated upstream by the load_history plugin.
 func AppendHistoryMessages(messages []chat.Message, history []*types.History) []chat.Message {
 	for _, history := range history {
 		messages = append(messages, chat.Message{Role: "user", Content: history.Query})
-		messages = append(messages, chat.Message{Role: "assistant", Content: history.Answer})
+		if history.Answer != "" {
+			messages = append(messages, chat.Message{Role: "assistant", Content: history.Answer})
+		}
 	}
 	return messages
 }
@@ -141,6 +168,7 @@ func loadAndProcessHistory(
 		return nil, err
 	}
 
+	questionsOnly := freshKnowledgeHistory(ctx)
 	historyMap := make(map[string]*types.History)
 	for _, message := range history {
 		h, ok := historyMap[message.RequestID]
@@ -154,10 +182,14 @@ func loadAndProcessHistory(
 			// Historical references are carried separately in KnowledgeReferences
 			// and can be re-merged into this turn's freshly rendered context.
 			h.Query = message.Content
+			h.CreateAt = message.CreatedAt
+			if questionsOnly {
+				historyMap[message.RequestID] = h
+				continue
+			}
 			if strings.TrimSpace(h.Query) == "" && (len(message.Images) > 0 || len(message.Attachments) > 0) {
 				h.Query = types.UploadOnlyQuestion(types.LanguageFromContextOrDefault(ctx))
 			}
-			h.CreateAt = message.CreatedAt
 			if desc := extractImageCaptions(message.Images); desc != "" {
 				h.Query += "\n\n[用户上传图片内容]\n" + desc
 			}
@@ -166,7 +198,9 @@ func loadAndProcessHistory(
 			}
 		} else {
 			h.Answer = regThinkTags.ReplaceAllString(message.Content, "")
-			h.KnowledgeReferences = message.KnowledgeReferences
+			if !questionsOnly {
+				h.KnowledgeReferences = message.KnowledgeReferences
+			}
 		}
 		historyMap[message.RequestID] = h
 	}
@@ -174,6 +208,9 @@ func loadAndProcessHistory(
 	historyList := make([]*types.History, 0, len(historyMap))
 	for _, h := range historyMap {
 		if h.Answer != "" && h.Query != "" {
+			if questionsOnly {
+				h.Answer = ""
+			}
 			historyList = append(historyList, h)
 		}
 	}

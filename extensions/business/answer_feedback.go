@@ -335,6 +335,9 @@ func (s *Service) approveQAFeedback(ctx context.Context, tx *sql.Tx, c Command, 
 	if err = s.currentQAPin(ctx, tx, c.Scope, pin); err != nil {
 		return Result{}, err
 	}
+	if err = s.stageCorrectionReplacement(ctx, tx, c, pin); err != nil {
+		return Result{}, err
+	}
 	out := Result{ID: c.ID, Status: "approved", Revision: f.revision + 1}
 	text, condition := strings.TrimSpace(c.Payload.Text), strings.TrimSpace(c.Payload.AppliesWhen)
 	topic := "answer-feedback:" + c.ID

@@ -100,7 +100,9 @@ const router = createRouter({
       children: [
         { path: "documents", name: "documents", component: () => import("../views/lifecycle/LifecycleView.vue"), meta: { requiresInit: true, requiresAuth: true } },
         { path: "lifecycle", name: "lifecycle", redirect: to => ({ name: 'documents', query: to.query }) },
-        ...(['families', 'lineage', 'associations', 'feedback-governance', 'revisions'] as const).map<RouteRecordRaw>(view => ({
+        { path: 'feedback-materials', name: 'feedback-materials', redirect: to => ({ name: 'documents', query: { ...to.query, view: 'feedback-materials' }, hash: to.hash }) },
+        { path: 'feedback-governance', name: 'feedback-governance', redirect: to => ({ name: 'documents', query: { ...to.query, view: 'feedback-materials', feedbackTab: 'review' }, hash: to.hash }) },
+        ...(['families', 'lineage', 'associations', 'revisions'] as const).map<RouteRecordRaw>(view => ({
           path: view, name: view, redirect: to => ({ name: 'documents', query: { ...to.query, view } }),
         })),
         { path: "model-supervisor", name: "model-supervisor", component: () => import("../views/model-supervisor/ModelSupervisorView.vue"), meta: { requiresInit: true, requiresAuth: true } },

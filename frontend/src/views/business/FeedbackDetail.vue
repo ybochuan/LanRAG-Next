@@ -64,6 +64,11 @@
         <label class="review-field">审核批注
           <t-textarea v-model="annotation" :autosize="{ minRows: 3 }" :disabled="locked" placeholder="写下核对分块后应采用的说明" />
         </label>
+        <label v-if="priorCorrections.length" class="review-field">替代同一分块的勘误
+          <t-select v-model="supersededID" :options="supersessionOptions" :disabled="locked" />
+        </label>
+        <p v-if="loadingCorrections" role="status" class="subtle">正在核对可替代的勘误…</p>
+        <p v-if="correctionReadFailed" role="status" class="subtle">无法读取可替代的勘误。 <t-button variant="text" size="small" @click="readPriorCorrections">重试</t-button></p>
         <p v-if="approvalHint" class="subtle">{{ approvalHint }}</p>
         <t-button theme="primary" :disabled="locked || !!approvalHint" @click="approve">批准分块批注</t-button>
       </template>
@@ -91,9 +96,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
-import { clauseEvidence, type AnnotationCheckOutcome, type BusinessPayload, type BusinessRecord, type FeedbackCitationChunk } from '@/api/business'
-import { date, feedbackAwaiting, feedbackRating, feedbackRatings, feedbackReasons, feedbackRestricted } from './model'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { clauseEvidence, correctionDocument, type CorrectionItem, type AnnotationCheckOutcome, type BusinessPayload, type BusinessRecord, type FeedbackCitationChunk } from '@/api/business'
+import { date, feedbackAwaiting, feedbackRating, feedbackRatings, feedbackReasons, feedbackRestricted, httpStatus } from './model'
 
 const checkLabels: Record<AnnotationCheckOutcome, string> = {
   sent: '已发送给模型',
@@ -124,6 +129,34 @@ const selected = ref<FeedbackCitationChunk>()
 const anchor = computed(() => props.kb && !restricted.value ? selected.value || props.record.feedback_anchor : undefined)
 const showAnnotation = computed(() => canAnnotate.value || !!(props.kb && !restricted.value && props.record.reviewed_guidance))
 const scenario = ref(''), annotation = ref('')
+const priorCorrections = ref<CorrectionItem[]>([]), supersededID = ref('')
+const loadingCorrections = ref(false), correctionReadFailed = ref(false)
+const supersessionOptions = computed(() => [
+  { value: '', label: '保留现有勘误' },
+  ...priorCorrections.value.map(item => ({ value: item.id, label: item.id + ' · ' + item.correction })),
+])
+let correctionRead = 0
+async function readPriorCorrections() {
+  const request = ++correctionRead, chunk = selected.value, kb = props.kb
+  priorCorrections.value = []
+  supersededID.value = ''
+  correctionReadFailed.value = false
+  loadingCorrections.value = false
+  if (!canAnnotate.value || !kb || !chunk) return
+  loadingCorrections.value = true
+  try {
+    const result = await correctionDocument(kb, chunk.document_id, chunk.version_id)
+    if (!mounted || request !== correctionRead) return
+    if (result.knowledge_base_id === kb && result.document_id === chunk.document_id && result.version_id === chunk.version_id) {
+      priorCorrections.value = result.items.filter(item => item.state === 'active' && item.chunk_id === chunk.chunk_id && item.id !== props.record.id)
+    }
+  } catch (error) {
+    if (mounted && request === correctionRead && httpStatus(error) !== 404) correctionReadFailed.value = true
+  } finally {
+    if (mounted && request === correctionRead) loadingCorrections.value = false
+  }
+}
+watch([selected, () => props.kb, canAnnotate], readPriorCorrections)
 const expanded = ref<Record<string, boolean>>({})
 const evidence = ref<Record<string, { status: 'loading' | 'verified' | 'unavailable'; text?: string }>>({})
 let mounted = true
@@ -154,9 +187,11 @@ ${annotation.value.trim()}`
 function approve() {
   const chunk = selected.value
   if (!canAnnotate.value || props.locked || approvalHint.value || !chunk || !citations.value.includes(chunk)) return
+  const previous = priorCorrections.value.find(item => item.id === supersededID.value)
   emit('approve', {
     text: annotation.value.trim(), applies_when: scenario.value.trim(),
     source_clause: { chunk_id: chunk.chunk_id, content_hash: chunk.content_hash },
+    ...(previous ? { supersedes_correction_id: previous.id, supersedes_correction_revision: previous.revision } : {}),
   })
 }
 </script>

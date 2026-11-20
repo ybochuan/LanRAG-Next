@@ -124,8 +124,11 @@ var answerFeedbackMigration string
 //go:embed migrations/040_annotation_checks.sql
 var annotationChecksMigration string
 
+//go:embed migrations/041_feedback_corrections.sql
+var feedbackCorrectionsMigration string
+
 // LatestSchemaVersion is the last published migration supported by this Host.
-const LatestSchemaVersion = 40
+const LatestSchemaVersion = 41
 
 //go:embed migrations/007_lifecycle_current_consistency.sql
 var lifecycleConsistencyMigration string
@@ -468,6 +471,14 @@ func (db *DB) migrate(ctx context.Context) error {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(40)"); err != nil {
+				return err
+			}
+		}
+		if version < 41 {
+			if _, err := tx.ExecContext(ctx, feedbackCorrectionsMigration); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(41)"); err != nil {
 				return err
 			}
 		}

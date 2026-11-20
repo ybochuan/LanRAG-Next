@@ -8,7 +8,8 @@
         <t-select v-model="revisionMode" :options="revisionModeOptions" :disabled="disabled" />
       </label>
       <label v-if="kind==='relation'">{{ $t('workbench.form.relationType') }}<t-select v-model="form.edge_type" :options="relationTypeOptions" :disabled="disabled" /></label>
-      <p v-if="fixedDocument?.end==='source'" class="subtle">{{ sourceLabel }} · {{ fixedDocument.title }}</p>
+      <p v-if="initialCorrection" class="subtle">源文档 · {{ initialCorrection.title || initialCorrection.document_id }} · 版本 {{ initialCorrection.version_id }}</p>
+      <p v-else-if="fixedDocument?.end==='source'" class="subtle">{{ sourceLabel }} · {{ fixedDocument.title }}</p>
       <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :exclude="kind==='relation'&&!crossKB ? form.target_document_id : undefined" :label="sourceLabel" @selected="sourceSelection=$event" :show-identity="form.edge_type==='repeals'||clauseMode" />
       <p v-if="fixedDocument?.end==='target'" class="subtle">{{ targetLabel }} · {{ fixedDocument.title }}</p>
       <t-alert v-if="targetSideCrossBlocked" theme="info" class="notice">从正文详情可新增同库补充说明和内容提示。其他关系请从源文档或文档关联页面创建。</t-alert>
@@ -53,10 +54,10 @@
       <label v-else-if="kind!=='relation'">{{ kind==='revision' ? $t('workbench.form.fullText') : $t('workbench.form.content') }}<t-textarea v-model="form.text" :autosize="{minRows:kind==='revision'?12:5}" :disabled="disabled" :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
       <fieldset v-if="kind==='revision'" :disabled="disabled"><legend>选用 1–3 条生效指导</legend>
         <t-alert v-if="guidanceError" role="alert" theme="error" class="notice">{{ guidanceError }}</t-alert>
-        <label v-for="item in guidances.filter(v=>v.status==='active')" :key="item.id" class="guidance-choice"><t-checkbox :checked="selected.includes(item.id)" :disabled="disabled || (!selected.includes(item.id)&&selected.length>=3)" @change="toggleGuidance(item.id)"><span><strong>{{ item.topic }}</strong><small>{{ item.text }}</small></span></t-checkbox></label>
+        <label v-for="item in guidances.filter(v=>v.status==='active')" :key="item.id" class="guidance-choice"><t-checkbox :checked="selected.includes(item.id)" :disabled="disabled || item.id===initialCorrection?.id || (!selected.includes(item.id)&&selected.length>=3)" @change="toggleGuidance(item.id)"><span><strong>{{ item.topic }}</strong><small>{{ item.text }}</small></span></t-checkbox></label>
         <p v-if="!guidanceLoading&&!guidances.some(v=>v.status==='active')" class="subtle">本页没有生效指导，可翻页或先去反馈治理添加。</p>
         <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">{{ $t('workbench.form.prev') }}</t-button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">{{ $t('workbench.form.next') }}</t-button></div>
-        <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <t-button variant="text" size="small" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">{{ $t('workbench.form.remove') }}</t-button></small>
+        <small v-for="id in selected" :key="id" class="selected-guidance">{{ selectedLabels.get(id)||id }} <t-button v-if="id!==initialCorrection?.id" variant="text" size="small" :disabled="disabled" @click="selected=selected.filter(v=>v!==id)">{{ $t('workbench.form.remove') }}</t-button></small>
       </fieldset>
       <t-button theme="primary" type="submit" :disabled="disabled || targetSideCrossBlocked || relationMissingDocuments || (kind==='revision'&&!selected.length) || (clauseMode&&(!clauses.source_clause||!clauses.target_clause))">{{ kind==='relation'?(form.edge_type==='repeals'?'提交废止审核':clauseMode?'提交条款审核':'保存关联'):kind==='revision'?(revisionMode==='split'?'提交整批审核':'提交提案'):kind==='guidance'?'添加种子指导':'提交反馈' }}</t-button>
     </form>
@@ -70,7 +71,7 @@ import ClausePicker from './ClausePicker.vue'
 import { requestFence } from '../lifecycle/model'
 import { clauseRelation, relationChoices, readingRelation, relationSentence } from './model'
 import { useI18n } from 'vue-i18n'
-const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;knowledgeBases?:{id:string;name:string}[];initialGuidance?:string;fixedDocument?:{id:string;title:string;end:'source'|'target'}}>()
+const props=defineProps<{kb:string;kind:api.BusinessKind;disabled:boolean;knowledgeBases?:{id:string;name:string}[];initialGuidance?:string;initialCorrection?:api.CorrectionRevisionSource;fixedDocument?:{id:string;title:string;end:'source'|'target'}}>()
 const emit=defineEmits<{submit:[action:api.BusinessAction,payload:api.BusinessPayload]}>()
 const { t } = useI18n()
 const knowledgeBases=computed(()=>props.knowledgeBases||[])
@@ -99,7 +100,7 @@ const conditionPreview=computed(()=>{
 const relationMissingDocuments=computed(()=>props.kind==='relation'&&(!form.document_id||!form.target_document_id||form.document_id===form.target_document_id))
 const revisionMode=ref<'single'|'split'>('single')
 // TDesign checkbox is boolean; the selection stays an id array capped at 3.
-function toggleGuidance(id:string){const at=selected.value.indexOf(id);if(at>=0)selected.value.splice(at,1);else if(selected.value.length<3)selected.value.push(id)}
+function toggleGuidance(id:string){if(id===props.initialCorrection?.id)return;const at=selected.value.indexOf(id);if(at>=0)selected.value.splice(at,1);else if(selected.value.length<3)selected.value.push(id)}
 // TDesign DatePicker uses a space-separated value; the form keeps the
 // datetime-local shape that Date.parse expects.
 const effectiveAtPicker=computed({
@@ -114,7 +115,7 @@ const riskOptions=computed(()=>[{label:t('workbench.form.riskLow'),value:'low'},
 const splitParts=ref([{key:0,title:'',text:''},{key:1,title:'',text:''}])
 let nextPartKey=2
 const selected=ref<string[]>([]),selectedLabels=ref(new Map<string,string>()),guidances=ref<api.BusinessRecord[]>([]),guidancePage=ref(1),guidanceLoading=ref(false),guidanceError=ref('')
-const fence=requestFence()
+const fence=requestFence(), initialGuidanceFence=requestFence()
 async function loadGuidances(){
   const token=fence.begin();guidanceLoading.value=true;guidanceError.value=''
   try{const result=await api.list(props.kb,'guidance',guidancePage.value);if(!fence.current(token))return;guidances.value=result;for(const row of result)selectedLabels.value.set(row.id,row.topic||row.id)}
@@ -136,7 +137,9 @@ function submit(){
   }
   else if(props.kind==='relation')emit('submit','relation_declare',{document_id:form.document_id,target_document_id:form.target_document_id,target_knowledge_base_id:crossEligible.value?(form.target_knowledge_base_id||undefined):undefined,edge_type:form.edge_type,similarity:form.similarity,declaration:form.declaration,structure:form.structure,...(crossKB.value&&form.edge_type==='related_to'?{second_confirmation:form.second_confirmation}:{})})
   else if(props.kind==='revision'){
-    const scope={document_id:form.document_id,guidance_ids:[...selected.value]}
+    const correction=props.initialCorrection
+    if(correction && !selected.value.includes(correction.id))return
+    const scope={document_id:correction?.document_id||form.document_id,guidance_ids:[...selected.value]}
     if(revisionMode.value==='split')emit('submit','split_create',{...scope,split_parts:splitParts.value.map(({title,text})=>({title,text}))})
     else emit('submit','revision_create',{...scope,text:form.text})
   }
@@ -150,6 +153,24 @@ watch(()=>props.fixedDocument,(fixed)=>{
   form.document_id=fixed.end==='source'?fixed.id:''
   form.target_document_id=fixed.end==='target'?fixed.id:''
 },{immediate:true})
-watch(()=>props.initialGuidance,async id=>{if(!id||props.kind!=='revision')return;const kb=props.kb;try{const rows=await api.list(kb,'guidance',1,id);if(kb!==props.kb)return;const item=rows.find(v=>v.id===id&&v.status==='active');if(item){selected.value=[id];selectedLabels.value.set(id,item.topic||id)}else guidanceError.value='选中的指导已经停用，请选择其他生效指导。'}catch{if(kb===props.kb)guidanceError.value='无法核对选中的指导。'}},{immediate:true})
-onBeforeUnmount(()=>fence.invalidate())
+watch([()=>props.kb,()=>props.initialGuidance,()=>props.initialCorrection],async ([kb,id,correction])=>{
+ const token=initialGuidanceFence.begin()
+ if(props.kind!=='revision')return
+ if(correction){
+   selected.value=[correction.id]
+   selectedLabels.value.set(correction.id,'勘误 '+correction.id)
+   return
+ }
+ if(!id)return
+ try{
+   const rows=await api.list(kb,'guidance',1,id)
+   if(!initialGuidanceFence.current(token))return
+   const item=rows.find(v=>v.id===id&&v.status==='active')
+   if(item){selected.value=[id];selectedLabels.value.set(id,item.topic||id)}
+   else guidanceError.value='选中的指导已经停用，请选择其他生效指导。'
+ }catch{
+   if(initialGuidanceFence.current(token))guidanceError.value='无法核对选中的指导。'
+ }
+},{immediate:true})
+onBeforeUnmount(()=>{fence.invalidate();initialGuidanceFence.invalidate()})
 </script>

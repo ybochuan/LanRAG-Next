@@ -42,6 +42,7 @@ export interface BusinessPayload {
   effective_at?: string
   source_clause?: ClauseAnchor; target_clause?: ClauseAnchor
   applies_when?: string; resolution?: string
+  supersedes_correction_id?: string; supersedes_correction_revision?: number
 }
 export type AnnotationCheckOutcome = 'sent' | 'matched' | 'source_mismatch' | 'cooling_down'
   | 'awaiting_activation' | 'budget_or_limit' | 'withdrawn' | 'quarantined' | 'guidance_unavailable'
@@ -82,6 +83,73 @@ async function unwrap<T>(request: Promise<unknown>): Promise<T> {
 }
 export const list = (kb: string, kind: BusinessKind, page = 1, id = '', state = '') =>
   unwrap<BusinessRecord[]>(get(`${base(kb)}${kind}_list?${new URLSearchParams({page:String(page),page_size:'20',id,...(state?{state}:{})})}`))
+export type CorrectionState = 'active' | 'all' | 'withdrawn' | 'superseded' | 'inactive'
+export interface CorrectionDocumentSummary {
+  knowledge_base_id: string
+  document_id: string
+  version_id: string
+  document_title: string
+  file_name: string
+  active_count: number
+  last_approved_at: string
+}
+export interface CorrectionReference {
+  id: string
+  revision: number
+  document_id: string
+  version_id: string
+  chunk_id: string
+}
+export type CorrectionRevisionReference = Omit<CorrectionReference, 'chunk_id'>
+export interface CorrectionRevisionSource extends CorrectionRevisionReference {
+  title: string
+  type: 'manual' | 'file'
+}
+export interface CorrectionItem extends CorrectionReference {
+  applies_when: string
+  correction: string
+  state: Exclude<CorrectionState, 'all'>
+  approved_at: string
+  effective_at: string
+}
+export interface CorrectionDocument extends CorrectionDocumentSummary {
+  markdown: string
+  items: CorrectionItem[]
+}
+export interface CorrectionFilters {
+  document_id?: string
+  version_id?: string
+  query?: string
+  state: CorrectionState
+  approved_from?: string
+  approved_to?: string
+}
+export interface CorrectionPage {
+  items: CorrectionDocumentSummary[]
+  total: number
+  page: number
+  page_size: number
+}
+export function correctionDocuments(kb: string, filters: CorrectionFilters, page: number) {
+  const query = new URLSearchParams({ page: String(page), page_size: '20' })
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) query.set(key, value)
+  }
+  return unwrap<CorrectionPage>(get(`${base(kb)}correction_documents?${query}`))
+}
+export function correctionDocument(kb: string, document_id: string, version_id: string, state: CorrectionState = 'active') {
+  const query = new URLSearchParams({ document_id, version_id, state })
+  return unwrap<CorrectionDocument>(get(`${base(kb)}correction_document?${query}`))
+}
+export async function verifyCorrectionRevision(kb: string, correction: CorrectionRevisionReference) {
+  const result = await correctionDocument(kb, correction.document_id, correction.version_id)
+  if (result.knowledge_base_id !== kb || result.document_id !== correction.document_id || result.version_id !== correction.version_id ||
+    !result.items.some(item => item.id === correction.id && item.revision === correction.revision && item.state === 'active' &&
+      item.document_id === correction.document_id && item.version_id === correction.version_id)) {
+    throw new Error('correction_unavailable')
+  }
+  return result.document_title
+}
 export const documentRecords = (kb: string, doc: string, kind: 'relation' | 'revision', page: number, id = '') =>
   unwrap<BusinessRecord[]>(get(`${base(kb)}related?${new URLSearchParams({
     state: kind === 'relation' ? 'workbench-relations' : 'workbench-revisions',

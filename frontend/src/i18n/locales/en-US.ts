@@ -9464,6 +9464,8 @@ export default {
       "families": "Business families",
       "associations": "Relations",
       "feedbackGovernance": "Feedback review",
+      "feedbackMaterials": "Feedback Materials",
+      "correctionDocuments": "Correction Documents",
       "revisions": "Revisions",
       "lineage": "Relation graph"
     },

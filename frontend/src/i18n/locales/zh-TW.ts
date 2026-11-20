@@ -9454,6 +9454,8 @@ export default {
       "families": "業務族",
       "associations": "關聯關係",
       "feedbackGovernance": "回饋審核",
+      "feedbackMaterials": "回饋資料",
+      "correctionDocuments": "勘誤文件",
       "revisions": "修訂發佈",
       "lineage": "關係圖"
     },

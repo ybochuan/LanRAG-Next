@@ -83,7 +83,7 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 		case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
 			"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
 			"business_family_workspace", "business_family_replacements", "business_family_suggestions", "business_cleanup_list",
-			"business_attachment_list", "business_attachment_preview":
+			"business_attachment_list", "business_attachment_preview", "business_correction_documents", "business_correction_document":
 			read = true
 		}
 		if read == mutation {
@@ -120,7 +120,17 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 	if action == "business_related" || strings.HasPrefix(action, "business_attachment_") {
 		req.DocumentID = c.Query("document_id")
 	}
-	if strings.HasPrefix(action, "business_") && !mutation {
+	if action == "business_correction_documents" || action == "business_correction_document" {
+		req.DocumentID = c.Query("document_id")
+		req.VersionID = c.Query("version_id")
+		req.Query = c.Query("query")
+		req.ApprovedFrom = c.Query("approved_from")
+		req.ApprovedTo = c.Query("approved_to")
+		if action == "business_correction_document" && (req.DocumentID == "" || req.VersionID == "") {
+			lifecycleError(c, 400)
+			return
+		}
+	} else if strings.HasPrefix(action, "business_") && !mutation {
 		req.Business, _ = json.Marshal(map[string]string{"id": c.Query("id")})
 	}
 	for name, target := range map[string]*int{"page": &req.Page, "page_size": &req.PageSize} {

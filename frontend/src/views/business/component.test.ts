@@ -13,6 +13,8 @@ function mountSetup(
   lifecycle: Record<string, unknown> = {},
   props: { section: 'associations' | 'feedback-governance' | 'revisions'; scope?: string; canWrite?: boolean; inboxOnly?: boolean } = { section: 'revisions' },
   auth = vue.reactive({ effectiveTenantId: 7, isLoggedIn: true, admin: false }),
+  routeQuery: Record<string, unknown> = {},
+  native: Record<string, unknown> = {},
 ) {
   const guards: (() => boolean | void)[] = []
   const scope = vue.effectScope()
@@ -27,10 +29,10 @@ function mountSetup(
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const modules: Record<string, unknown> = {
     vue: { ...vue, useId: () => 'test-' + nextID++, onMounted() {}, onBeforeUnmount() {} },
-    'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({ options: { history: { state: {} } } }), onBeforeRouteLeave: (guard: () => boolean) => guards.push(guard), onBeforeRouteUpdate: (guard: () => boolean) => guards.push(guard) },
+    'vue-router': { useRoute: () => ({ query: routeQuery }), useRouter: () => ({ options: { history: { state: {} } } }), onBeforeRouteLeave: (guard: () => boolean) => guards.push(guard), onBeforeRouteUpdate: (guard: () => boolean) => guards.push(guard) },
     '@/stores/auth': { useAuthStore: () => ({ get effectiveTenantId() { return auth.effectiveTenantId }, get isLoggedIn() { return auth.isLoggedIn }, hasRole: () => auth.admin }) },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
-    '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }) },
+    '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }), ...native },
     '@/api/lifecycle': {
       authority: async () => { overviewCalls++; return { can_write: true } },
       ...lifecycle,
@@ -38,11 +40,61 @@ function mountSetup(
     '@/api/business': { documentTitle: async () => '', relationRecords: api.list, ...api },
     './CreateForm.vue': {}, './DocumentPicker.vue': {}, '../lifecycle/model': { requestFence }, './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'defineEmits', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'defineEmits', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated,correctionSource,correctionSourceLoading,correctionSourceError,loadCorrectionSource};`)(
     (id: string) => modules[id], () => props, () => () => {}, () => 0, () => {}, { addEventListener() {}, removeEventListener() {} }, {},
   ))
   return { state, guards, props, overviewCalls: () => overviewCalls, stop: () => scope.stop() }
 }
+
+const correctionQuery = { kb: 'kb-a', guidance: 'correction-a', correctionDocument: 'doc-a', correctionVersion: 'v1', correctionRevision: '2' }
+
+for (const type of ['manual', 'file'] as const) {
+  test('a correction selects the existing ' + type + ' revision flow for the exact source', async () => {
+    const calls: unknown[][] = []
+    const view = mountSetup({ list: async () => [], verifyCorrectionRevision: async (...args: unknown[]) => {
+      calls.push(args)
+      return '制度 A'
+    } }, {}, { section: 'revisions', scope: 'kb-a', canWrite: true }, undefined, correctionQuery, {
+      getKnowledgeDetails: async (id: string) => ({ success: true, data: { id, type, knowledge_base_id: 'kb-a', metadata: { status: 'publish' } } }),
+    })
+    try {
+      view.state.kb.value = 'kb-a'; await vue.nextTick()
+      view.state.canWrite.value = true
+      await view.state.loadCorrectionSource()
+      const selection = { id: 'correction-a', document_id: 'doc-a', version_id: 'v1', revision: 2 }
+      assert.deepEqual(calls.at(-1), ['kb-a', selection])
+      assert.deepEqual(view.state.correctionSource.value, { ...selection, title: '制度 A', type })
+    } finally { view.stop() }
+  })
+}
+
+test('a correction route fails closed on a foreign source, draft manual, or lost write authority', async () => {
+  let sourceRead: () => Promise<unknown> = async () => ({ success: true, data: { id: 'doc-a', type: 'file', knowledge_base_id: 'kb-b' } })
+  const view = mountSetup({ list: async () => [], verifyCorrectionRevision: async () => '制度 A' }, {},
+    { section: 'revisions', scope: 'kb-a', canWrite: true }, undefined, correctionQuery, {
+      getKnowledgeDetails: () => sourceRead(),
+    })
+  try {
+    view.state.kb.value = 'kb-a'; await vue.nextTick()
+    view.state.canWrite.value = true
+    await view.state.loadCorrectionSource()
+    assert.equal(view.state.correctionSource.value, undefined)
+    assert.match(view.state.correctionSourceError.value, /无法核对/)
+    sourceRead = async () => ({ success: true, data: { id: 'doc-a', type: 'manual', knowledge_base_id: 'kb-a', metadata: { status: 'draft' } } })
+    await view.state.loadCorrectionSource()
+    assert.equal(view.state.correctionSource.value, undefined)
+    assert.match(view.state.correctionSourceError.value, /不支持正式修订/)
+    let release!: (value: unknown) => void
+    sourceRead = () => new Promise(resolve => { release = resolve })
+    const check = view.state.loadCorrectionSource()
+    await Promise.resolve()
+    view.state.canWrite.value = false
+    release({ success: true, data: { id: 'doc-a', type: 'file', knowledge_base_id: 'kb-a' } })
+    await check
+    assert.equal(view.state.correctionSource.value, undefined)
+    assert.equal(view.state.correctionSourceLoading.value, false)
+  } finally { view.stop() }
+})
 
 test('unknown write keeps its original retry when navigating to another business view', async () => {
   const view = mountSetup({ list: async () => [] })

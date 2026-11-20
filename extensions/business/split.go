@@ -162,7 +162,7 @@ func (s *Service) createSplit(ctx context.Context, c Command) (Result, error) {
 		if err := noApprovedSplit(ctx, tx, c.Scope, c.Payload.DocumentID, source); err != nil {
 			return Result{}, err
 		}
-		if err := requireRevisionGuidances(ctx, tx, c.Scope, c.Payload.GuidanceIDs); err != nil {
+		if err := s.requireRevisionGuidances(ctx, tx, c.Scope, c.Payload.DocumentID, source, c.Payload.GuidanceIDs); err != nil {
 			return Result{}, err
 		}
 		var family string

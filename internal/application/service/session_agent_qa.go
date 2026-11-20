@@ -432,6 +432,12 @@ func (s *sessionService) AgentQA(
 		sourceState, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext,
 			req.Resume.Snapshot, req.Resume.Prompt)
 	} else {
+		selected := len(req.KnowledgeBaseIDs) != 0 || len(req.KnowledgeIDs) != 0 || len(req.TagScopes) != 0
+		var priorQuery string
+		if agentConfig.MultiTurnEnabled && agent.IsKnowledgeFollowUp(req.Query) {
+			priorQuery = s.priorAgentKnowledgeQuery(ctx, req, agentConfig.SearchTargets)
+		}
+		ctx = agent.WithKnowledgeEvidence(ctx, selected, req.Query, priorQuery)
 		sourceState, err = engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
 	}
 	if _, tracked := extensionbridge.SourceRunFromContext(ctx); tracked {
@@ -455,6 +461,39 @@ func (s *sessionService) AgentQA(
 	}
 	// Return empty - events will be handled by Handler via EventBus subscription
 	return nil
+}
+
+// priorAgentKnowledgeQuery uses only the previous paired user's original query.
+// Stored answers and old tool payloads never enter the new search or provider call.
+func (s *sessionService) priorAgentKnowledgeQuery(ctx context.Context, req *types.QARequest, targets types.SearchTargets) string {
+	if s.messageRepo == nil || req.UserMessageID == "" || len(targets) == 0 {
+		return ""
+	}
+	sessionID := req.Session.ID
+	current, err := s.messageRepo.GetMessage(ctx, sessionID, req.UserMessageID)
+	if err != nil || current == nil || current.Role != "user" {
+		return ""
+	}
+	messages, err := s.messageRepo.ListMessagesBySessionBeforeCursor(ctx, sessionID, current.CreatedAt, current.ID, 2)
+	if err != nil || len(messages) != 2 || messages[0] == nil || messages[1] == nil {
+		return ""
+	}
+	answer, question := messages[0], messages[1]
+	if answer.Role != "assistant" || !answer.IsCompleted || answer.RequestID == "" ||
+		question.Role != "user" || question.RequestID != answer.RequestID ||
+		answer.SessionID != sessionID || question.SessionID != sessionID {
+		return ""
+	}
+	query := strings.TrimSpace(question.Content)
+	if query == "" || len(query)+len(req.Query)+1 > 4096 {
+		return ""
+	}
+	for _, ref := range answer.KnowledgeReferences {
+		if tools.VerifyKnowledgeFollowUp(ctx, targets, ref, s.chunkService, s.knowledgeService) {
+			return query
+		}
+	}
+	return ""
 }
 
 type dataURIImageDescriber interface {

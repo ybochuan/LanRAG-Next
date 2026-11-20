@@ -195,9 +195,9 @@ func (s *sessionService) KnowledgeQA(
 	// this decision or the request is incorrectly downgraded to pure chat.
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
 	needsRAG := hasKB || webSearchEnabled
-	// M2: historical answers have no complete source provenance. Do not replay
-	// them to query-understanding or generation models. Persisted history stays intact.
-	if rejectUnattributed(ctx) != nil {
+	// Knowledge turns load prior user questions through the source-aware history adapter.
+	// Other turns keep the existing boundary for opaque conversation history.
+	if !hasKB && rejectUnattributed(ctx) != nil {
 		chatManage.MaxRounds = 0
 		chatManage.History = nil
 		chatManage.HistoryLoaded = true
@@ -250,6 +250,9 @@ func (s *sessionService) KnowledgeQA(
 	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
 	// bind script execution to a per-session MicroVM instance.
 	ctx = types.WithSessionID(ctx, req.Session.ID)
+	if hasKB {
+		ctx = chatpipeline.WithFreshKnowledgeHistory(ctx)
+	}
 	if sourceCtx, sourceErr := extensionbridge.BeginSourceRunForTargets(ctx, types.SessionOwnerIDFromContext(ctx), req.Session.ID, req.AssistantMessageID, searchTargets); sourceErr == nil {
 		ctx = sourceCtx
 	} else if len(searchTargets) != 0 {
@@ -744,7 +747,9 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		// emitted after the pipeline returned — by then the `complete` event had
 		// already closed the stream, so the frontend only saw citations on refresh.
 		if eventType == types.CHAT_COMPLETION_STREAM {
-			emitKnowledgeReferencesEvent(ctx, chatManage)
+			if _, tracked := extensionbridge.SourceRunFromContext(ctx); !tracked {
+				emitKnowledgeReferencesEvent(ctx, chatManage)
+			}
 		}
 		err := s.eventManager.Trigger(stageCtx, eventType, chatManage)
 		if understandProgress != nil && eventType == types.QUERY_UNDERSTAND {

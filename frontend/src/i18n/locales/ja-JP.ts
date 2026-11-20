@@ -9458,6 +9458,8 @@ export default {
       "families": "業務ファミリー",
       "associations": "関連",
       "feedbackGovernance": "フィードバック審査",
+      "feedbackMaterials": "フィードバック資料",
+      "correctionDocuments": "訂正文書",
       "revisions": "改訂公開",
       "lineage": "関係グラフ"
     },

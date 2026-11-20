@@ -99,7 +99,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
-	inputs, complete := sourceInputsForModel(chatManage)
+	ctx = extensionbridge.WithCorrectionQuery(ctx, correctionQuery(chatManage))
+	ctx = extensionbridge.WithCorrectionSourceHandles(ctx, modelContext.ChunkHandle)
+	inputs, complete := sourceInputsForModel(ctx, chatManage)
 	ctx, chatMessages, sourceCall, err := extensionbridge.BeginGuidedSourceCall(ctx, chatMessages, opt, inputs, complete)
 	if err != nil {
 		finishSourceModelRun(ctx, nil, false)
@@ -121,6 +123,14 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			"error":      "nil_channel",
 		})
 		return ErrModelCall.WithError(errors.New("chat stream returned nil channel"))
+	}
+
+	if _, tracked := extensionbridge.SourceRunFromContext(ctx); tracked && len(chatManage.MergeResult) > 0 {
+		attachCorrectionReferences(chatManage.MergeResult, sourceCall.CorrectionItems())
+		_ = eventBus.Emit(ctx, types.Event{
+			ID: uuid.NewString(), Type: types.EventType(event.EventAgentReferences), SessionID: chatManage.SessionID,
+			Data: event.AgentReferencesData{References: chatManage.MergeResult},
+		})
 	}
 
 	pipelineInfo(ctx, "Stream", "model_started", map[string]interface{}{

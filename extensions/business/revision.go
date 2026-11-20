@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/outbox"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
@@ -90,7 +91,7 @@ func (s *Service) revision(ctx context.Context, c Command) (Result, error) {
 			if e = s.current(ctx, tx, c.Scope, c.Payload.DocumentID, source); e != nil {
 				return Result{}, e
 			}
-			if e = requireRevisionGuidances(ctx, tx, c.Scope, c.Payload.GuidanceIDs); e != nil {
+			if e = s.requireRevisionGuidances(ctx, tx, c.Scope, c.Payload.DocumentID, source, c.Payload.GuidanceIDs); e != nil {
 				return Result{}, e
 			}
 			out.ID = newID()
@@ -166,17 +167,26 @@ func (s *Service) bindBinaryRevision(ctx context.Context, c Command) (Result, er
 	})
 }
 
-func requireRevisionGuidances(ctx context.Context, tx *sql.Tx, scope provenance.Scope, ids []string) error {
+func (s *Service) requireRevisionGuidances(ctx context.Context, tx *sql.Tx, scope provenance.Scope, doc, version string, ids []string) error {
 	seen := map[string]bool{}
 	for _, id := range ids {
 		if !validID(id) || seen[id] {
 			return ErrInvalid
 		}
 		seen[id] = true
-		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM ext_feedback_guidances
-			WHERE tenant_id=? AND knowledge_base_id=? AND guidance_id=? AND status='active'`, args(scope, id)...).Scan(&one); err != nil {
+		var isQA bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ext_qa_feedback q WHERE
+			(q.tenant_id,q.knowledge_base_id,q.feedback_id)=(g.tenant_id,g.knowledge_base_id,g.feedback_id))
+			FROM ext_feedback_guidances g WHERE g.tenant_id=? AND g.knowledge_base_id=? AND g.guidance_id=? AND g.status='active'`, args(scope, id)...).Scan(&isQA); err != nil {
 			return ErrConflict
+		}
+		if isQA {
+			if _, err := corrections.ActiveTx(ctx, tx, correctionScope(scope), s.now(), doc, version, id); err != nil {
+				if errors.Is(err, corrections.ErrNotFound) {
+					return ErrConflict
+				}
+				return err
+			}
 		}
 	}
 	return nil

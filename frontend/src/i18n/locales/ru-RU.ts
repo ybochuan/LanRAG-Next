@@ -9458,6 +9458,8 @@ export default {
       "families": "Бизнес-семейства",
       "associations": "Связи",
       "feedbackGovernance": "Проверка отзывов",
+      "feedbackMaterials": "Материалы отзывов",
+      "correctionDocuments": "Документы с исправлениями",
       "revisions": "Ревизии",
       "lineage": "Граф связей"
     },

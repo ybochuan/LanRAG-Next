@@ -25,6 +25,8 @@ type Config struct {
 	FamilyEmbedder    *business.LocalFamilyEmbedder `json:"-"`
 	Mode              string
 	DBPath            string
+	CorrectionDir     string   // Managed correction Markdown directory, defaults beside DBPath.
+	CorrectionKBIDs   []string // Nil enables evidence in all configured KBs.
 	NativeDBPath      string
 	UpstreamURL       string
 	APIKey            string `json:"-"`
@@ -89,7 +91,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		}
 		c.Parser = p
 	}
-	workerKeys := []string{"AGENTRAG_EXT_DB", "AGENTRAG_WEKNORA_URL", "AGENTRAG_WEKNORA_API_KEY", "AGENTRAG_TENANT_ID", "AGENTRAG_KB_IDS", "AGENTRAG_RECONCILE_INTERVAL", "AGENTRAG_OUTBOX_POLL_INTERVAL", "AGENTRAG_OUTBOX_LEASE", "AGENTRAG_OUTBOX_RETRY_DELAY", "AGENTRAG_OUTBOX_MAX_ATTEMPTS"}
+	workerKeys := []string{"AGENTRAG_EXT_DB", "AGENTRAG_CORRECTION_DIR", "AGENTRAG_CORRECTION_KB_IDS", "AGENTRAG_WEKNORA_URL", "AGENTRAG_WEKNORA_API_KEY", "AGENTRAG_TENANT_ID", "AGENTRAG_KB_IDS", "AGENTRAG_RECONCILE_INTERVAL", "AGENTRAG_OUTBOX_POLL_INTERVAL", "AGENTRAG_OUTBOX_LEASE", "AGENTRAG_OUTBOX_RETRY_DELAY", "AGENTRAG_OUTBOX_MAX_ATTEMPTS"}
 	if c.Mode == "probe" {
 		for _, key := range workerKeys {
 			if getenv(key) != "" {
@@ -97,6 +99,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 			}
 		}
 	}
+	c.CorrectionDir = strings.TrimSpace(getenv("AGENTRAG_CORRECTION_DIR"))
 	c.DBPath, c.UpstreamURL, c.APIKey = getenv("AGENTRAG_EXT_DB"), getenv("AGENTRAG_WEKNORA_URL"), getenv("AGENTRAG_WEKNORA_API_KEY")
 	if c.Mode == "worker" {
 		if driver := strings.TrimSpace(getenv("DB_DRIVER")); driver == "" || driver == "sqlite" {
@@ -130,6 +133,14 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	if raw := getenv("AGENTRAG_KB_IDS"); raw != "" {
 		for _, id := range strings.Split(raw, ",") {
 			c.KnowledgeBaseIDs = append(c.KnowledgeBaseIDs, strings.TrimSpace(id))
+		}
+	}
+	if raw := strings.TrimSpace(getenv("AGENTRAG_CORRECTION_KB_IDS")); raw != "" {
+		c.CorrectionKBIDs = []string{}
+		if raw != "[]" {
+			for _, id := range strings.Split(raw, ",") {
+				c.CorrectionKBIDs = append(c.CorrectionKBIDs, strings.TrimSpace(id))
+			}
 		}
 	}
 	for _, setting := range []struct {
@@ -212,7 +223,7 @@ func (c Config) Validate() error {
 		return errors.New("outbox attempts must be 1..100")
 	}
 	if c.Mode == "probe" {
-		if c.DBPath != "" || c.UpstreamURL != "" || c.APIKey != "" || c.TenantID != 0 || len(c.KnowledgeBaseIDs) != 0 || c.FamilyEmbedder != nil {
+		if c.DBPath != "" || c.CorrectionDir != "" || c.CorrectionKBIDs != nil || c.UpstreamURL != "" || c.APIKey != "" || c.TenantID != 0 || len(c.KnowledgeBaseIDs) != 0 || c.FamilyEmbedder != nil {
 			return errors.New("probe configuration contains worker options")
 		}
 		return nil
@@ -232,6 +243,12 @@ func (c Config) Validate() error {
 			return errors.New("invalid or duplicate worker knowledge base")
 		}
 		seen[id] = true
+	}
+	for _, id := range c.CorrectionKBIDs {
+		if !seen[id] {
+			return errors.New("invalid or duplicate AGENTRAG_CORRECTION_KB_IDS member")
+		}
+		delete(seen, id)
 	}
 	return nil
 }

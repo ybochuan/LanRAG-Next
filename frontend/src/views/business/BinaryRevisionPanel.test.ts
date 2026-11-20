@@ -5,10 +5,12 @@ import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as recovery from './binaryRevisionRecovery'
+import type { CorrectionRevisionSource } from '@/api/business'
 
 const source = parse(readFileSync(new URL('./BinaryRevisionPanel.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const original = new File(['revised'], 'revised.pdf')
+const correction: CorrectionRevisionSource = { id: 'correction', revision: 2, document_id: 'source', version_id: 'source-v1', title: '源文档', type: 'file' }
 
 type WriteBody = { operation_id: string; business: { id?: string; payload: Record<string, unknown> } }
 type Stage = 'upload' | 'revision_create_binary' | 'revision_bind_binary'
@@ -24,6 +26,10 @@ function fixture(failOnce?: Stage) {
   let uploaded: recovery.NativeDocument | undefined
   let bound = false
   let sourceDocument = ''
+  let guidance: unknown
+  let proposalVersion = correction.version_id
+  let correctionAvailable = true
+  const verifications: CorrectionRevisionSource[] = []
   let uploads = 0
   let reads = 0
   const loseResponse = (stage: Stage) => {
@@ -50,10 +56,15 @@ function fixture(failOnce?: Stage) {
       batchQueryKnowledge: async () => ({ success: true, data: [uploaded] }),
     },
     '@/api/business': {
+      verifyCorrectionRevision: async (_kb: string, source: CorrectionRevisionSource) => {
+        verifications.push(source)
+        if (!correctionAvailable) throw new Error('correction unavailable')
+      },
       write: async (_kb: string, action: 'revision_create_binary' | 'revision_bind_binary', body: WriteBody) => {
         calls.push({ action, body })
         if (action === 'revision_create_binary') {
           sourceDocument = String(body.business.payload.document_id)
+          guidance = body.business.payload.guidance_ids
           loseResponse(action)
           return { id: 'proposal', revision: 1, status: 'pending_review' }
         }
@@ -63,7 +74,7 @@ function fixture(failOnce?: Stage) {
       },
       list: async () => {
         reads++
-        return [{ id: 'proposal', record_kind: 'revision', source_document_id: sourceDocument, proposed_patch: '',
+        return [{ id: 'proposal', record_kind: 'revision', source_document_id: sourceDocument, source_version_id: proposalVersion, guidance_ids: guidance, proposed_patch: '',
           status: 'pending_review', revision: bound ? 2 : 1, target_document_id: bound ? 'target' : '' }]
       },
     },
@@ -71,11 +82,14 @@ function fixture(failOnce?: Stage) {
   }
   return {
     calls, countUploads: () => uploads, countReadbacks: () => reads, stored: () => values.size,
-    mount() {
+    verifications,
+    withdrawCorrection: () => { correctionAvailable = false },
+    setProposalVersion: (version: string) => { proposalVersion = version },
+    mount(initialCorrection?: CorrectionRevisionSource) {
       const scope = vue.effectScope()
       const state = scope.run(() => new Function('require', 'exports', 'defineProps', 'defineEmits', 'sessionStorage', code +
-        '\nreturn {sourceId,file,error,notice,recovery,submit};')(
-        (id: string) => modules[id], {}, () => ({ kb: 'kb', disabled: false }), () => () => {}, storage,
+        '\nreturn {sourceId,file,error,notice,recovery,differentRecovery,submit};')(
+        (id: string) => modules[id], {}, () => ({ kb: 'kb', disabled: false, initialCorrection }), () => () => {}, storage,
       ))
       return { state, stop: () => scope.stop() }
     },
@@ -128,3 +142,54 @@ for (const stage of ['upload', 'revision_create_binary', 'revision_bind_binary']
     } finally { after.stop() }
   })
 }
+
+test('correction-linked uploads fix the source and recover the same proposal payload', async () => {
+  const scenario = fixture('revision_create_binary')
+  const before = scenario.mount(correction)
+  try {
+    assert.equal(before.state.sourceId.value, correction.document_id)
+    before.state.sourceId.value = 'another-source'
+    before.state.file.value = original
+    await before.state.submit(false)
+    assert.match(before.state.error.value, /请求结果未知/)
+    assert.deepEqual(before.state.recovery.value?.correction, { id: correction.id, version_id: correction.version_id, revision: correction.revision })
+    assert.deepEqual(scenario.verifications, [correction])
+    assert.deepEqual(scenario.calls[0].body.business.payload, { document_id: correction.document_id, guidance_ids: [correction.id] })
+  } finally { before.stop() }
+  const other = scenario.mount({ ...correction, id: 'other-correction' })
+  try {
+    assert.equal(other.state.differentRecovery.value, true)
+    await other.state.submit(false)
+    assert.equal(scenario.calls.length, 1)
+  } finally { other.stop() }
+  scenario.withdrawCorrection()
+  const reopened = scenario.mount()
+  try {
+    await reopened.state.submit(false)
+    assert.equal(reopened.state.error.value, '')
+    assert.deepEqual(scenario.calls[1], scenario.calls[0])
+    assert.equal(scenario.calls[2].action, 'revision_bind_binary')
+    assert.equal(scenario.countUploads(), 1)
+  } finally { reopened.stop() }
+})
+
+test('a correction cannot start an upload after withdrawal or bind a proposal from another version', async () => {
+  const withdrawn = fixture()
+  withdrawn.withdrawCorrection()
+  const before = withdrawn.mount(correction)
+  try {
+    before.state.file.value = original
+    await before.state.submit(false)
+    assert.match(before.state.error.value, /所选勘误已变化/)
+    assert.equal(withdrawn.countUploads(), 0)
+  } finally { before.stop() }
+  const wrongVersion = fixture()
+  wrongVersion.setProposalVersion('another-version')
+  const after = wrongVersion.mount(correction)
+  try {
+    after.state.file.value = original
+    await after.state.submit(false)
+    assert.match(after.state.error.value, /无法核对原修订提案/)
+    assert.deepEqual(wrongVersion.calls.map(call => call.action), ['revision_create_binary'])
+  } finally { after.stop() }
+})

@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/extensionbridge"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -67,22 +68,30 @@ func isGovernanceWebResult(r *types.SearchResult) bool {
 
 // sourceInputsForModel fingerprints the native fields in the provider's rows.
 // The legacy merged passage is replaced by separately rendered source bodies.
-func sourceInputsForModel(cm *types.ChatManage) ([]extensionbridge.SourceInput, bool) {
-	if len(cm.History) != 0 || cm.MemoryPrompt != "" || len(cm.Images) != 0 || len(cm.ContextImages) != 0 || cm.ImageDescription != "" || len(cm.Attachments) != 0 || cm.QuotedContext != "" || cm.DataAnalysisEnabled {
+func sourceInputsForModel(ctx context.Context, cm *types.ChatManage) ([]extensionbridge.SourceInput, bool) {
+	if !historyHasOnlyQuestions(ctx, cm.History) || cm.MemoryPrompt != "" || len(cm.Images) != 0 || len(cm.ContextImages) != 0 || cm.ImageDescription != "" || len(cm.Attachments) != 0 || cm.QuotedContext != "" || cm.DataAnalysisEnabled {
 		return nil, false
 	}
 	if !cm.NeedsRetrieval() {
 		return nil, len(cm.MergeResult) == 0
 	}
+	// The native placeholder substitution may alter an already inserted
+	// legacy passage before the model renderer tries to replace it. Keep
+	// such requests incomplete because both representations could survive.
+	if strings.Contains(cm.RenderedContexts, "{{") {
+		return nil, false
+	}
+	run, tracked := extensionbridge.SourceRunFromContext(ctx)
 	for _, r := range cm.MergeResult {
-		if !plainModelSource(r) || r.ContentRewritten && len(r.CitationSources) == 0 {
+		if !plainModelSource(r) || (tracked && r.KnowledgeBaseID != run.Scope.KnowledgeBaseID) ||
+			(r.ContentRewritten && len(r.CitationSources) == 0) {
 			return nil, false
 		}
 	}
 	var inputs []extensionbridge.SourceInput
 	seen := map[string]bool{}
 	for _, r := range pipelineModelRows(cm) {
-		if !plainModelSource(r) || r.ContentRewritten || r.Content == "" {
+		if !plainModelSource(r) || (tracked && r.KnowledgeBaseID != run.Scope.KnowledgeBaseID) || r.ContentRewritten || r.Content == "" {
 			return nil, false
 		}
 		inputs = append(inputs,
@@ -105,10 +114,21 @@ func sourceInputsForModel(cm *types.ChatManage) ([]extensionbridge.SourceInput, 
 }
 
 func plainModelSource(r *types.SearchResult) bool {
-	return r != nil && r.ID != "" && r.KnowledgeID != "" && r.KnowledgeBaseID != "" &&
-		!isGovernanceWebResult(r) && !isPipelineWebReference(r) && r.MatchType != types.MatchTypeGraph &&
-		(r.ChunkType == "" || r.ChunkType == string(types.ChunkTypeText)) &&
-		r.ParentChunkID == "" && r.ImageInfo == "" && r.KnowledgeCustomMetadata == ""
+	if r == nil || r.ID == "" || r.KnowledgeID == "" || r.KnowledgeBaseID == "" ||
+		isGovernanceWebResult(r) || isPipelineWebReference(r) || r.MatchType == types.MatchTypeGraph ||
+		r.ImageInfo != "" || r.KnowledgeCustomMetadata != "" {
+		return false
+	}
+	switch r.ChunkType {
+	case "", types.ChunkTypeText:
+		return r.ParentChunkID == ""
+	case types.ChunkTypeSummary:
+		// A stored summary has its own verifiable body. Its parent is a
+		// relationship, and the model row does not include that parent's text.
+		return !r.ContentRewritten
+	default:
+		return false
+	}
 }
 
 func finishSourceModelRun(ctx context.Context, call *extensionbridge.SourceCall, success bool) {

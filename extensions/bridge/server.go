@@ -17,6 +17,7 @@ type Services struct {
 	Ready                  func(context.Context) bool // Local DB/services only; never depends on Core availability.
 	BeforeRetrieve         *RetrieveHandler
 	AfterRetrieve          *AttachmentHandler
+	CorrectionSources      *CorrectionSourcesHandler
 	BeforeAttachmentDelete *AttachmentDeleteHandler
 	MCP                    http.Handler
 	Metrics                http.Handler  // Optional loopback-only operational metrics endpoint.
@@ -76,6 +77,7 @@ func NewServerWithServices(services Services) *http.Server {
 		"/bridge/before-retrieve",
 		"/bridge/after-retrieve",
 		"/bridge/before-generate",
+		"/bridge/correction-sources",
 		"/bridge/ingest-event",
 	} {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -87,6 +89,9 @@ func NewServerWithServices(services Services) *http.Server {
 		}
 		if path == "/bridge/after-retrieve" && services.AfterRetrieve != nil {
 			handler = services.AfterRetrieve.ServeHTTP
+		}
+		if path == "/bridge/correction-sources" && services.CorrectionSources != nil {
+			handler = services.CorrectionSources.ServeHTTP
 		}
 		mux.HandleFunc("POST "+path, requireVersion(func(w http.ResponseWriter, r *http.Request) {
 			if path == "/bridge/before-retrieve" {

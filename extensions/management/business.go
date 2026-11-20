@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
+	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 )
@@ -25,13 +26,25 @@ func businessRead(action string) bool {
 	case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
 		"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
 		"business_family_replacements", "business_family_backfill_plans", "business_family_workspace",
-		"business_family_suggestions", "business_cleanup_list", "business_attachment_list", "business_attachment_preview":
+		"business_family_suggestions", "business_cleanup_list", "business_attachment_list", "business_attachment_preview",
+		"business_correction_documents", "business_correction_document":
 		return true
 	default:
 		return false
 	}
 }
 func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
+	if r.Action == "business_correction_documents" || r.Action == "business_correction_document" {
+		if !r.CanWrite && r.State != "" && r.State != "active" {
+			return nil, errScopeNotConfigured
+		}
+		scope := corrections.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}
+		filter := corrections.Filter{DocumentID: r.DocumentID, VersionID: r.VersionID, Query: r.Query, State: r.State, ApprovedFrom: r.ApprovedFrom, ApprovedTo: r.ApprovedTo, Page: r.Page, PageSize: r.PageSize, History: r.CanWrite}
+		if r.Action == "business_correction_document" {
+			return s.corrections.Document(ctx, scope, filter, s.titles)
+		}
+		return s.corrections.Documents(ctx, scope, filter, s.titles)
+	}
 	if strings.HasPrefix(r.Action, "business_attachment_") {
 		return s.executeAttachment(ctx, r)
 	}

@@ -55,6 +55,7 @@
           <div><dt>登记时间</dt><dd>{{ formatDate(selected.created_at) }}</dd></div>
         </dl>
         <div class="detail-actions"><t-button variant="outline" @click="expandNode('provenance')">内容溯源</t-button><t-button variant="outline" @click="expandNode('version-ancestry')">版本历史</t-button>
+          <t-button v-if="selected.type==='document_version' && selected.document_id" variant="outline" @click="$emit('correction',selected.knowledge_base_id || kb,selected.document_id,selected.id, !selected.current || (!!selected.state && selected.state!=='active'))">反馈文档</t-button>
           <t-button v-if="selected.document_id" theme="primary" @click="$emit('open',selected.document_id,nodeTitle(selected),selected.knowledge_base_id)">打开文档详情</t-button>
         </div>
       </section>
@@ -75,7 +76,7 @@ import { graphError, layoutGraph, modes, nodeTitle, stateLabels, typeLabels } fr
 import LineageCanvas from './LineageCanvas.vue'
 
 const props = defineProps<{ scope?:string; documentId?:string }>()
-defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string] }>()
+defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string]; correction:[kb:string,documentId:string,versionId:string,history:boolean] }>()
 const route = useRoute(), router=useRouter(), auth = useAuthStore()
 const associationReturn=computed(()=>{
   const from=route.query.associationFrom

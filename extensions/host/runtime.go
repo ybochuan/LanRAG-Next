@@ -17,6 +17,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/bridge"
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
 	"github.com/ybochuan/LanRAG-Next/extensions/cleanup"
+	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
 	"github.com/ybochuan/LanRAG-Next/extensions/ingest"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
@@ -212,6 +213,11 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		metricsHandler = metricsCollector.handler(nil)
 	}
 	services := bridge.Services{Metrics: metricsHandler}
+	var correctionService *corrections.Service
+	correctionKBs := cfg.CorrectionKBIDs
+	if correctionKBs == nil {
+		correctionKBs = cfg.KnowledgeBaseIDs
+	}
 	var localReady atomic.Bool
 	defer localReady.Store(false)
 	services.Ready = func(ctx context.Context) bool {
@@ -238,6 +244,8 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		workbenchAttachments = attachmentworkbench.New(db, attachmentSource, workbenchImporter).WithRelations(businessService)
 		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs, NativeDBPath: cfg.NativeDBPath}
 		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
+		correctionService = corrections.New(db, time.Now)
+		services.CorrectionSources = &bridge.CorrectionSourcesHandler{Key: cfg.ManagementKey, TenantID: cfg.TenantID, KnowledgeBaseIDs: cfg.KnowledgeBaseIDs, EnabledKnowledgeBaseIDs: correctionKBs, Corrections: correctionService}
 		if cfg.NativeDBPath != "" {
 			attachmentCleanup = attachmentcleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, attachmentSource.DeleteAttachment, cfg.RetryDelay)
 			attachmentCleanup.WithResourceReclaimer(func(ctx context.Context, kb, doc, hash, resources string) (string, error) {
@@ -279,7 +287,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		for _, scope := range scopes {
 			proofScopes = append(proofScopes, provenance.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID})
 		}
-		proofs := provenance.NewHTTPServer(sourceRuns, sourceLedger, cfg.ManagementKey, proofScopes)
+		proofs := provenance.NewHTTPServer(sourceRuns, sourceLedger, cfg.ManagementKey, proofScopes).WithCorrectionKBs(correctionKBs)
 		server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/provenance/") || r.URL.Path == "/bridge/before-generate" {
 				proofs.ServeHTTP(w, r)
@@ -299,6 +307,28 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	launch := func(fn func(context.Context) error) {
 		tasks.Add(1)
 		go func() { defer tasks.Done(); backgroundResult <- fn(runCtx) }()
+	}
+	if correctionService != nil {
+		dir := cfg.CorrectionDir
+		if dir == "" {
+			dir = filepath.Join(filepath.Dir(cfg.DBPath), "corrections")
+		}
+		launch(func(ctx context.Context) error {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				for _, scope := range lifecycleScopes {
+					if err := correctionService.Project(ctx, dir, corrections.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID}); err != nil && ctx.Err() == nil {
+						report("correction_projection_failed")
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+				}
+			}
+		})
 	}
 	if workbenchAttachments != nil {
 		launch(func(ctx context.Context) error {

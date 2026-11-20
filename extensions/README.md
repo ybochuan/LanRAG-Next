@@ -68,6 +68,8 @@ go run -mod=readonly ./cmd/extension-host
 | 可选环境变量 | 默认值 | 范围／用途 |
 |---|---|---|
 | AGENTRAG_RECONCILE_INTERVAL | 1m | 对账周期 |
+| AGENTRAG_CORRECTION_DIR | 扩展 DB 同级 `corrections` | 受管反馈 Markdown 目录，使用私有本地目录 |
+| AGENTRAG_CORRECTION_KB_IDS | 全部已配置 KB | 勘误候选检索与逐轮证据的 KB ID 白名单，逗号分隔。`[]` 暂停全部 KB 的新接线，保留审核状态、Markdown 投影及原有指导行为 |
 | AGENTRAG_OUTBOX_POLL_INTERVAL | 1s | 空闲/失败后的轮询 |
 | AGENTRAG_OUTBOX_LEASE | 1m | 单次投影租约及Handler超时 |
 | AGENTRAG_OUTBOX_RETRY_DELAY | 5s | 失败后的退避 |

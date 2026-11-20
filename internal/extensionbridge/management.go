@@ -26,6 +26,10 @@ type ManagementRequest struct {
 	State                  string          `json:"state,omitempty"`
 	Title                  string          `json:"title,omitempty"`
 	GraphMode              string          `json:"graph_mode,omitempty"`
+	VersionID              string          `json:"version_id,omitempty"`
+	Query                  string          `json:"query,omitempty"`
+	ApprovedFrom           string          `json:"approved_from,omitempty"`
+	ApprovedTo             string          `json:"approved_to,omitempty"`
 	ExpectedRevision       int64           `json:"expected_revision"`
 	Annotations            json.RawMessage `json:"annotations,omitempty"`
 	Rules                  json.RawMessage `json:"rules,omitempty"`

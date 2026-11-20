@@ -31,6 +31,21 @@ func TestConfigDefaultsAndCompleteWorker(t *testing.T) {
 	}
 }
 
+func TestConfigCorrectionRollout(t *testing.T) {
+	values := workerEnv()
+	values["AGENTRAG_CORRECTION_DIR"] = "test-correction-root"
+	values["AGENTRAG_CORRECTION_KB_IDS"] = " kb-b "
+	cfg, err := LoadConfig(envReader(values))
+	if err != nil || cfg.CorrectionDir != "test-correction-root" || len(cfg.CorrectionKBIDs) != 1 || cfg.CorrectionKBIDs[0] != "kb-b" {
+		t.Fatalf("wrong rollout scope: %+v %v", cfg.CorrectionKBIDs, err)
+	}
+	values["AGENTRAG_CORRECTION_KB_IDS"] = "[]"
+	cfg, err = LoadConfig(envReader(values))
+	if err != nil || cfg.CorrectionKBIDs == nil || len(cfg.CorrectionKBIDs) != 0 {
+		t.Fatalf("explicit disable must differ from unset: %+v %v", cfg.CorrectionKBIDs, err)
+	}
+}
+
 func TestConfigRejectsInvalidInputsWithoutEchoingValues(t *testing.T) {
 	for _, change := range []func(map[string]string){
 		func(e map[string]string) { delete(e, "AGENTRAG_WEKNORA_API_KEY") },
@@ -38,6 +53,8 @@ func TestConfigRejectsInvalidInputsWithoutEchoingValues(t *testing.T) {
 		func(e map[string]string) { e["AGENTRAG_TENANT_ID"] = "test-secret" },
 		func(e map[string]string) { e["AGENTRAG_KB_IDS"] = "kb-a,kb-a" },
 		func(e map[string]string) { e["AGENTRAG_KB_IDS"] = "kb-a," },
+		func(e map[string]string) { e["AGENTRAG_CORRECTION_KB_IDS"] = "test-secret" },
+		func(e map[string]string) { e["AGENTRAG_CORRECTION_KB_IDS"] = "kb-b,kb-b" },
 		func(e map[string]string) { e["AGENTRAG_RECONCILE_INTERVAL"] = "0s" },
 		func(e map[string]string) { e["AGENTRAG_OUTBOX_LEASE"] = "1ns" },
 		func(e map[string]string) { e["AGENTRAG_SHUTDOWN_TIMEOUT"] = "25h" },

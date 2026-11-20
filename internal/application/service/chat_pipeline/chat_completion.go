@@ -55,7 +55,9 @@ func (p *PluginChatCompletion) OnEvent(
 	chatMessages = modelContext.EncodeMessages(chatMessages)
 	reportModelContextLeaks(ctx, "Completion", modelContext, chatMessages)
 	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
-	inputs, complete := sourceInputsForModel(chatManage)
+	ctx = extensionbridge.WithCorrectionQuery(ctx, correctionQuery(chatManage))
+	ctx = extensionbridge.WithCorrectionSourceHandles(ctx, modelContext.ChunkHandle)
+	inputs, complete := sourceInputsForModel(ctx, chatManage)
 	ctx, chatMessages, sourceCall, err := extensionbridge.BeginGuidedSourceCall(ctx, chatMessages, opt, inputs, complete)
 	if err != nil {
 		finishSourceModelRun(ctx, nil, false)
@@ -92,6 +94,7 @@ func (p *PluginChatCompletion) OnEvent(
 		"prompt_tokens":     chatResponse.Usage.PromptTokens,
 	})
 	chatManage.ChatResponse = chatResponse
+	attachCorrectionReferences(chatManage.MergeResult, sourceCall.CorrectionItems())
 	sourceSucceeded = true
 	return next()
 }

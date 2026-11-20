@@ -155,10 +155,21 @@ type MatchedImage struct {
 	URL             string `json:"url"`
 }
 
+// CorrectionReference links generation evidence to a versioned reviewed correction.
+type CorrectionReference struct {
+	ID         string `json:"id"`
+	Revision   int64  `json:"revision"`
+	DocumentID string `json:"document_id"`
+	VersionID  string `json:"version_id"`
+	ChunkID    string `json:"chunk_id"`
+}
+
 // SearchResult represents the search result
 type SearchResult struct {
 	// CitationSources retains independently citeable bodies after context expansion.
 	CitationSources []*SearchResult `json:"-" gorm:"-"`
+	// CorrectionItems identifies reviewed evidence delivered with this source.
+	CorrectionItems []CorrectionReference `json:"correction_items,omitempty" gorm:"-"`
 	// ID
 	ID string `gorm:"column:id"              json:"id" extensions:"x-agent=chunk_id"`
 	// Content

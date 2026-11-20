@@ -131,6 +131,9 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 		if e != nil && e != sql.ErrNoRows {
 			return Result{}, e
 		}
+		if e == sql.ErrNoRows && (p.SupersedesCorrectionID != "" || p.SupersedesCorrectionRevision != 0) {
+			return Result{}, ErrInvalid
+		}
 		if e == nil {
 			switch c.Action {
 			case "feedback_approve":
@@ -262,6 +265,9 @@ WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=? AND status='active'`
 			}
 		}
 		_, e = tx.ExecContext(ctx, `UPDATE ext_feedback_staging SET status=?,revision=?,ready_at=? WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`, append([]any{out.Status, out.Revision, ready}, args(c.Scope, c.ID)...)...)
+		if e == nil && c.Action == "feedback_activate" && f.anchor != nil {
+			e = s.publishCorrection(ctx, tx, c, f.anchor, s.now())
+		}
 		return out, e
 	})
 }

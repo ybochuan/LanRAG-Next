@@ -89,11 +89,11 @@ type sourceInputRequest struct {
 	Evidence    SourceInput `json:"evidence"`
 }
 type sourceStepResult struct {
-	OperationID string `json:"operation_id"`
-	StepID      string `json:"step_id"`
-	Outcome     string `json:"outcome"`
-	InputHash   string `json:"input_hash"`
-	OutputHash  string `json:"output_hash"`
+	OperationID        string `json:"operation_id"`
+	StepID             string `json:"step_id"`
+	Outcome            string `json:"outcome"`
+	InputHash          string `json:"input_hash"`
+	OutputHash         string `json:"output_hash"`
 	AnnotationDelivery string `json:"annotation_delivery,omitempty"`
 }
 type sourceFinish struct {
@@ -328,12 +328,13 @@ func finishSourceStepHashes(ctx context.Context, input, output, outcome, operati
 // SourceCall holds only request-local transport digests. Host owns all run facts.
 // Record and Finish are called by the single consumer of this model/tool call.
 type SourceCall struct {
-	ctx       context.Context
-	inputHash string
-	output    hash.Hash
-	operation string
+	ctx                context.Context
+	inputHash          string
+	output             hash.Hash
+	operation          string
 	annotationDelivery string
-	err       error
+	correctionItems    []types.CorrectionReference
+	err                error
 }
 
 // BeginSourceCall proves consumed fields before execution. Unsupported input

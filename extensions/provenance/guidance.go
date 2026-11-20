@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
 	"github.com/ybochuan/LanRAG-Next/extensions/guidance"
 )
 
@@ -14,6 +15,8 @@ import (
 type GuidanceRequest struct {
 	StepID              string               `json:"step_id"`
 	CallID              string               `json:"call_id"`
+	CorrectionEvidence  bool                 `json:"correction_evidence,omitempty"`
+	Query               string               `json:"query,omitempty"`
 	ConsumedToolOutputs []ConsumedToolOutput `json:"consumed_tool_outputs,omitempty"`
 }
 
@@ -36,7 +39,7 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 	if !r.available() {
 		return out, ErrUnavailable
 	}
-	if q.StepID != "" && !id(q.StepID) || !digest(q.CallID) || len(q.ConsumedToolOutputs) > 128 || q.StepID == "" && len(q.ConsumedToolOutputs) != 0 {
+	if q.StepID != "" && !id(q.StepID) || !digest(q.CallID) || len(q.ConsumedToolOutputs) > 128 || !corrections.ValidQuery(q.Query) || q.StepID == "" && len(q.ConsumedToolOutputs) != 0 {
 		return out, ErrInvalid
 	}
 	err = r.db.Write(ctx, func(tx *sql.Tx) error {
@@ -61,7 +64,7 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 		if err != nil {
 			return err
 		}
-		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID, StepID: q.StepID, ConsumedToolSteps: steps}
+		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID, StepID: q.StepID, ConsumedToolSteps: steps, CorrectionEvidence: q.CorrectionEvidence, Query: q.Query, Now: r.now()}
 		selection, err := guidance.SelectTx(ctx, tx, scope, q.CallID)
 		if err != nil {
 			return err
@@ -72,11 +75,13 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 			}
 		}
 		out = GuidanceResult{Selection: selection, StepID: q.StepID}
-		if (selection.Content == "" && selection.AnnotationContent == "") || q.StepID == "" {
+		if (selection.Content == "" && selection.AnnotationContent == "" && selection.CorrectionContent == "") || q.StepID == "" {
 			return nil
 		}
 		var instruction any = selection.Content
-		if selection.AnnotationContent != "" {
+		if selection.CorrectionContent != "" {
+			instruction = []string{selection.Content, selection.AnnotationPolicy, selection.AnnotationContent, selection.CorrectionContent}
+		} else if selection.AnnotationContent != "" {
 			instruction = []string{selection.Content, selection.AnnotationPolicy, selection.AnnotationContent}
 		}
 		body, err := json.Marshal(instruction)

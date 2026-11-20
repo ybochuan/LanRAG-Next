@@ -48,6 +48,9 @@
           </button>
         </header>
 
+        <div v-if="sourceTarget?.knowledgeBaseId && sourceTarget.correctionItems?.length" class="reference-corrections">
+          <RouterLink v-for="item in sourceTarget.correctionItems" :key="item.id+':'+item.revision" :to="correctionRoute(sourceTarget.knowledgeBaseId, item.document_id, item.version_id, item)">{{ t('workbench.workspace.correctionDocuments') }} {{ item.id }}</RouterLink>
+        </div>
         <ChatReferenceSourceView
           v-if="sourceTarget"
           class="chat-references-panel__source"
@@ -161,6 +164,9 @@
                   </div>
                 </template>
               </component>
+              <div v-if="!embeddedMode && item.knowledgeBaseId && item.correctionItems?.length" class="reference-corrections">
+                <RouterLink v-for="correction in item.correctionItems" :key="correction.id+':'+correction.revision" :to="correctionRoute(item.knowledgeBaseId, correction.document_id, correction.version_id, correction)">{{ t('workbench.workspace.correctionDocuments') }} {{ correction.id }}</RouterLink>
+              </div>
             </article>
           </section>
         </div>
@@ -185,6 +191,7 @@ import { REFERENCES_PANEL_WIDTH, useChatReferencesDrawer } from '@/composables/u
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 import ChatReferenceSourceView from '@/components/ChatReferenceSourceView.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
+import { correctionRoute } from '@/views/feedback/model'
 import {
   buildReferenceSections,
   formatReferenceSnippet,
@@ -278,6 +285,7 @@ function openItemSource(item: ReferenceListItem) {
     knowledgeBaseId: item.knowledgeBaseId,
     title: item.title,
     fileName: item.fileName,
+    correctionItems: item.correctionItems,
   })
 }
 
@@ -668,6 +676,14 @@ watch(visible, (open) => {
   min-width: 0;
 }
 
+.reference-corrections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
+}
+.reference-corrections a { color: var(--td-brand-color); }
 .reference-item__source {
   display: flex;
   align-items: center;

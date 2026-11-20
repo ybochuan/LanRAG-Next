@@ -63,6 +63,10 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	var err error
 	// This phase has its own single overflow retry. The last tool results and
 	// the tool-free synthesis request differ from the preceding ReAct round.
+	toolChoice := "none"
+	if ctx.Value(currentKnowledgeEvidenceKey{}) == true {
+		toolChoice = ""
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -80,8 +84,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 				RuntimeNotice:       runtimeNotice,
 				Temperature:         e.config.Temperature,
 				MaxCompletionTokens: budget,
+				ToolChoice:          toolChoice,
 				PromptCacheKey:      sessionID,
-				ToolChoice:          "none",
 				Thinking:            new(false), // A nil preference can enable the provider's default thinking mode.
 			},
 			func(chunk *types.StreamResponse, _ string) {
@@ -163,6 +167,10 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		answerStreamed, providerDone, terminalContent = false, false, ""
 		splitter = agenttools.NewThinkStreamSplitter()
 	}
+	if err == errNoCurrentKnowledgeEvidence {
+		e.finishWithoutKnowledgeEvidence(ctx, state, sessionID)
+		return nil
+	}
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
@@ -170,6 +178,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			"error":      err.Error(),
 		})
 		return err
+	}
+	if llmResult.FinishReason != "content_filter" {
+		e.publishSearchReferences(ctx, state, sessionID, llmResult.SearchReferences)
 	}
 	_, tail := splitter.Flush()
 	_ = e.eventBus.Emit(ctx, event.Event{

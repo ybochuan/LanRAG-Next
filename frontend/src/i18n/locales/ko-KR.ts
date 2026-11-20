@@ -9458,6 +9458,8 @@ export default {
       "families": "업무 패밀리",
       "associations": "관계",
       "feedbackGovernance": "피드백 검토",
+      "feedbackMaterials": "피드백 자료",
+      "correctionDocuments": "정정 문서",
       "revisions": "개정 발행",
       "lineage": "관계 그래프"
     },

@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/ybochuan/LanRAG-Next/extensions/guidance"
 )
 
 func TestGuidanceRequiresActualModelStepAndRollsBackFailedBinding(t *testing.T) {
@@ -90,11 +92,12 @@ func TestGuidanceUsesOnlyConsumedAgentSearchOutput(t *testing.T) {
 			"INSERT INTO ext_lineage_node VALUES('v1','7','kb','document_version','doc','now')",
 			"INSERT INTO ext_document_version_family VALUES('family','7','kb','doc','','v1','v1',1,'now','now')",
 			"INSERT INTO ext_document_version VALUES('v1','7','kb','family','doc','" + contentHash + "',1,'event-doc','','fixture','now')",
-			`INSERT INTO ext_source_snapshot_evidence VALUES('7','kb','v1','{"chunks":[{"id":"pin","content_hash":"` + contentHash + `"}]}','` + contentHash + `')`,
+			`INSERT INTO ext_source_snapshot_evidence VALUES('7','kb','v1','{"chunks":[{"id":"pin","content_hash":"` + contentHash + `","chunk_index":0}]}','` + contentHash + `')`,
 			"INSERT INTO ext_feedback_events VALUES('7','kb','review','manual','review','',0,'now')",
-			"INSERT INTO ext_feedback_staging VALUES('7','kb','review','review','Use five working days','medium','approved',2,'now')",
+			"INSERT INTO ext_feedback_staging VALUES('7','kb','review','review','Use five working days','medium','active',3,'now')",
 			`INSERT INTO ext_qa_feedback(tenant_id,knowledge_base_id,feedback_id,submitted_at,rating,reason,text,submitted_context,citation_chunks,feedback_anchor,status,revision) VALUES('7','kb','review','now','correction','','','{}','[]','{"document_id":"doc","version_id":"v1","chunk_id":"pin","content_hash":"` + contentHash + `"}','approved',2)`,
-			"INSERT INTO ext_feedback_guidances VALUES('7','kb','guide','review','feedback','review','Use five working days',0.75,'active',1,'now')",
+			"INSERT INTO ext_feedback_guidances VALUES('7','kb','review','review','feedback','review','Use five working days',0.75,'active',1,'now')",
+			"INSERT INTO ext_feedback_corrections VALUES('7','kb','review','doc','v1','pin',0,'" + contentHash + "','Five working days','Submission deadline','2020-01-01T00:00:00Z','2020-01-02T00:00:00Z',NULL)",
 		} {
 			if _, err := tx.Exec(stmt); err != nil {
 				return err
@@ -173,5 +176,46 @@ func TestGuidanceUsesOnlyConsumedAgentSearchOutput(t *testing.T) {
 				}
 			}
 		})
+	}
+	var q GuidanceRequest
+	for _, name := range []string{"first", "second", "third", "fourth", "fifth"} {
+		sum := sha256.Sum256([]byte("opt-in-" + name))
+		q = GuidanceRequest{StepID: begin(h, "evidence-"+name, "model"), CallID: hex.EncodeToString(sum[:]), ConsumedToolOutputs: []ConsumedToolOutput{pin}, CorrectionEvidence: true, Query: "What is the submission deadline?"}
+		out, err := r.PrepareGuidance(ctx, h, q)
+		if err != nil || !strings.Contains(out.CorrectionContent, "勘误 1\n  适用条件：Submission deadline\n  修正口径：Five working days") || out.AnnotationPolicy == "" || out.AnnotationContent != "" || len(out.Items) != 0 || out.Units != 0 || len(out.CorrectionItems) != 1 {
+			t.Fatalf("round %s issued wrong evidence: %+v %v", name, out, err)
+		}
+		if item := out.CorrectionItems[0]; item.ID != "review" || item.Revision != 3 || item.DocumentID != "doc" || item.VersionID != "v1" || item.ChunkID != "pin" {
+			t.Fatalf("incorrect evidence identity: %+v", item)
+		}
+	}
+	other := q
+	other.Query = "Weather forecast"
+	if out, err := r.PrepareGuidance(ctx, h, other); err != nil || out.CorrectionContent != "" {
+		t.Fatalf("unmatched retry leaked evidence: %+v %v", out, err)
+	}
+	absence := q
+	absence.ConsumedToolOutputs = nil
+	if out, err := r.PrepareGuidance(ctx, h, absence); err != nil || out.CorrectionContent != "" {
+		t.Fatalf("retry without consumed chunk leaked evidence: %+v %v", out, err)
+	}
+	if err := r.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE ext_feedback_staging SET status='withdrawn',revision=revision+1 WHERE feedback_id='review'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := r.PrepareGuidance(ctx, h, q); err != nil || out.CorrectionContent != "" {
+		t.Fatalf("replayed withdrawn correction: %+v %v", out, err)
+	}
+	// A rollback request still uses the same current publication gate.
+	if err := r.db.Write(ctx, func(tx *sql.Tx) error {
+		legacy, err := guidance.SelectTx(ctx, tx, guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: "user", SessionID: "session", RunID: h.RunID, StepID: q.StepID, ConsumedToolSteps: []string{pin.StepID}, Now: r.now()}, strings.Repeat("f", 64))
+		if err == nil && legacy.AnnotationContent != "" {
+			t.Errorf("legacy rollback returned withdrawn annotation: %+v", legacy)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

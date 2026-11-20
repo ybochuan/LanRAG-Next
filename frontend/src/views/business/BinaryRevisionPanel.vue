@@ -5,8 +5,14 @@
       <span class="subtle">PDF / DOCX / XLSX / PPTX</span>
     </div>
     <p class="subtle">上传修订后的正式源文件，解析完成后建立修订提案并绑定该文件。</p>
-    <form @submit.prevent="submit(false)">
-      <DocumentPicker v-model="sourceId" :kb="kb" label="原制度文档" searchable :disabled="disabled || uploading || !!recovery" />
+    <t-alert v-if="differentRecovery" role="alert" theme="warning" class="notice">本知识库已有其他待核对的修订操作。请先在修订发布页完成核对。
+      <RouterLink :to="{ name: 'documents', query: { kb, view: 'revisions' } }">前往修订发布</RouterLink>
+    </t-alert>
+    <form v-else @submit.prevent="submit(false)">
+      <p v-if="initialCorrection" class="subtle">源文档 · {{ initialCorrection.title || initialCorrection.document_id }} · 版本 {{ initialCorrection.version_id }}</p>
+      <p v-else-if="recovery?.correction" class="subtle">源文档 · {{ recovery.source }} · 版本 {{ recovery.correction.version_id }}</p>
+      <DocumentPicker v-else v-model="sourceId" :kb="kb" label="原制度文档" searchable :disabled="disabled || uploading || !!recovery" />
+      <p v-if="correction" class="subtle">已选勘误 · {{ correction.id }} · 修订 {{ correction.revision }}</p>
       <label v-if="!recovery?.target">修订后文件
         <t-upload v-model="files" :auto-upload="false" :multiple="false" :max="1" accept=".pdf,.docx,.xlsx,.pptx" :disabled="disabled || uploading" @change="chooseFile" />
       </label>
@@ -33,7 +39,7 @@
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import type { UploadFile } from 'tdesign-vue-next'
 import { batchQueryKnowledge, downKnowledgeDetails, listKnowledgeFiles, reparseKnowledge, uploadKnowledgeFile } from '@/api/knowledge-base'
-import { list, write } from '@/api/business'
+import { list, verifyCorrectionRevision, write, type CorrectionRevisionSource } from '@/api/business'
 import { useAuthStore } from '@/stores/auth'
 import DocumentPicker from './DocumentPicker.vue'
 import {
@@ -42,7 +48,7 @@ import {
   type BinaryRevisionRecovery, type NativeDocument, type NativePage, type RecoveryStage,
 } from './binaryRevisionRecovery'
 
-const props = defineProps<{ kb: string; disabled: boolean }>()
+const props = defineProps<{ kb: string; disabled: boolean; initialCorrection?: CorrectionRevisionSource }>()
 const emit = defineEmits<{ created: []; locked: [value: boolean] }>()
 const auth = useAuthStore()
 const scopeKey = computed(() => recoveryKey(auth.user?.id, auth.effectiveTenantId, props.kb))
@@ -50,6 +56,12 @@ const sourceId = ref('')
 const files = ref<UploadFile[]>([])
 const file = ref<File>()
 const recovery = ref<BinaryRevisionRecovery>()
+const correction = computed(() => props.initialCorrection ?? recovery.value?.correction)
+const differentRecovery = computed(() => {
+  const initial = props.initialCorrection, stored = recovery.value
+  return !!initial && !!stored && (stored.source !== initial.document_id || stored.correction?.id !== initial.id ||
+    stored.correction.version_id !== initial.version_id || stored.correction.revision !== initial.revision)
+})
 const uploading = ref(false)
 const storageUnavailable = ref(false)
 const canReparse = ref(false)
@@ -66,10 +78,10 @@ function stop() {
   }
 }
 
-watch(scopeKey, key => {
+watch([scopeKey, () => props.initialCorrection], ([key, initial]) => {
   stop()
   recovery.value = undefined
-  sourceId.value = ''
+  sourceId.value = initial?.document_id ?? ''
   files.value = []
   file.value = undefined
   canReparse.value = false
@@ -79,7 +91,7 @@ watch(scopeKey, key => {
   if (!key) return
   try {
     recovery.value = readRecovery(sessionStorage.getItem(key))
-    sourceId.value = recovery.value?.source ?? ''
+    sourceId.value = initial?.document_id ?? recovery.value?.source ?? ''
   } catch {
     storageUnavailable.value = true
     error.value = '无法读取本标签页的修订恢复记录。'
@@ -110,7 +122,7 @@ function endRecovery() {
   if (!recovery.value || props.disabled || uploading.value) return
   try {
     persist(scopeKey.value)
-    sourceId.value = ''
+    sourceId.value = props.initialCorrection?.document_id ?? ''
     files.value = []
     file.value = undefined
     canReparse.value = false
@@ -124,8 +136,10 @@ async function submit(retryParse: boolean) {
   const key = scopeKey.value
   const kb = props.kb
   const selectedFile = file.value
-  const selectedSource = sourceId.value
-  if (!key || props.disabled || storageUnavailable.value || uploading.value || (!recovery.value && (!selectedSource || !selectedFile))) return
+  const initial = props.initialCorrection
+  const selectedSource = initial?.document_id ?? sourceId.value
+  if (!key || props.disabled || storageUnavailable.value || uploading.value || differentRecovery.value ||
+    (!recovery.value && (!selectedSource || !selectedFile))) return
   const token = ++run
   const current = () => token === run && key === scopeKey.value
   function ensureCurrent() {
@@ -245,8 +259,16 @@ async function submit(retryParse: boolean) {
   canReparse.value = false
   emit('locked', true)
   try {
-    operation = recovery.value ?? await startRecovery(selectedSource, selectedFile!)
-    if (!recovery.value) save(operation)
+    if (recovery.value) operation = recovery.value
+    else {
+      if (initial) {
+        try { await verifyCorrectionRevision(kb, initial) }
+        catch { throw new RecoveryError('所选勘误已变化或暂时无法核对，请返回勘误文档重新选择。') }
+        ensureCurrent()
+      }
+      operation = await startRecovery(selectedSource, selectedFile!, initial)
+      save(operation)
+    }
     if (!operation.target) await recoverUpload()
     stage = '绑定'
     progress.value = '正在核对提案…'
@@ -259,7 +281,10 @@ async function submit(retryParse: boolean) {
         progress.value = '正在核对并创建提案…'
         const result = await mutate(() => write(kb, 'revision_create_binary', {
           operation_id: operation.createOperation, expected_revision: 0,
-          business: { payload: { document_id: operation.source } },
+          business: { payload: {
+            document_id: operation.source,
+            ...(operation.correction ? { guidance_ids: [operation.correction.id] } : {}),
+          } },
         }), value => !checkedCreation(value))
         save({ ...operation, proposal: checkedCreation(result)! })
       }
@@ -276,7 +301,7 @@ async function submit(retryParse: boolean) {
     ensureCurrent()
     persist(key)
     notice.value = '已确认修订提案（' + operation.proposal!.id + '）绑定该文件，请在列表中查看。'
-    sourceId.value = ''
+    sourceId.value = props.initialCorrection?.document_id ?? ''
     files.value = []
     file.value = undefined
     emit('created')

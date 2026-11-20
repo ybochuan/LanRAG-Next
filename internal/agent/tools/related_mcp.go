@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
-	"github.com/Tencent/WeKnora/internal/types"
 	"os"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // TrustedRelatedMCPService binds the exception to the authenticated local Host.
@@ -13,6 +15,28 @@ func TrustedRelatedMCPService(s *types.MCPService) bool {
 }
 func trustedRelatedTool(t *MCPTool) bool {
 	return t != nil && t.mcpTool != nil && (t.mcpTool.Name == "query_related_docs" || t.mcpTool.Name == "search_archived_documents") && TrustedRelatedMCPService(t.service)
+}
+
+// HasScopedArchiveService checks whether native MCP discovery can route an explicit historical request.
+func (r *ToolRegistry) HasScopedArchiveService(ctx context.Context) bool {
+	tool, err := r.GetTool(ToolDiscoverMCPTools)
+	if err != nil {
+		return false
+	}
+	discovery, ok := tool.(*MCPDiscoverTool)
+	if !ok || discovery.catalog.authorize(ctx) != nil {
+		return false
+	}
+	for _, entry := range discovery.catalog.servers {
+		entry.mu.Lock()
+		service := entry.service
+		trusted := TrustedRelatedMCPService(service) && len(service.AgentRAGScope) > 0
+		entry.mu.Unlock()
+		if trusted {
+			return true
+		}
+	}
+	return false
 }
 
 // RelatedMCPServiceScope encodes only native-authorized targets, never model args.

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 )
 
 // HTTPRequest is exclusively a server-to-server DTO. Browser/model arguments
@@ -36,10 +37,11 @@ type HTTPRequest struct {
 // HTTPServer serves proof APIs on the existing loopback listener. A missing
 // worker DB/provider/key cannot fall back to an allow policy.
 type HTTPServer struct {
-	runs   *Runs
-	ledger *Ledger
-	key    string
-	scopes map[Scope]bool
+	runs          *Runs
+	ledger        *Ledger
+	key           string
+	scopes        map[Scope]bool
+	correctionKBs []string
 }
 
 // NewHTTPServer installs no fixtures and owns no DB or goroutine lifetime.
@@ -50,6 +52,13 @@ func NewHTTPServer(runs *Runs, ledger *Ledger, key string, scopes []Scope) *HTTP
 			s.scopes[scope] = true
 		}
 	}
+	return s
+}
+
+// WithCorrectionKBs restricts persistent evidence to enabled knowledge bases.
+// Nil retains the default of all configured scopes.
+func (s *HTTPServer) WithCorrectionKBs(ids []string) *HTTPServer {
+	s.correctionKBs = slices.Clone(ids)
 	return s
 }
 
@@ -147,6 +156,9 @@ func (s *HTTPServer) execute(ctx context.Context, path string, q HTTPRequest) (a
 	switch path {
 	case "/bridge/before-generate":
 		if q.Guidance != nil {
+			if s.correctionKBs != nil && !slices.Contains(s.correctionKBs, q.Handle.Scope.KnowledgeBaseID) {
+				q.Guidance.CorrectionEvidence = false
+			}
 			return s.runs.PrepareGuidance(ctx, *q.Handle, *q.Guidance)
 		}
 	case "/provenance/runs/steps":

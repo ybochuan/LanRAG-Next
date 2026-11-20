@@ -1,4 +1,4 @@
-import type { BusinessRecord, BusinessResult } from '@/api/business'
+import type { BusinessRecord, BusinessResult, CorrectionRevisionReference } from '@/api/business'
 
 export const uploadMarker = 'agentrag_binary_revision_upload'
 export const pageSize = 100
@@ -8,8 +8,11 @@ const nativeHash = /^[a-f0-9]{32}$/
 
 export type RecoveryStage = '上传' | '解析' | '创建提案' | '绑定'
 
+type RevisionCorrection = Pick<CorrectionRevisionReference, 'id' | 'revision' | 'version_id'>
+
 export interface BinaryRevisionRecovery {
   source: string
+  correction?: RevisionCorrection
   fileType: string
   size: number
   fingerprint: string
@@ -67,11 +70,13 @@ function operationId() {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export async function startRecovery(source: string, file: File): Promise<BinaryRevisionRecovery> {
+export async function startRecovery(source: string, file: File, correction?: CorrectionRevisionReference): Promise<BinaryRevisionRecovery> {
   const type = fileType(file)
   if (!fileTypes.includes(type) || file.size === 0) throw new RecoveryError('请选择非空的 PDF、DOCX、XLSX 或 PPTX 文件。')
   return {
-    source, fileType: type, size: file.size, fingerprint: await fingerprint(file),
+    source,
+    ...(correction ? { correction: { id: correction.id, version_id: correction.version_id, revision: correction.revision } } : {}),
+    fileType: type, size: file.size, fingerprint: await fingerprint(file),
     uploadOperation: operationId(), createOperation: operationId(), bindOperation: operationId(), uploadAttempted: false,
   }
 }
@@ -88,6 +93,9 @@ export function readRecovery(raw: string | null): BinaryRevisionRecovery | undef
     !Number.isSafeInteger(recovery.size) || recovery.size <= 0 || !/^[a-f0-9]{64}$/.test(recovery.fingerprint) ||
     ![recovery.uploadOperation, recovery.createOperation, recovery.bindOperation].every(id => nativeHash.test(id)) ||
     typeof recovery.uploadAttempted !== 'boolean' ||
+    (recovery.correction !== undefined && (!recovery.correction || typeof recovery.correction.id !== 'string' || !recovery.correction.id ||
+      typeof recovery.correction.version_id !== 'string' || !recovery.correction.version_id ||
+      !Number.isSafeInteger(recovery.correction.revision) || recovery.correction.revision < 1)) ||
     (recovery.target && (!recovery.uploadAttempted || !recovery.target.id || !nativeHash.test(recovery.target.hash))) ||
     (recovery.proposal && (!recovery.target || !recovery.proposal.id || recovery.proposal.revision !== 1)) ||
     (recovery.reparseFrom !== undefined && (!recovery.target || typeof recovery.reparseFrom !== 'string' || !recovery.reparseFrom))) {
@@ -136,7 +144,9 @@ export function checkProposal(rows: BusinessRecord[], recovery: BinaryRevisionRe
   // The native list returns record_kind=revision for a regular proposal.
   // This value predates the frontend's split-only record_kind union.
   const kind: string | undefined = row?.record_kind
-  if (!row || row.id !== proposal.id || kind !== 'revision' || row.source_document_id !== recovery.source || row.proposed_patch !== '') {
+  const correction = recovery.correction
+  if (!row || row.id !== proposal.id || kind !== 'revision' || row.source_document_id !== recovery.source || row.proposed_patch !== '' ||
+    (correction && (row.source_version_id !== correction.version_id || row.guidance_ids?.length !== 1 || row.guidance_ids[0] !== correction.id))) {
     throw new RecoveryError('暂时无法核对原修订提案，请稍后继续核对。')
   }
   if (row.target_document_id === recovery.target?.id) return true

@@ -129,8 +129,9 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 		Thinking:            &thinking,
 	}
 	// The first text-only rewrite consumes the user's question and prompt templates.
-	// History, attachments, memory and images have no source adapter here.
-	complete := len(historyList) == 0 && !hasImages && len(chatManage.Attachments) == 0 && !hasMemory
+	// Prior user questions are safe to reuse. Attachments, memory and images
+	// lack a source adapter here.
+	complete := historyHasOnlyQuestions(ctx, historyList) && !hasImages && len(chatManage.Attachments) == 0 && !hasMemory
 	request := struct{ Messages, Options any }{messages, options}
 	modelCtx, sourceCall, err := extensionbridge.BeginSourceCall(modelCtx, "model", request, nil, complete)
 	if err != nil {
@@ -155,6 +156,9 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	// --- Parse structured output ---
 	p.parseOutput(chatManage, response.Content)
+	if chatManage.Intent == types.IntentFollowUp && len(historyList) > 0 && freshKnowledgeHistory(ctx) {
+		chatManage.Intent = types.IntentKBSearch
+	}
 
 	// Persist image description asynchronously — this DB write does not affect
 	// the current pipeline result, so it can run in the background.
@@ -320,6 +324,13 @@ func (p *PluginQueryUnderstand) buildPrompts(
 	}
 
 	conversationText := formatConversationHistory(historyList)
+	if len(historyList) > 0 && historyHasOnlyQuestions(ctx, historyList) {
+		systemPrompt += "\n\n## Current knowledge question\n" +
+			"Rewrite only the current User Question. If its subject is clear on its own, ignore the earlier questions. " +
+			"For an explicit reference or omission, use only the closest relevant earlier question to fill in the missing subject. " +
+			"Never combine earlier questions with the current question or add their topics, constraints, or answers. " +
+			"A follow-up that needs facts from the selected knowledge base still requires kb_search."
+	}
 
 	queryContent := chatManage.Query
 	if len(chatManage.Images) > 0 {
@@ -575,8 +586,10 @@ func formatConversationHistory(historyList []*types.History) string {
 		builder.WriteString("------BEGIN------\n")
 		builder.WriteString("User question: ")
 		builder.WriteString(h.Query)
-		builder.WriteString("\nAssistant answer: ")
-		builder.WriteString(h.Answer)
+		if h.Answer != "" {
+			builder.WriteString("\nAssistant answer: ")
+			builder.WriteString(h.Answer)
+		}
 		builder.WriteString("\n------END------\n")
 	}
 	return builder.String()

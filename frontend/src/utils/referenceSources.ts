@@ -1,4 +1,5 @@
 import type { SourceLocator } from './sourceLocator'
+import type { CorrectionReference } from '@/api/business'
 
 export type ReferenceItemKind = 'web' | 'document' | 'tool'
 
@@ -19,6 +20,7 @@ export type KnowledgeReferenceLike = {
   source_locators?: SourceLocator[]
   /** After merging a document's chunks: the first one with positions. */
   source_chunk_id?: string
+  correction_items?: CorrectionReference[]
 }
 
 export type ReferenceListItem = {
@@ -37,6 +39,7 @@ export type ReferenceListItem = {
   sourceChunkId?: string
   knowledgeId?: string
   knowledgeBaseId?: string
+  correctionItems?: CorrectionReference[]
   content?: string
 }
 
@@ -187,6 +190,7 @@ function buildDocumentItem(item: KnowledgeReferenceLike, index: number): Referen
     sourceChunkId: item.source_chunk_id,
     knowledgeId: item.knowledge_id,
     knowledgeBaseId: item.knowledge_base_id,
+    correctionItems: item.correction_items,
     snippet: truncateText(item.content || '', 220) || undefined,
     content: item.content,
   }
@@ -245,6 +249,11 @@ export function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): Knowled
     for (const chunkId of chunkIds) {
       if (!existing.chunk_ids?.includes(chunkId)) {
         existing.chunk_ids = [...(existing.chunk_ids || []), chunkId]
+      }
+    }
+    for (const correction of item.correction_items || []) {
+      if (!existing.correction_items?.some(other => correction.id === other.id && correction.revision === other.revision && correction.version_id === other.version_id)) {
+        existing.correction_items = [...(existing.correction_items || []), correction]
       }
     }
     if (content && !existing.content_parts?.includes(content)) {
@@ -355,6 +364,7 @@ export type ReferenceSourceTarget = {
   content?: string
   locators?: SourceLocator[]
   anchorText?: string
+  correctionItems?: CorrectionReference[]
 }
 
 /**
@@ -389,6 +399,7 @@ export function resolveReferenceSource(
     content: exact ? exact.content : undefined,
     locators: exact ? exact.source_locators : undefined,
     anchorText: target?.anchorText,
+    correctionItems: ref.correction_items?.filter(item => item.chunk_id === chunkId),
   }
 }
 

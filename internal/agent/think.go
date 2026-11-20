@@ -32,6 +32,7 @@ type streamLLMResult struct {
 	Usage              *types.TokenUsage
 	FinishReason       string // actual finish_reason from LLM (captured from last stream chunk)
 	StreamError        string // error message from stream (e.g., timeout), kept separate from Content
+	SearchReferences   []*types.SearchResult
 }
 
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
@@ -64,9 +65,14 @@ func (e *AgentEngine) streamLLMToEventBus(
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	inputs, complete := e.modelSourceInputs(messages)
-	if complete {
-		llmCtx = extensionbridge.WithConsumedToolOutputs(llmCtx, e.searchOutputs.consumed(llmCtx, messages))
+	outputs := e.searchOutputs.consumed(llmCtx, messages)
+	if ctx.Value(currentKnowledgeEvidenceKey{}) == true && len(outputs) == 0 {
+		return nil, errNoCurrentKnowledgeEvidence
 	}
+	if complete {
+		llmCtx = extensionbridge.WithConsumedToolOutputs(llmCtx, outputs)
+	}
+	llmCtx = extensionbridge.WithCorrectionSourceHandles(llmCtx, e.modelContext.ChunkHandle)
 	llmCtx, messages, sourceCall, sourceErr := extensionbridge.BeginGuidedSourceCall(llmCtx, messages, opts, inputs, complete)
 	if sourceErr != nil {
 		return nil, sourceErr
@@ -260,6 +266,9 @@ func (e *AgentEngine) streamLLMToEventBus(
 	}
 
 	sourceSucceeded = result.FinishReason != "" && ctx.Err() == nil
+	if complete && ctx.Err() == nil {
+		result.SearchReferences = e.searchOutputs.references(outputs, sourceCall.CorrectionItems())
+	}
 	return result, nil
 }
 
@@ -550,6 +559,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	logger.Infof(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d, emitted_events=%v",
 		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls), emittedEventTypes)
 
+	e.lastSearchRefs = llmResult.SearchReferences
 	inlineReasoning, cleanContent := agenttools.SplitThinkContent(llmResult.Content)
 	fullContent := strings.TrimSpace(cleanContent)
 
@@ -702,6 +712,10 @@ func (e *AgentEngine) callLLMWithRetry(
 				break
 			}
 		}
+	}
+	if errors.Is(err, errNoCurrentKnowledgeEvidence) {
+		e.finishWithoutKnowledgeEvidence(ctx, state, sessionID)
+		return nil, nil
 	}
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: %v", round, err)

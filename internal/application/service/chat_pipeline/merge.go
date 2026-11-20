@@ -54,6 +54,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 
 	// Step 1: Select input
 	searchResult := p.selectInputResults(ctx, chatManage)
+	searchResult = withCorrectionCandidates(searchResult, chatManage.CorrectionCandidates, chatManage.RerankTopK)
 
 	// Step 2: Initial dedup
 	searchResult = p.dedup(ctx, "dedup_summary", searchResult)

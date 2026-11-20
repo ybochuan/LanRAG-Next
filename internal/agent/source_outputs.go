@@ -84,12 +84,60 @@ func (r *searchOutputReceipts) consumed(ctx context.Context, messages []chat.Mes
 			continue
 		}
 		receipt := r.byCall[message.ToolCallID]
-		if receipt.runID == run.RunID && receipt.renderedHash != "" && receipt.renderedHash == extensionbridge.SourceFieldHash(message.Content) {
-			outputs = append(outputs, receipt.output)
-			if len(outputs) == 128 {
-				break
-			}
+		if receipt.runID != run.RunID || receipt.result == nil || receipt.renderedHash == "" || receipt.renderedHash != extensionbridge.SourceFieldHash(message.Content) {
+			continue
+		}
+		if count, _ := receipt.result.Data["count"].(int); count <= 0 {
+			continue
+		}
+		outputs = append(outputs, receipt.output)
+		if len(outputs) == 128 {
+			break
 		}
 	}
 	return outputs
+}
+
+// references joins reviewed correction identities to original chunks from the
+// same search outputs that were actually presented to the provider.
+func (r *searchOutputReceipts) references(outputs []extensionbridge.ConsumedToolOutput, corrections []types.CorrectionReference) []*types.SearchResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	type chunkKey struct{ document, chunk string }
+	items := make(map[chunkKey][]types.CorrectionReference)
+	for _, item := range corrections {
+		key := chunkKey{item.DocumentID, item.ChunkID}
+		items[key] = append(items[key], item)
+	}
+	seen := make(map[chunkKey]bool)
+	var refs []*types.SearchResult
+	for _, output := range outputs {
+		receipt := r.byCall[output.ToolCallID]
+		if receipt.output != output || receipt.result == nil {
+			continue
+		}
+		rows, _ := receipt.result.Data["results"].([]map[string]interface{})
+		for _, row := range rows {
+			id, _ := row["chunk_id"].(string)
+			doc, _ := row["knowledge_id"].(string)
+			kb, _ := row["knowledge_base_id"].(string)
+			key := chunkKey{doc, id}
+			if id == "" || doc == "" || kb == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			body, _ := row["content"].(string)
+			title, _ := row["knowledge_title"].(string)
+			chunkType, _ := row["chunk_type"].(string)
+			index, _ := row["chunk_index"].(int)
+			score, _ := row["score"].(float64)
+			locators, _ := row["source_locators"].(types.SourceLocators)
+			refs = append(refs, &types.SearchResult{
+				ID: id, KnowledgeID: doc, KnowledgeBaseID: kb, KnowledgeTitle: title, Content: body,
+				ChunkType: chunkType, ChunkIndex: index, Score: score, SourceLocators: locators,
+				CorrectionItems: items[key],
+			})
+		}
+	}
+	return refs
 }

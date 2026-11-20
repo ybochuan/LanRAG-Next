@@ -16,6 +16,8 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
     'vue-router': { useRoute:()=>route, useRouter:()=>({}), onBeforeRouteLeave(){}, onBeforeRouteUpdate(){} },
     '@/api/business': {},
+    '@/api/lineage': {},
+    '../feedback/model': {},
     '../business/model': { httpStatus },
     '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [{ id: 'kb', name: '测试库' }] }) },
     '@/api/lifecycle': {
@@ -286,7 +288,7 @@ test('date conflict reload uses a fresh revision and reapplies only the edited d
 })
 test('every workspace view has a top-level tab entry', () => {
   const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
-  const views = ['families', 'associations', 'feedback-governance', 'revisions', 'lineage']
+  const views = ['families', 'associations', 'feedback-materials', 'revisions', 'lineage']
   const tabs = source.match(/const workspaceTabs=\[([\s\S]*?)\] as const/)?.[1] ?? ''
   assert.ok(tabs.length > 0, 'workspaceTabs must be declared')
   for (const view of views) {
@@ -294,12 +296,12 @@ test('every workspace view has a top-level tab entry', () => {
   }
   const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
   assert.ok(
-    template.includes('v-for="item in workspaceTabs"'),
+    template.includes('v-for="item in workspaceTabs.filter'),
     'the top tab bar must render the workspace tabs',
   )
   assert.ok(
-    !template.includes('showFeedback'),
-    'the removed showFeedback helper must not be referenced any more',
+    template.includes('panel-correction-documents') && template.includes('panel-feedback-review'),
+    'the unified workspace must expose corrections and review as distinct panels',
   )
 })
 
@@ -327,7 +329,7 @@ test('the review panel shows the notification delivery state', () => {
 test('the workspace tab label set matches the router view contract', () => {
   const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
   const tabs = source.match(/const workspaceTabs=\[([\s\S]*?)\] as const/)?.[1] ?? ''
-  for (const view of ['families', 'lineage', 'associations', 'feedback-governance', 'revisions']) {
+  for (const view of ['families', 'lineage', 'associations', 'feedback-materials', 'revisions']) {
     assert.ok(source.includes(`view==='${view}'`), `router must accept ${view}`)
     assert.ok(tabs.includes(`key:'${view}'`), `workspaceTabs must expose ${view}`)
   }
@@ -358,7 +360,7 @@ test('cross-KB creation from the target side is blocked with a clear hint', () =
   const template = src.descriptor.template?.content ?? ''
   const script = src.descriptor.scriptSetup!.content
   assert.ok(script.includes("targetSideCrossBlocked"), 'a guard must exist for the target-side entry')
-  assert.ok(script.includes("targetSideCrossBlocked.value)return"), 'submit must refuse the blocked entry')
+  assert.match(script, /if\([^\n]*targetSideCrossBlocked\.value[^\n]*\)return/, 'submit must refuse the blocked entry')
   assert.ok(template.includes('targetSideCrossBlocked ||'), 'the submit button must be disabled')
   assert.ok(script.includes("fixedDocument?.end==='target'&&!readingRelation(form.edge_type)"), 'only same-library reading relations are offered with a fixed target')
   assert.ok(template.includes('其他关系请从源文档或文档关联页面创建'), 'the hint must name where to create other relations')

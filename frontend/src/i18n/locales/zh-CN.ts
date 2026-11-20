@@ -9457,6 +9457,8 @@ export default {
       "families": "业务族",
       "associations": "关联关系",
       "feedbackGovernance": "反馈审核",
+      "feedbackMaterials": "反馈资料",
+      "correctionDocuments": "勘误文档",
       "revisions": "修订发布",
       "lineage": "关系图"
     },

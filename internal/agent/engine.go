@@ -85,6 +85,7 @@ type AgentEngine struct {
 	contextRewrites int
 	modelContext    *modelcontext.Registry // single request-local boundary for every model handle
 	searchOutputs   searchOutputReceipts
+	lastSearchRefs  []*types.SearchResult
 	// steerSink, when set, lets users append messages into the running turn.
 	// Drained at every round boundary; nil disables mid-run injection.
 	steerSink         types.SteerSink
@@ -785,6 +786,17 @@ func (e *AgentEngine) executeLoop(
 		}
 	}
 
+	// The opening user message is followed by the native evidence search
+	// before the first model round, without spending a model iteration.
+	if len(state.RoundSteps) == 0 && state.Suspended == nil {
+		var usable bool
+		ctx, messages, usable = e.initialKnowledgeEvidence(ctx, state, messages, sessionID, messageID)
+		if !usable {
+			e.finishWithoutKnowledgeEvidence(ctx, state, sessionID)
+			return state, nil
+		}
+	}
+
 	guards := &loopGuards{}
 loop:
 	for e.withinIterationBudget(state.CurrentRound) || e.allowSteerOverrun {
@@ -1354,6 +1366,9 @@ func (e *AgentEngine) runReActIteration(
 		}
 		state.FinalAnswer = verdict.finalAnswer
 		state.IsComplete = true
+		if response.FinishReason != "content_filter" {
+			e.publishSearchReferences(ctx, state, sessionID, e.lastSearchRefs)
+		}
 		if buttonsRan {
 			// The text is the turn's answer; left on the step it would replay
 			// twice in later turns and show again as a step on reload.

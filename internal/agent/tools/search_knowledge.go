@@ -309,6 +309,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		final = t.matchingPattern(ctx, final)
 		keptOutside = t.matchingPattern(ctx, keptOutside)
 	}
+	final = withCorrectionCandidates(final, t.correctionCandidates(ctx, searchTargets, kbList, query), limit)
 	if len(final) > limit {
 		final = final[:limit]
 	}
@@ -1174,6 +1175,9 @@ func (t *SearchKnowledgeTool) formatOutput(
 		} else {
 			row["chunk_id"] = result.ID
 			row["chunk_index"] = result.ChunkIndex
+			if len(result.SourceLocators) > 0 {
+				row["source_locators"] = result.SourceLocators
+			}
 		}
 		formattedResults = append(formattedResults, row)
 	}

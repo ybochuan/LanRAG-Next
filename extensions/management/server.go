@@ -14,6 +14,7 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/attachmentworkbench"
 	"github.com/ybochuan/LanRAG-Next/extensions/business"
 	"github.com/ybochuan/LanRAG-Next/extensions/cleanup"
+	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
 	"github.com/ybochuan/LanRAG-Next/extensions/dependencies"
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 	"github.com/ybochuan/LanRAG-Next/extensions/lineage"
@@ -29,6 +30,7 @@ type Server struct {
 	scopes      map[lifecycle.PolicyScope]bool
 	sources     *lineage.Registry
 	business    *business.Service
+	corrections *corrections.Service
 	cleanup     *cleanup.Service
 	attachments *attachmentworkbench.Service
 	renditions  *lineage.Renditions
@@ -58,7 +60,7 @@ func (s *Server) WithRenditions(r *lineage.Renditions) *Server { s.renditions = 
 
 // New creates a disabled (503) management adapter when no strong key is configured.
 func New(db *store.DB, key string, scopes []lifecycle.PolicyScope) *Server {
-	s := &Server{db: db, key: key, scopes: map[lifecycle.PolicyScope]bool{}}
+	s := &Server{db: db, key: key, scopes: map[lifecycle.PolicyScope]bool{}, corrections: corrections.New(db, time.Now)}
 	for _, v := range scopes {
 		s.scopes[v] = true
 	}
@@ -81,6 +83,10 @@ type Request struct {
 	TenantID               uint64                `json:"tenant_id"`
 	KnowledgeBaseID        string                `json:"knowledge_base_id"`
 	DocumentID             string                `json:"document_id,omitempty"`
+	VersionID              string                `json:"version_id,omitempty"`
+	Query                  string                `json:"query,omitempty"`
+	ApprovedFrom           string                `json:"approved_from,omitempty"`
+	ApprovedTo             string                `json:"approved_to,omitempty"`
 	ArtifactID             string                `json:"artifact_id,omitempty"`
 	Page                   int                   `json:"page,omitempty"`
 	PageSize               int                   `json:"page_size,omitempty"`
@@ -189,10 +195,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errNotFound) {
 			status, code = 404, "document_not_found"
 		}
-		if errors.Is(err, business.ErrNotFound) {
+		if errors.Is(err, business.ErrNotFound) || errors.Is(err, corrections.ErrNotFound) {
 			status, code = 404, "not_found"
 		}
-		if errors.Is(err, errDatabase) || errors.Is(err, lineage.ErrUnavailable) || errors.Is(err, business.ErrUnavailable) {
+		if errors.Is(err, errDatabase) || errors.Is(err, lineage.ErrUnavailable) || errors.Is(err, business.ErrUnavailable) || errors.Is(err, corrections.ErrUnavailable) {
 			status, code = 503, "management_unavailable"
 		}
 		writeError(w, status, code)

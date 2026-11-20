@@ -38,6 +38,8 @@ func TestExtensionLifecycleHTTPAuthority(t *testing.T) {
 		{"foreign document", "GET", "/api/v1/knowledge-bases/kb/lifecycle/documents/doc", "", types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 404},
 		{"forged authority", "PUT", "/api/v1/knowledge-bases/kb/lifecycle/rules", `{"expected_revision":0,"rules":{},"can_write":true}`, types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 400},
 		{"business viewer cannot write", "PUT", "/api/v1/knowledge-bases/kb/lifecycle/business/guidance_seed", `{"expected_revision":0,"operation_id":"seed","business":{"payload":{"text":"test","topic":"test"}}}`, types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleViewer}, 403},
+		{"correction detail requires a version", "GET", "/api/v1/knowledge-bases/kb/lifecycle/business/correction_document?document_id=doc", "", types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleViewer}, 400},
+		{"foreign correction document", "GET", "/api/v1/knowledge-bases/kb/lifecycle/business/correction_document?document_id=doc&version_id=v1", "", types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleViewer}, 404},
 		{"business GET cannot publish", "GET", "/api/v1/knowledge-bases/kb/lifecycle/business/revision_publish", "", types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 400},
 		{"business cannot forge actor", "PUT", "/api/v1/knowledge-bases/kb/lifecycle/business/guidance_seed", `{"expected_revision":0,"operation_id":"seed","actor_id":"other","business":{"payload":{"text":"test","topic":"test"}}}`, types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 400},
 	} {
