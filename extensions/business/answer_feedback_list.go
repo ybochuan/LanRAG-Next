@@ -137,7 +137,7 @@ func (s *Service) listFeedback(ctx context.Context, c Command) ([]map[string]any
 }
 
 type annotationCheck struct {
-	Outcome   string `json:"outcome"`
+	Outcome   string    `json:"outcome"`
 	CheckedAt time.Time `json:"checked_at"`
 }
 

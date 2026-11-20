@@ -45,11 +45,11 @@ type InputRequest struct {
 // StepResult is supplied by trusted native call sites after actual completion.
 // Success requires exact request/output digests; unknown/error can never seal.
 type StepResult struct {
-	OperationID string `json:"operation_id"`
-	StepID      string `json:"step_id"`
-	Outcome     string `json:"outcome"`
-	InputHash   string `json:"input_hash"`
-	OutputHash  string `json:"output_hash"`
+	OperationID        string `json:"operation_id"`
+	StepID             string `json:"step_id"`
+	Outcome            string `json:"outcome"`
+	InputHash          string `json:"input_hash"`
+	OutputHash         string `json:"output_hash"`
 	AnnotationDelivery string `json:"annotation_delivery,omitempty"`
 }
 
