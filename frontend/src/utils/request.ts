@@ -3,6 +3,7 @@ import axios from "axios";
 import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
+import { getDesktopApiOrigin } from './desktop-api-base';
 import { isSkillBundleUploadUrl } from './uploadLimit';
 import { isTimeoutError, uploadTimeoutMs } from './requestTimeouts';
 import {
@@ -265,6 +266,10 @@ export function postUpload(
   onUploadProgress?: (progressEvent: any) => void,
   config: any = {},
 ): Promise<WithStatus<any>> {
+  // Wails' WebView2 asset-server request bridge drops the bytes of multipart
+  // file parts. Upload directly to the Core origin injected by the desktop
+  // shell, while keeping the normal relative path in a browser deployment.
+  const uploadBaseURL = getDesktopApiOrigin();
   return instance.post(url, data, {
     // Uploads are bounded by transfer time, not by the 30s default that suits
     // JSON calls. Derive the budget from the payload so a deployment raising
@@ -272,6 +277,7 @@ export function postUpload(
     // `config.timeout` still wins.
     timeout: uploadTimeoutMs(data),
     ...config,
+    ...(uploadBaseURL ? { baseURL: uploadBaseURL } : {}),
     headers: {
       "Content-Type": "multipart/form-data",
       "X-Request-ID": `${generateRandomString(12)}`,

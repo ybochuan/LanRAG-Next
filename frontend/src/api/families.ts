@@ -54,6 +54,7 @@ export interface FamilyReplacementHistory {
   business_family_id: string
   family_revision: number
   published_document_id?: string
+  initial_document_id?: string
   final_document_id?: string
   steps: FamilyReplacement[]
   fingerprint?: string

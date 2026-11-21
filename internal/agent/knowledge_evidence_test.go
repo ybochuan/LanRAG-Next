@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -116,6 +118,15 @@ func TestKnowledgeEvidenceRoutesBeforeFirstAnswer(t *testing.T) {
 			require.Zero(t, model.callCount)
 		})
 	}
+}
+
+func TestRequestsArchiveSearchRoutesExplicitOldEditions(t *testing.T) {
+	current := strconv.Itoa(time.Now().Year()) + "版的上门服务管理办法"
+	old := strconv.Itoa(time.Now().Year()-2) + "版的上门服务管理办法"
+	require.False(t, requestsArchiveSearch(current))
+	require.True(t, requestsArchiveSearch("我想查下"+old+"，对上门核实业务的具体业务种类和范围"))
+	require.True(t, requestsArchiveSearch("我想查下上一版的上门服务管理办法"))
+	require.False(t, requestsArchiveSearch("报销制度里的五个工作日适用哪一条？"))
 }
 
 func TestCurrentSearchReceiptJoinsCorrectionToOnlyMatchingCurrentChunk(t *testing.T) {

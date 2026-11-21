@@ -3,7 +3,7 @@ import { ref, onMounted, onBeforeUnmount, onUnmounted, computed, watch, nextTick
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
-import { MessagePlugin } from "tdesign-vue-next";
+import { Button, MessagePlugin } from "tdesign-vue-next";
 import type { SendMessageOptions } from '@/utils/questionOrigin';
 import { useSettingsStore } from '@/stores/settings';
 import { useBrowserConnectionStore } from '@/stores/browserConnection';
@@ -2641,22 +2641,17 @@ const showAgentNotReadyMessage = (
         : t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText }),
     ),
     ...(isRemoteShared ? [] : [
-      h('a', {
-        href: '#',
-        onClick: (e: Event) => {
-          e.preventDefault();
+      h(Button, {
+        theme: 'primary',
+        variant: 'text',
+        size: 'small',
+        style: { alignSelf: 'flex-start' },
+        onClick: () => {
           const section = resolveAgentNotReadySection(reasonKeys || ['summary_model'])
           const highlight = resolveAgentNotReadyHighlight(reasonKeys || ['summary_model'])
           goToAgentEditor(agent, section, highlight, sourceTenantId);
         },
-        style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
-        onMouseenter: (e: Event) => {
-          (e.target as HTMLElement).style.textDecoration = 'underline';
-        },
-        onMouseleave: (e: Event) => {
-          (e.target as HTMLElement).style.textDecoration = 'none';
-        }
-      }, t('input.goToAgentEditor')),
+      }, { default: () => t('input.goToAgentEditor') }),
     ]),
   ]);
 

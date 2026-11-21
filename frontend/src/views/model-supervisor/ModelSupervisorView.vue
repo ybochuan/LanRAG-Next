@@ -3,13 +3,13 @@
     <header class="page-heading">
       <div class="title-block">
         <h1 id="supervisor-title"><ResourceIcon type="server" :size="24" class="page-icon" />{{ $t('workbench.supervisor.title') }}</h1>
-        <p class="page-subtitle">{{ $t('workbench.supervisor.subtitle') }}</p>
+        <p class="page-subtitle">{{ desktop ? '启停本机的 llama-server 实例，并检查 Windows 桌面能否访问模型。' : $t('workbench.supervisor.subtitle') }}</p>
       </div>
       <div class="heading-actions">
-        <t-button v-if="hasToken" variant="outline" @click="toggleTokenForm">
+        <t-button v-if="!desktop && hasToken" variant="outline" @click="toggleTokenForm">
           {{ showTokenForm ? '取消' : '令牌' }}
         </t-button>
-        <t-button variant="outline" :loading="busy" :disabled="!hasToken" @click="reload">刷新</t-button>
+        <t-button variant="outline" :loading="busy" :disabled="!canManage" @click="reload">刷新</t-button>
       </div>
     </header>
 
@@ -25,7 +25,7 @@
       <p class="hint">令牌只保存在本机浏览器里；服务地址 {{ api.baseUrl() }}。</p>
     </div>
 
-    <template v-if="hasToken">
+    <template v-if="canManage">
       <t-alert v-if="error" theme="error" class="notice" role="alert">{{ error }}</t-alert>
 
       <section v-if="res" class="resource-bar" aria-label="主机资源">
@@ -50,7 +50,7 @@
           <header>
             <div>
               <h2>{{ item.id }}</h2>
-              <p class="model-name">{{ item.model }}</p>
+              <p class="model-name" :title="item.model_path">{{ item.model }}</p>
             </div>
             <t-tag variant="light" size="small" :theme="statusTheme(item.status)">{{ statusLabel[item.status] }}</t-tag>
           </header>
@@ -127,17 +127,22 @@
       <section class="add-panel">
         <div class="add-head">
           <h2>新增模型实例</h2>
-          <t-button variant="text" size="small" :disabled="busy" @click="loadCatalog">重新扫描模型目录</t-button>
+          <t-button v-if="!desktop" variant="text" size="small" :disabled="busy" @click="loadCatalog">重新扫描模型目录</t-button>
         </div>
-        <p class="hint">
+        <p v-if="!desktop" class="hint">
           从 <code>{{ catalogData?.model_dir || 'data/models' }}</code> 选择 .gguf，运行时固定用
           <code>{{ catalogData?.binary || 'data/bin/llama-server.exe' }}</code><span v-if="catalogData && !catalogData.binary_ready" class="warn">（未找到该文件）</span>
         </p>
-        <t-alert v-if="catalogData?.note" theme="info" class="notice">{{ catalogData.note }}</t-alert>
+        <t-alert v-if="!desktop && catalogData?.note" theme="info" class="notice">{{ catalogData.note }}</t-alert>
         <form class="add-form" @submit.prevent="doAdd">
           <div class="form-grid">
             <label class="field">标识<t-input v-model="form.id" placeholder="embedding" /></label>
-            <label class="field">模型文件<t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" /></label>
+            <div v-if="desktop" class="field">
+              <span>模型文件</span>
+              <t-button variant="outline" :disabled="busy" @click="chooseModelFile">选择 GGUF 文件</t-button>
+              <span v-if="selectedModelPath" class="model-name" :title="selectedModelPath">{{ form.model }}</span>
+            </div>
+            <label v-else class="field">模型文件<t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" /></label>
             <label class="field">任务<t-select v-model="form.task_type" :options="taskTypeOptions" /></label>
             <label class="field">端口<t-input-number v-model="form.port" :min="1" :max="65535" /></label>
             <label class="field field-gpu">GPU 层数
@@ -145,7 +150,7 @@
                 <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" class="gpu-layers" />
                 <t-switch v-model="form.use_gpu" />
                 <span class="gpu-label">使用 GPU</span>
-                <t-button theme="primary" type="submit" class="gpu-submit" :loading="busy" :disabled="!catalogData?.models.length">启动</t-button>
+                <t-button theme="primary" type="submit" class="gpu-submit" :loading="busy" :disabled="desktop ? !selectedModelPath : !catalogData?.models.length">启动</t-button>
               </span>
             </label>
           </div>
@@ -164,6 +169,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import * as api from '@/api/modelSupervisor'
 
+const desktop = api.isPackagedDesktop()
 const statusLabel: Record<api.InstanceStatus, string> = {
   stopped: '已停止',
   starting: '启动中',
@@ -172,19 +178,20 @@ const statusLabel: Record<api.InstanceStatus, string> = {
   failed: '异常退出'
 }
 const reachLabel: Record<api.Reachability, string> = {
-  loopback: '两侧可达',
+  loopback: desktop ? '本机可达' : '两侧可达',
   gateway: '仅网关可达',
   unverified: '未验证'
 }
 
-const hasToken = ref(!!api.token())
+const hasToken = ref(!desktop && !!api.token())
+const canManage = computed(() => desktop || hasToken.value)
 const tokenDraft = ref('')
 const tokenError = ref('')
 // The token form is shown when no token is stored, and can also be reopened on
 // demand: a supervisor restarted with a new MODEL_SUPERVISOR_TOKEN makes the
 // stored value wrong, and hiding the only input would leave the page unusable.
 const showTokenForm = ref(false)
-const tokenFormVisible = computed(() => !hasToken.value || showTokenForm.value)
+const tokenFormVisible = computed(() => !desktop && (!hasToken.value || showTokenForm.value))
 const instances = ref<api.Instance[]>([])
 const res = ref<api.Resources>()
 const probes = ref<Record<string, api.Probe>>({})
@@ -220,6 +227,19 @@ const form = reactive({
 })
 
 const catalogData = ref<api.Catalog>()
+const selectedModelPath = ref('')
+
+async function chooseModelFile() {
+  formError.value = ''
+  try {
+    const path = await api.pickModelFile()
+    if (!path) return
+    selectedModelPath.value = path
+    form.model = path.split(/[\\/]/).pop() || ''
+  } catch (cause) {
+    formError.value = message(cause)
+  }
+}
 // Status badge uses the shared tag palette instead of bespoke colours.
 const statusTheme=(status:string)=>({running:'success',failed:'danger',starting:'warning',stopping:'warning'} as Record<string,string>)[status]||'default'
 // TDesign select options built from the local catalog and the fixed task list.
@@ -295,7 +315,7 @@ function toggleTokenForm() {
  * Returns the text for a plain error slot (empty when the token gate took over).
  */
 function fail(cause: unknown): string {
-  if (api.isAuthFailure(cause)) {
+  if (!desktop && api.isAuthFailure(cause)) {
     api.setToken('')
     hasToken.value = false
     showTokenForm.value = false
@@ -337,7 +357,11 @@ async function reload() {
  * successful start stays "运行中" indefinitely.
  */
 async function refreshStatuses() {
-  if (!hasToken.value || busy.value || acting.value) return
+  if (!canManage.value || busy.value || acting.value) return
+  if (desktop && !catalogData.value) {
+    await reload()
+    return
+  }
   try {
     const listed = await api.list()
     instances.value = listed.instances
@@ -366,9 +390,11 @@ async function probeOne(id: string) {
 async function doStart(item: api.Instance) {
   acting.value = item.id
   error.value = ''
+  const spec = { id: item.id, model: item.model, model_path: item.model_path, task_type: item.task_type,
+    port: item.port, use_gpu: item.gpu_layers > 0, gpu_layers: item.gpu_layers }
   try {
     await api.start(
-      { id: item.id, model: item.model, task_type: item.task_type, port: item.port },
+      spec,
       false
     )
     await reload()
@@ -381,7 +407,7 @@ async function doStart(item: api.Instance) {
       if (proceed) {
         try {
           await api.start(
-            { id: item.id, model: item.model, task_type: item.task_type, port: item.port },
+            spec,
             true
           )
           await reload()
@@ -417,6 +443,7 @@ async function doAdd() {
     const payload: api.SpecInput = {
       id: form.id,
       model: form.model,
+      model_path: desktop ? selectedModelPath.value : undefined,
       task_type: form.task_type,
       port: form.port,
       use_gpu: form.use_gpu
@@ -434,6 +461,7 @@ async function doAdd() {
     await api.start(payload)
     form.id = ''
     form.model = ''
+    selectedModelPath.value = ''
     form.gpu_layers = ''
     await reload()
   } catch (cause) {
@@ -508,7 +536,7 @@ onBeforeUnmount(() => {
   stopLogPolling()
   stopStatusPolling()
 })
-void (hasToken.value ? reload() : Promise.resolve())
+if (canManage.value) void reload()
 statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 </script>
 

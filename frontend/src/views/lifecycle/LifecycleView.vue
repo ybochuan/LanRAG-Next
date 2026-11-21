@@ -13,7 +13,6 @@
   <t-empty v-if="loadingKB" class="empty" role="status" description="正在加载知识库…" />
   <t-empty v-else-if="!knowledgeBases.length && !error && !standaloneFeedback" class="empty" description="还没有可访问的知识库。创建或加入知识库后即可管理文档。" />
   <t-empty v-else-if="!kb && !standaloneFeedback && knowledgeBases.length" class="empty" description="请选择一个知识库。" />
-  <t-button v-if="canOpenStandaloneFeedback && workspaceView!=='feedback-materials'" variant="outline" @click="showFeedbackReview">未归属反馈</t-button>
   <template v-if="kb || standaloneFeedback">
    <div class="tabs" role="tablist" aria-label="工作台视图" @keydown="moveTabFocus">
     <t-button v-for="item in kb ? tabs : []" variant="text" :tabindex="!workspaceView && tab===item.key ? 0 : -1" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :aria-controls="`panel-${item.key}`" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">
@@ -145,7 +144,7 @@
    <aside class="document-drawer" role="dialog" aria-modal="true" aria-labelledby="document-title" tabindex="-1" ref="drawer">
     <header>
      <div><span class="eyebrow">文档详情</span><h2 id="document-title">{{ selectedTitle || selectedID }}</h2>
-      <div v-if="detail" class="drawer-meta"><span class="state-badge" :class="detail.snapshot.current.state">{{ label(detail.snapshot.current.state) }}</span>
+      <div v-if="detail" class="drawer-meta"><span class="state-badge" :class="detail.snapshot.effective_state || detail.snapshot.current.state">{{ label(detail.snapshot.effective_state || detail.snapshot.current.state) }}</span>
        <span>{{ detail.business_family?.label || $t('workbench.list.unassigned') }}</span></div>
      </div>
      <t-button variant="text" shape="square" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
@@ -170,7 +169,7 @@
         <t-button variant="text" size="small" @click="dateConflictDraft=undefined">放弃草稿</t-button>
        </t-alert>
       <form @submit.prevent="submitDocument">
-       <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">此附件的生效/失效时间继承主件。 <t-button variant="text" theme="primary" size="small" :disabled="detailLocked" @click="openParentDocument">打开主件</t-button></p>
+       <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">此附件的生效/失效时间与生命周期状态继承主件。 <t-button variant="text" theme="primary" size="small" :disabled="detailLocked" @click="openParentDocument">打开主件</t-button></p>
        <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
        <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
        <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
@@ -537,7 +536,7 @@ async function openCurrentVersionCorrections(){
   version=graph.nodes.find(node=>node.type==='document_version'&&node.document_id===id&&node.current&&(!node.knowledge_base_id||node.knowledge_base_id===scope))?.id||''
  }catch{}finally{openingCorrections.value=false}
  if(selectedID.value!==id||selectedKB.value!==scope)return
- openVersionCorrections(scope,id,version,detailCanWrite.value&&detail.value?.snapshot.current.state!=='active')
+ openVersionCorrections(scope,id,version,detailCanWrite.value&&(detail.value?.snapshot.effective_state||detail.value?.snapshot.current.state)!=='active')
 }
 function openVersionCorrections(scope:string,id:string,version:string,history=false){
  if(selectedID.value){closeDocument();if(selectedID.value)return}

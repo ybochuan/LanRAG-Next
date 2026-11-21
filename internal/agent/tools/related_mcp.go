@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // TrustedRelatedMCPService binds the exception to the authenticated local Host.
 func TrustedRelatedMCPService(s *types.MCPService) bool {
+	if s != nil && s.Enabled && mcp.IsDesktopHostMCP(s) {
+		return true
+	}
 	key := os.Getenv("AGENTRAG_MANAGEMENT_KEY")
 	return s != nil && s.Enabled && s.URL != nil && *s.URL == "http://127.0.0.1:8090/mcp" && s.TransportType == types.MCPTransportHTTPStreamable && len(key) >= 32 && s.Headers["Authorization"] == "Bearer "+key
 }
@@ -47,7 +51,7 @@ func RelatedMCPServiceScope(s *types.MCPService, targets types.SearchTargets) *t
 	copy := *s
 	copy.Name = "AgentRAG"
 	copy.Description = "有效补充通知、附件和历史归档文档查询"
-	copy.UsageInstructions = "通过 discover_mcp_tools 按需发现 query_related_docs；用户明确要求查阅历史失效条款时，发现 search_archived_documents。"
+	copy.UsageInstructions = "通过 discover_mcp_tools 按需发现 query_related_docs；用户明确要求查阅历史失效条款或指定旧版年份时，发现 search_archived_documents。"
 	copy.Headers = types.MCPHeaders{}
 	for k, v := range s.Headers {
 		copy.Headers[k] = v

@@ -52,6 +52,30 @@ export function relatedAttachments(session: any): RelatedAttachment[] {
   })
 }
 
+/** Keep only structured attachments named in the answer or linked from it. */
+export function answerAttachments(session: any, answer: string): RelatedAttachment[] {
+  const text = typeof answer === 'string' ? answer.trim() : ''
+  if (!text) return []
+  return relatedAttachments(session).filter(item => isAttachmentMentioned(item, text))
+}
+
+function isAttachmentMentioned(item: RelatedAttachment, text: string): boolean {
+  const names = [item.display_name, item.original_filename, item.file_name]
+    .map(value => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean)
+  for (const name of names) {
+    if (containsToken(text, name)) return true
+    const stem = name.replace(/\.[^.]+$/, '')
+    if (stem && stem !== name && stem.length >= 3 && containsToken(text, stem)) return true
+  }
+  return typeof item.download_url === 'string' && item.download_url.length > 0 && text.includes(item.download_url)
+}
+
+function containsToken(text: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^A-Za-z0-9])${escaped}($|[^A-Za-z0-9])`, 'i').test(text)
+}
+
 /** Recognize native download anchors backed by this answer's metadata. */
 export function attachmentAtTarget(target: any, session: any): RelatedAttachment | undefined {
   const href = target?.closest?.('a[href]')?.getAttribute('href')

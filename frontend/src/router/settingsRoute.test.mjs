@@ -23,3 +23,9 @@ test('/platform/settings keeps a route but renders nothing into the outlet', () 
   assert.match(block, /component: SettingsRouteOutlet/)
   assert.match(router, /const SettingsRouteOutlet = defineComponent\(\{[^}]*render: \(\) => null/)
 })
+
+test('Model Process Management opens the supervisor page', () => {
+  const block = routeBlock('model-supervisor')
+  assert.match(block, /ModelSupervisorView\.vue/)
+  assert.doesNotMatch(block, /redirect:/)
+})

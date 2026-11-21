@@ -43,6 +43,7 @@ type Prober struct {
 	Client      *http.Client
 	DialTimeout time.Duration
 	WSLDistro   string
+	LocalCore   bool
 	WSLProbe    func(ctx context.Context, url string) (int, error)
 	Dial        func(addr string) error
 }
@@ -131,6 +132,11 @@ func (p *Prober) Check(ctx context.Context, spec Spec) ProbeResult {
 		return result
 	}
 	result.EmbeddingDim = dim
+	if p.LocalCore {
+		result.Reachability = ReachLoopback
+		result.Note = "reachable from Windows Desktop"
+		return result
+	}
 
 	code, err := p.wsl()(ctx, "http://"+addr+"/health")
 	switch {

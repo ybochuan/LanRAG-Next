@@ -47,7 +47,7 @@ type Runner func(name string, args ...string) ([]byte, error)
 
 // DefaultRunner shells out through PATH.
 func DefaultRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
+	return withoutConsole(exec.Command(name, args...)).Output()
 }
 
 // QueryResources samples GPU capacity. A missing or failing nvidia-smi yields

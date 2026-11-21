@@ -93,6 +93,18 @@ func TestProbeReportsDimensionWhenBothSidesReachable(t *testing.T) {
 	}
 }
 
+func TestProbeForWindowsDesktopUsesMeasuredLocalEndpoint(t *testing.T) {
+	_, port := fakeServer(t, 2560, http.StatusOK, http.StatusOK)
+	prober := &Prober{LocalCore: true, WSLProbe: func(context.Context, string) (int, error) {
+		t.Error("Windows Desktop should not invoke WSL")
+		return 0, nil
+	}}
+	result := prober.Check(context.Background(), embeddingSpec(port))
+	if result.Reachability != ReachLoopback || result.EmbeddingDim != 2560 {
+		t.Fatalf("unexpected native probe: %+v", result)
+	}
+}
+
 func TestProbeRerankReportsReachability(t *testing.T) {
 	_, port := fakeServer(t, 0, http.StatusOK, http.StatusOK)
 	prober := &Prober{WSLProbe: func(context.Context, string) (int, error) { return http.StatusOK, nil }}

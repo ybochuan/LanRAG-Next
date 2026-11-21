@@ -146,7 +146,7 @@
             <t-button theme="primary" type="submit" :disabled="locked || !newDocument || !oldDocument || !effectiveAt">提交审核</t-button>
           </form>
           <h2>补录历史版本链</h2>
-          <p>从已执行的发布件开始，按生效日期核对已到期的连续草案。</p>
+          <p>按生效日期核对已到期的连续草案；尚未建立发布件时，从最早草案的旧件开始补录。</p>
           <t-button variant="outline" :loading="historyBusy" :disabled="locked" @click="loadHistory">{{ historyBusy ? '正在核对…' : '预览历史链' }}</t-button>
           <p v-if="historyError" role="alert">{{ historyError }}</p>
           <template v-if="history">
@@ -284,7 +284,7 @@ const locked = computed(() => saving.value || !!pending.value || documentBusy.va
 const catalogFence = requestFence(), listFence = requestFence(), viewFence = requestFence()
 const historyFence = requestFence()
 const historyBlocks: Record<string,string> = {
-  missing_applied_head: '请先执行首条替代，建立当前发布件。',
+  missing_applied_head: '发布件缺少生效日期，无法核对历史链，请先恢复发布头。',
   scheduled_replacement: '已有待生效的替代，请先处理该计划。',
   no_past_drafts: '当前没有已到生效日期的历史草案。',
   history_limit: '本族历史草案超过一次可核对的范围。',
@@ -476,6 +476,9 @@ function approvalBlock(row: api.FamilyReplacement) {
     return '草案的族修订或锁定版本已变化，需重新核验。'
   }
   if (plans.value.some(plan=>plan.status==='scheduled')) return '已有待生效的替代计划。'
+  if (Number.isFinite(Date.parse(row.effective_at)) && Date.parse(row.effective_at) <= Date.now()) {
+    return '制度生效时间已过，请使用下方“补录历史版本链”一次处理。'
+  }
   return ''
 }
 function approve(row: api.FamilyReplacement) {
@@ -600,7 +603,10 @@ async function perform() {
     if (code && [400,403,404,409].includes(code)) {
       pending.value = undefined
       batch.value = undefined
-      error.value = code===409 ? '记录或业务条件已改变，请刷新核对后重试。' : '操作被拒绝，请核对文档和权限。'
+      error.value = code===403 ? '没有操作权限，请核对账号权限。'
+        : code===409 ? '记录或业务条件已改变，请刷新核对后重试。'
+        : code===404 ? '目标记录不存在，请刷新后重试。'
+        : '操作被拒绝，请核对当前业务条件或文档状态。'
       if (code===403) canWrite.value = false
     } else error.value = '服务暂不可用。可重试原请求。'
   } finally {

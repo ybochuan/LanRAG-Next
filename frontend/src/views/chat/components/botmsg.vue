@@ -137,7 +137,7 @@
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
         </div>
-        <RelatedAttachments :session="session" />
+        <RelatedAttachments :session="session" :answer="answerText" />
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"

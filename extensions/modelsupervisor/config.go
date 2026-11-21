@@ -56,6 +56,8 @@ type Config struct {
 	// WSLDistro names the distribution the core runs in. The probe runs curl
 	// inside it to prove the address works from both sides of the boundary.
 	WSLDistro string
+	// LocalCore uses the measured Windows endpoint directly for Windows Desktop.
+	LocalCore bool
 	// AllowedOrigins are the browser origins allowed to call the API. Empty
 	// means CORS is off, which is correct for a headless deployment and wrong
 	// for the console.
@@ -95,10 +97,11 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		StatePath: pick("MODEL_SUPERVISOR_STATE", DefaultStatePath),
 		APIKey:    strings.TrimSpace(getenv("MODEL_SUPERVISOR_LLAMA_API_KEY")),
 		WSLDistro: pick("MODEL_SUPERVISOR_WSL_DISTRO", DefaultWSLDistro),
+		LocalCore: getenv("MODEL_SUPERVISOR_LOCAL_CORE") == "1",
 		LogLines:  DefaultLogLines,
 	}
 	for _, origin := range strings.Split(pick("MODEL_SUPERVISOR_ALLOWED_ORIGINS", DefaultAllowedOrigins), ",") {
-		if origin = strings.TrimSpace(origin); origin != "" {
+		if origin = strings.TrimSpace(origin); origin != "" && !cfg.LocalCore {
 			cfg.AllowedOrigins = append(cfg.AllowedOrigins, origin)
 		}
 	}

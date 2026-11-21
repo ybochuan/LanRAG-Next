@@ -313,6 +313,82 @@ func TestFamilyReplacementHistoryCommitsFiveVersionChainAtomically(t *testing.T)
 	}
 }
 
+func TestFamilyReplacementHistoryBackfillsChainWithoutPublishedHead(t *testing.T) {
+	ctx := t.Context()
+	s, db, clock, create := familyReplacementFixture(t)
+	familyID := create.Payload.BusinessFamilyID
+	familyRevision := create.Payload.FamilyRevision
+	seedSplitTarget(t, db, "v2024")
+	add := cmd("family_member_add", "history-member-v2024")
+	add.ID, add.ExpectedRevision, add.Payload.DocumentID = familyID, familyRevision, "v2024"
+	added, err := s.Execute(ctx, add)
+	if err != nil {
+		t.Fatal(err)
+	}
+	familyRevision = added.Revision
+	docs := []string{"source", "target", "v2024"}
+	var drafts []Result
+	for i := 1; i < len(docs); i++ {
+		due := clock.Add(time.Duration(i) * time.Hour)
+		draft := create
+		draft.OperationID = "nohead-plan-" + docs[i]
+		draft.Payload.FamilyRevision = familyRevision
+		draft.Payload.TargetDocumentID, draft.Payload.DocumentID, draft.Payload.EffectiveAt = docs[i-1], docs[i], &due
+		result, err := s.Execute(ctx, draft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		drafts = append(drafts, result)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		for i, draft := range drafts {
+			due := clock.Add(time.Duration(i-3) * time.Hour)
+			if _, err := tx.Exec(`UPDATE ext_family_replacements SET effective_at_ms=? WHERE replacement_id=?`,
+				due.UnixMilli(), draft.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	query := Command{Scope: create.Scope, ID: familyID}
+	preview, err := s.FamilyReplacementHistory(ctx, query)
+	if err != nil || preview.Fingerprint == "" || preview.PublishedDocumentID != "" ||
+		preview.InitialDocumentID != "source" || preview.FinalDocumentID != "v2024" ||
+		len(preview.Steps) != 2 || preview.FamilyRevision != familyRevision {
+		t.Fatal("no-head historical chain cannot be previewed", preview, err)
+	}
+	apply := cmd("family_replace_history", "history-nohead")
+	apply.ID, apply.ExpectedRevision = familyID, preview.FamilyRevision
+	apply.Payload = Payload{SecondConfirmation: true, HistoryFingerprint: preview.Fingerprint,
+		ReplacementIDs: []string{drafts[0].ID, drafts[1].ID}}
+	result, err := s.Execute(ctx, apply)
+	if err != nil || result.Status != "applied" || result.TargetDocumentID != "v2024" ||
+		result.Revision != preview.FamilyRevision+2 {
+		t.Fatal("no-head historical cutover failed", result, err)
+	}
+	families, err := s.Families(ctx, query)
+	if err != nil || len(families) != 1 || families[0].PublishedDocumentID != "v2024" ||
+		families[0].Revision != preview.FamilyRevision+2 {
+		t.Fatal("unexpected publication head after no-head backfill", families, err)
+	}
+	if err := db.View(ctx, func(tx *sql.Tx) error {
+		for doc, want := range map[string]string{"source": "superseded", "target": "superseded", "v2024": "active"} {
+			state, _, err := store.ReadLifecycleCurrentTx(ctx, tx, 7, "kb", doc)
+			if err != nil {
+				return err
+			}
+			if state != want {
+				t.Fatalf("document %s state=%s want=%s", doc, state, want)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFamilyReplacementCompetingApprovalAndDrift(t *testing.T) {
 	ctx := t.Context()
 	s, db, clock, create := familyReplacementFixture(t)

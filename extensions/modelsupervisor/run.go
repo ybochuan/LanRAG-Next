@@ -62,13 +62,14 @@ func Run(ctx context.Context, cfg Config, report func(string)) error {
 	}()
 
 	manager, err := NewManager(Options{
-		Store:       NewStore(cfg.StatePath),
-		BinaryDir:   cfg.BinaryDir,
-		ModelDir:    cfg.ModelDir,
-		APIKey:      cfg.APIKey,
-		Job:         job,
-		StopTimeout: cfg.StopTimeout,
-		LogLines:    cfg.LogLines,
+		Store:              NewStore(cfg.StatePath),
+		BinaryDir:          cfg.BinaryDir,
+		ModelDir:           cfg.ModelDir,
+		AllowSelectedFiles: cfg.LocalCore,
+		APIKey:             cfg.APIKey,
+		Job:                job,
+		StopTimeout:        cfg.StopTimeout,
+		LogLines:           cfg.LogLines,
 	})
 	if err != nil {
 		return err
@@ -78,7 +79,7 @@ func Run(ctx context.Context, cfg Config, report func(string)) error {
 	}
 	defer func() { _ = manager.Close() }()
 
-	prober := &Prober{WSLDistro: cfg.WSLDistro}
+	prober := &Prober{WSLDistro: cfg.WSLDistro, LocalCore: cfg.LocalCore}
 	server, err := NewServer(manager, prober, cfg.Token)
 	if err != nil {
 		return err
@@ -110,7 +111,7 @@ func Run(ctx context.Context, cfg Config, report func(string)) error {
 		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
-	report(fmt.Sprintf("model supervisor listening on http://%s", cfg.Addr))
+	report(fmt.Sprintf("model supervisor listening on http://%s", listener.Addr()))
 	serveErr := httpServer.Serve(listener)
 	<-shutdownDone
 	if errors.Is(serveErr, http.ErrServerClosed) {

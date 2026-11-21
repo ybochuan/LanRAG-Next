@@ -15,13 +15,16 @@ const maxHistoricalReplacements = 16
 // FamilyReplacementHistory describes a past-due suffix of one family's timeline.
 // Fingerprint is present only when the saved drafts form a confirmable chain.
 type FamilyReplacementHistory struct {
-	FamilyID            string              `json:"business_family_id"`
-	FamilyRevision      int64               `json:"family_revision"`
-	PublishedDocumentID string              `json:"published_document_id,omitempty"`
-	FinalDocumentID     string              `json:"final_document_id,omitempty"`
-	Steps               []FamilyReplacement `json:"steps"`
-	Fingerprint         string              `json:"fingerprint,omitempty"`
-	BlockedReason       string              `json:"blocked_reason,omitempty"`
+	FamilyID            string `json:"business_family_id"`
+	FamilyRevision      int64  `json:"family_revision"`
+	PublishedDocumentID string `json:"published_document_id,omitempty"`
+	// InitialDocumentID is the earliest document of an unbounded legacy chain.
+	// It is set only when the family has no published head yet.
+	InitialDocumentID string              `json:"initial_document_id,omitempty"`
+	FinalDocumentID   string              `json:"final_document_id,omitempty"`
+	Steps             []FamilyReplacement `json:"steps"`
+	Fingerprint       string              `json:"fingerprint,omitempty"`
+	BlockedReason     string              `json:"blocked_reason,omitempty"`
 }
 
 // FamilyReplacementHistory reads a preview without refreshing or changing facts.
@@ -66,7 +69,7 @@ func (s *Service) familyReplacementHistoryTx(ctx context.Context, tx *sql.Tx, sc
 	if err != nil {
 		return preview, err
 	}
-	if headDate == 0 {
+	if headDate == 0 && preview.PublishedDocumentID != "" {
 		preview.BlockedReason = "missing_applied_head"
 		return preview, nil
 	}
@@ -103,7 +106,19 @@ func (s *Service) familyReplacementHistoryTx(ctx context.Context, tx *sql.Tx, sc
 		preview.BlockedReason = "history_limit"
 		return preview, nil
 	}
+	if preview.PublishedDocumentID == "" {
+		// A family can be assembled and receive historical drafts before it ever
+		// has a published head. In that case the earliest draft's old document is
+		// the only defensible baseline for the chain.
+		first := preview.Steps[0]
+		preview.InitialDocumentID = first.OldDocumentID
+		headVersion = first.OldVersionNodeID
+		headDate = 0
+	}
 	previous, version, date := preview.PublishedDocumentID, headVersion, headDate
+	if previous == "" {
+		previous = preview.InitialDocumentID
+	}
 	seen := map[string]bool{previous: true}
 	for _, p := range preview.Steps {
 		if p.Status != "pending_review" || p.OldDocumentID != previous || p.OldVersionNodeID != version ||
@@ -167,7 +182,14 @@ func (s *Service) applyFamilyReplacementHistory(ctx context.Context, c Command) 
 	if !preview.matches(c) {
 		return s.replayAfterObservationError(ctx, c, ErrConflict)
 	}
-	docs := []string{preview.PublishedDocumentID}
+	baseDocument := preview.PublishedDocumentID
+	if baseDocument == "" {
+		baseDocument = preview.InitialDocumentID
+	}
+	if baseDocument == "" {
+		return s.replayAfterObservationError(ctx, c, ErrConflict)
+	}
+	docs := []string{baseDocument}
 	evidence := make([][]weknora.AttachmentDocument, len(preview.Steps))
 	dependencies := make([]map[string]string, len(preview.Steps))
 	for i, p := range preview.Steps {

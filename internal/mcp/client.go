@@ -214,6 +214,10 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	clientCfg.SameOriginRedirectsOnly = true
 	clientCfg.Timeout = timeout
 	httpClient := secutils.NewSSRFSafeHTTPClient(clientCfg)
+	if IsDesktopHostMCP(config.Service) {
+		httpClient.Transport = &http.Transport{}
+		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 
 	// Build headers
 	headers := make(map[string]string)

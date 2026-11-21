@@ -13,14 +13,32 @@ import (
 // lifecycle row still appears as pending because it exists in the native list.
 const nativeOverviewFrom = ` FROM weknora.knowledges k LEFT JOIN ext_lifecycle_current c ON c.tenant_id=k.tenant_id AND c.knowledge_base_id=k.knowledge_base_id AND c.document_id=k.id` + store.LifecycleEventJoinSQL
 
+// nativeAttachmentParentStateSQL returns the verified lifecycle state of the
+// attachment's current parent. It is used only to display the parent's state on
+// an active attachment; the child's own lifecycle row and event stream stay
+// unchanged.
+func nativeAttachmentParentStateSQL() string {
+	return `(SELECT pc.state
+FROM ext_attachment_links l
+JOIN ext_lifecycle_current pc ON pc.tenant_id=l.tenant_id AND pc.knowledge_base_id=l.knowledge_base_id AND pc.document_id=l.parent_document_id
+JOIN ext_lifecycle_events pe ON pe.tenant_id=pc.tenant_id AND pe.knowledge_base_id=pc.knowledge_base_id AND pe.document_id=pc.document_id AND pe.event_id=pc.last_event_id
+WHERE l.tenant_id=k.tenant_id AND l.knowledge_base_id=k.knowledge_base_id AND l.attachment_id=k.id
+AND l.removed_at IS NULL AND l.retired_at IS NULL
+AND pc.state=pe.to_state
+AND NOT EXISTS (SELECT 1 FROM ext_lifecycle_events newer WHERE newer.tenant_id=pc.tenant_id AND newer.knowledge_base_id=pc.knowledge_base_id AND newer.document_id=pc.document_id AND newer.sequence>pe.sequence)
+ORDER BY l.created_at DESC LIMIT 1)`
+}
+
 func nativeOverviewState() string {
-	return `COALESCE(CASE WHEN c.document_id IS NULL OR NOT (` + store.LifecycleCurrentVerifiedSQL + `) THEN 'pending' ELSE c.state END,'pending')`
+	own := `COALESCE(CASE WHEN c.document_id IS NULL OR NOT (` + store.LifecycleCurrentVerifiedSQL + `) THEN 'pending' ELSE c.state END,'pending')`
+	parent := nativeAttachmentParentStateSQL()
+	return `CASE WHEN ` + parent + ` IS NOT NULL AND ` + parent + `<>'active' THEN ` + parent + ` WHEN (` + own + `)='active' THEN COALESCE(` + parent + `,` + own + `) ELSE ` + own + ` END`
 }
 
 func (s *Server) nativeOverviewCounts(ctx context.Context, tenant, kb string) (map[string]int, error) {
 	counts := map[string]int{}
 	err := s.db.ViewNative(ctx, s.nativeDB, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT `+nativeOverviewState()+` state,count(*)`+nativeOverviewFrom+` WHERE k.tenant_id=? AND k.knowledge_base_id=? AND COALESCE(k.deleted_at,'')='' GROUP BY state`, tenant, kb)
+		rows, err := tx.QueryContext(ctx, `SELECT state,count(*) FROM (SELECT `+nativeOverviewState()+` AS state`+nativeOverviewFrom+` WHERE k.tenant_id=? AND k.knowledge_base_id=? AND COALESCE(k.deleted_at,'')='') GROUP BY state`, tenant, kb)
 		if err != nil {
 			return err
 		}

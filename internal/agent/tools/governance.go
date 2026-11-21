@@ -145,7 +145,7 @@ func searchSourceInputs(rows []*searchResultWithMeta) ([]extensionbridge.SourceI
 
 // rerankSourceInputs proves the cleaned text and its optional raw prefixes
 // against native fields. Only the later tool output marks retrieved chunks.
-func rerankSourceInputs(rows []*types.SearchResult, passages []string, hasImages bool) ([]extensionbridge.SourceInput, bool) {
+func rerankSourceInputs(ctx context.Context, rows []*types.SearchResult, passages []string, hasImages bool) ([]extensionbridge.SourceInput, bool) {
 	if hasImages || len(rows) != len(passages) {
 		return nil, false
 	}
@@ -163,21 +163,32 @@ func rerankSourceInputs(rows []*types.SearchResult, passages []string, hasImages
 			DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "content", ValueHash: extensionbridge.SourceFieldHash(row.Content),
 		})
 		if header := strings.TrimSpace(row.ContextHeader); header != "" {
-			body = header + "\n\n" + body
 			inputs = append(inputs, extensionbridge.SourceInput{
 				DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "context_header", ValueHash: extensionbridge.SourceFieldHash(row.ContextHeader),
 			})
 		}
 		if title := strings.TrimSpace(row.KnowledgeTitle); title != "" {
-			body = title + "\n\n" + body
 			input := extensionbridge.SourceInput{DocumentID: row.KnowledgeID, Field: "title", ValueHash: extensionbridge.SourceFieldHash(row.KnowledgeTitle)}
 			if !titles[input] {
 				inputs = append(inputs, input)
 				titles[input] = true
 			}
 		}
-		// Rerank can trim the prepared passage to its character limit.
-		if !strings.HasPrefix(body, passages[i]) {
+		if len(row.ChunkMetadata) > 0 {
+			inputs = append(inputs, extensionbridge.SourceInput{
+				DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "metadata", ValueHash: extensionbridge.SourceFieldHash([]byte(row.ChunkMetadata)),
+			})
+		}
+		if row.ImageInfo != "" {
+			inputs = append(inputs, extensionbridge.SourceInput{
+				DocumentID: row.KnowledgeID, ChunkID: row.ID, Field: "image_info", ValueHash: extensionbridge.SourceFieldHash(row.ImageInfo),
+			})
+		}
+		// ModelPassage is the exact source composition. The rerank stage may
+		// trim its tail to the model's character limit, so the sent passage
+		// must be a prefix of the expected one.
+		expected := reranking.ModelPassage(ctx, row)
+		if !strings.HasPrefix(expected, passages[i]) {
 			return nil, false
 		}
 	}

@@ -402,3 +402,9 @@ test('the feedback sub-tabs write the writable ref, not the readonly kind comput
   assert.ok(template.includes("@click=\"feedbackTab='feedback'\""), 'the feedback tab must switch feedbackTab')
   assert.ok(!template.includes("@click=\"kind="), 'kind is a readonly computed and must not be assigned')
 })
+
+test('the workbench shows feedback review within its workspace', () => {
+  const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template!.content
+  assert.doesNotMatch(template, />未归属反馈<\/t-button>/)
+  assert.match(template, /id="tab-feedback-review"/)
+})

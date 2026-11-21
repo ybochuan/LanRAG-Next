@@ -1,7 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { SupervisorError, isAuthFailure } from './modelSupervisor.ts'
+import { SupervisorError, isAuthFailure, list } from './modelSupervisor.ts'
+
+test('packaged Desktop uses the WebView path without a browser credential', async (t) => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __RUNTIME_CONFIG__: { LANRAG_LITE_PRODUCT: true } },
+  })
+  t.after(() => { Reflect.deleteProperty(globalThis, 'window') })
+  t.mock.method(globalThis, 'fetch', async (path: string, init: RequestInit) => {
+    assert.equal(path, '/extensions/models/list')
+    assert.deepEqual(init.headers, { 'X-AgentRAG-Model-Supervisor-Version': '1' })
+    return Response.json({ instances: [] })
+  })
+  assert.deepEqual(await list(), { instances: [] })
+})
 
 test('isAuthFailure recognises a rejected supervisor token', () => {
   assert.equal(

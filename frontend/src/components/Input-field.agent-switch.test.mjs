@@ -9,6 +9,35 @@ import { chatSubmitShortcut } from '../utils/chatSubmitShortcut.ts'
 const inputField = readFileSync(new URL('./Input-field.vue', import.meta.url), 'utf8')
 const settingsStore = readFileSync(new URL('../stores/settings.ts', import.meta.url), 'utf8')
 
+test('quick answer setup opens the agent editor inside the current window', () => {
+  const code = inputField.slice(inputField.indexOf('const goToAgentEditor ='), inputField.indexOf('const toggleWebSearch ='))
+  const Button = {}
+  const choices = []
+  const visits = []
+  const show = vm.runInNewContext(ts.transpile(`${code}\nshowAgentNotReadyMessage`), {
+    Button,
+    h: (type, props, children) => ({ type, props, children }),
+    t: (key) => key,
+    locale: { value: 'zh-CN' },
+    formatLocalizedList: (list) => list.join(','),
+    canLocallyConfigureAgent: () => true,
+    resolveAgentNotReadySection: () => 'model',
+    resolveAgentNotReadyHighlight: (keys) => keys[0],
+    MessagePlugin: { warning: ({ content }) => choices.push(...content().children) },
+    router: { push: (location) => visits.push(location) },
+  })
+
+  show({ id: 'builtin-quick-answer', name: '快速问答' }, ['对话模型'], ['summary_model'])
+  const action = choices[1]
+  assert.equal(action.type, Button)
+  assert.equal(action.props.href, undefined)
+  action.props.onClick()
+  assert.deepEqual(JSON.parse(JSON.stringify(visits)), [{
+    path: '/platform/agents',
+    query: { edit: 'builtin-quick-answer', section: 'model', highlight: 'summary_model' },
+  }])
+})
+
 test('composer shortcuts queue Enter, inject drafts, and promote the first queued message when empty', () => {
   const code = inputField.slice(inputField.indexOf('const steerShortcutLabel ='), inputField.indexOf('const onPaste ='))
   const sends = [], promotes = []

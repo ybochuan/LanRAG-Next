@@ -8,9 +8,9 @@
     <t-alert v-if="notice" theme="success" class="notice">{{ notice }}</t-alert>
     <div v-if="busy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取文档状态…</span></div>
     <template v-if="detail">
-      <p>文档状态 · {{ stateLabels[detail.snapshot.current.state] || detail.snapshot.current.state }}</p>
+      <p>文档状态 · {{ stateLabels[detail.snapshot.effective_state || detail.snapshot.current.state] || detail.snapshot.effective_state || detail.snapshot.current.state }}</p>
       <form @submit.prevent="save">
-        <p v-if="inherited" class="subtle">此附件的生效/失效时间继承主件，请到主件编辑日期。</p>
+        <p v-if="inherited" class="subtle">此附件的生效/失效时间与生命周期状态继承主件，请到主件编辑日期。</p>
         <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked || inherited" clearable /></label>
         <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked || inherited" clearable /></label>
         <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked || inherited" clearable /></label>

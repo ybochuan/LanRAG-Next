@@ -8,6 +8,8 @@
  * do when nothing else comes up.
  */
 
+export const isPackagedDesktop = (): boolean => Boolean(window.__RUNTIME_CONFIG__?.LANRAG_LITE_PRODUCT)
+
 const DEFAULT_BASE = 'http://127.0.0.1:8092'
 const BASE_KEY = 'agentrag_model_supervisor_url'
 const TOKEN_KEY = 'agentrag_model_supervisor_token'
@@ -40,6 +42,7 @@ export interface Health {
 export interface Instance {
   id: string
   model: string
+  model_path?: string
   task_type: TaskType
   port: number
   status: InstanceStatus
@@ -109,6 +112,7 @@ export interface LogLine {
 export interface SpecInput {
   id: string
   model: string
+  model_path?: string
   task_type: TaskType
   port: number
   use_gpu?: boolean
@@ -132,6 +136,13 @@ export class SupervisorError extends Error {
 }
 
 export const baseUrl = (): string => localStorage.getItem(BASE_KEY) || DEFAULT_BASE
+
+export async function pickModelFile(): Promise<string> {
+  const native = window as Window & { go?: { main?: { App?: { PickModelFile?: () => Promise<string> } } } }
+  const pick = native.go?.main?.App?.PickModelFile
+  if (!pick) throw new Error('请在 LanRAG Lite 桌面窗口中选择 GGUF 文件。')
+  return pick()
+}
 export const setBaseUrl = (value: string): void => {
   const trimmed = value.trim().replace(/\/+$/, '')
   if (trimmed) localStorage.setItem(BASE_KEY, trimmed)
@@ -145,15 +156,14 @@ export const setToken = (value: string): void => {
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {
-    [VERSION_HEADER]: WIRE_VERSION,
-    'X-API-Key': token()
-  }
+  const desktop = isPackagedDesktop()
+  const headers: Record<string, string> = { [VERSION_HEADER]: WIRE_VERSION }
+  if (!desktop) headers['X-API-Key'] = token()
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
   let response: Response
   try {
-    response = await fetch(baseUrl() + path, {
+    response = await fetch(desktop ? path : baseUrl() + path, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body)
@@ -162,7 +172,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     // A network-level failure here almost always means the supervisor is not
     // running, or its allowlist does not include this page's origin.
     throw new SupervisorError(
-      `无法连接模型管理器（${baseUrl()}）。请确认它已启动，且允许来源包含 ${window.location.origin}。`,
+      desktop ? '无法连接本机模型管理器。'
+        : `无法连接模型管理器（${baseUrl()}）。请确认它已启动，且允许来源包含 ${window.location.origin}。`,
       0,
       'unreachable',
       { cause: String(cause) }
@@ -179,6 +190,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     }
   }
   if (!response.ok) {
+    if (desktop && response.status === 503) {
+      throw new SupervisorError('本机模型管理器暂未就绪。请重试或查看 model-supervisor.log。', 503, 'unreachable')
+    }
     const record = (payload ?? {}) as Record<string, unknown>
     throw new SupervisorError(
       String(record.error ?? `HTTP ${response.status}`),
@@ -186,6 +200,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
       String(record.code ?? 'http_error'),
       record
     )
+  }
+  if (desktop && payload === null) {
+    throw new SupervisorError('请在 LanRAG Lite 桌面窗口中打开模型进程管理。', 0, 'desktop_required')
   }
   return payload as T
 }

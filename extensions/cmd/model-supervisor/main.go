@@ -7,18 +7,35 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/modelsupervisor"
 )
 
 func main() {
+	parentStdin := flag.Bool("parent-stdin", false, "report the bound address to Desktop and stop when its stdin closes")
+	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Getenv, func(message string) { log.Print(message) }); err != nil && !errors.Is(err, context.Canceled) {
+	if *parentStdin {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			stop()
+		}()
+	}
+	if err := run(ctx, os.Getenv, func(message string) {
+		log.Print(message)
+		if address, ok := strings.CutPrefix(message, "model supervisor listening on "); *parentStdin && ok {
+			fmt.Println(address)
+		}
+	}); err != nil && !errors.Is(err, context.Canceled) {
 		log.Print(err)
 		os.Exit(1)
 	}

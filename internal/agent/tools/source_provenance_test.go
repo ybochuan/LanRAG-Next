@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/extensionbridge"
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -57,6 +59,25 @@ func TestSearchSourceInputsPreserveAllReturnedDocuments(t *testing.T) {
 	}
 }
 
+func TestRerankSourceInputsAllowGeneratedQuestionEnrichment(t *testing.T) {
+	row := &types.SearchResult{
+		ID: "chunk", KnowledgeID: "doc", Content: "BODY", KnowledgeTitle: "TITLE",
+		ChunkMetadata: types.JSON(`{"generated_questions":[{"question":"Q1"},{"question":"Q2"}]}`),
+	}
+	passage := reranking.ModelPassage(context.Background(), row)
+	inputs, known := rerankSourceInputs(context.Background(), []*types.SearchResult{row}, []string{passage}, false)
+	if !known {
+		t.Fatal("generated question enrichment rejected")
+	}
+	fields := map[string]bool{}
+	for _, input := range inputs {
+		fields[input.Field] = true
+	}
+	if !fields["content"] || !fields["metadata"] {
+		t.Fatalf("missing evidence fields: %+v", inputs)
+	}
+}
+
 func TestRerankSourceInputsProveOnlyFieldsThatExplainSentText(t *testing.T) {
 	row := &types.SearchResult{
 		ID: "chunk", KnowledgeID: "doc", Content: "**Reviewed** by two people",
@@ -64,7 +85,7 @@ func TestRerankSourceInputsProveOnlyFieldsThatExplainSentText(t *testing.T) {
 	}
 	rows := []*types.SearchResult{row}
 	passage := "Policy\n\nSection 1\n\nReviewed"
-	inputs, known := rerankSourceInputs(rows, []string{passage}, false)
+	inputs, known := rerankSourceInputs(context.Background(), rows, []string{passage}, false)
 	if !known || len(inputs) != 3 {
 		t.Fatalf("cleaned, fitted text lacked evidence: %+v", inputs)
 	}
@@ -78,10 +99,10 @@ func TestRerankSourceInputsProveOnlyFieldsThatExplainSentText(t *testing.T) {
 	if len(fields) != 0 {
 		t.Fatalf("missing evidence fields: %v", fields)
 	}
-	if _, known = rerankSourceInputs(rows, []string{passage + " with unproved enrichment"}, false); known {
+	if _, known = rerankSourceInputs(context.Background(), rows, []string{passage + " with unproved enrichment"}, false); known {
 		t.Fatal("unproved enrichment can seal")
 	}
-	if _, known = rerankSourceInputs(rows, []string{passage}, true); known {
+	if _, known = rerankSourceInputs(context.Background(), rows, []string{passage}, true); known {
 		t.Fatal("image request can seal with text evidence")
 	}
 }

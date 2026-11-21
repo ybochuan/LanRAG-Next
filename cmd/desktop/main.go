@@ -26,6 +26,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
@@ -194,6 +195,14 @@ func main() {
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
 	execPath, errPath := os.Executable()
+	installed, err := prepareInstalledDesktop(execPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
+	if installed != nil {
+		defer installed.close()
+	}
 	// A packaged .app keeps config under Contents/Resources. wails dev also
 	// runs from a .app, but that bundle has no copied config; stay in the
 	// repo and use config/ there.
@@ -212,7 +221,9 @@ func main() {
 	}
 
 	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded
-	_ = godotenv.Load()
+	if installed == nil {
+		_ = godotenv.Load()
+	}
 	// wails dev picks up the repo .env, which may ask for Redis streams
 	// without REDIS_ADDR. go-redis then dials localhost:6379 and aborts
 	// startup. Lite has no Redis; keep the in-memory stream manager.
@@ -235,7 +246,11 @@ func main() {
 	runtime.SilenceGinRouteSpam()
 	// Provision the signing key first so the startup banner reflects it
 	// instead of warning about a key the desktop is about to create.
-	if err := ensureDesktopSigningKey(); err != nil {
+	signingKey := ensureDesktopSigningKey
+	if installed != nil {
+		signingKey = func() error { return ensureDesktopSigningKeyInDir(installed.profile) }
+	}
+	if err := signingKey(); err != nil {
 		panic(fmt.Sprintf("initialize desktop signing key: %v", err))
 	}
 	runtime.LogStartupEnv(context.Background())
@@ -255,6 +270,7 @@ func main() {
 
 	// Initialize the WeKnora App struct
 	app := NewApp()
+	app.installed = installed
 	setupBytes := make([]byte, 32)
 	if _, err := rand.Read(setupBytes); err != nil {
 		panic("failed to generate desktop authentication capability")
@@ -265,6 +281,7 @@ func main() {
 
 	// Error channel to capture server startup errors
 	serverErrCh := make(chan error, 1)
+	serverReady := make(chan struct{})
 
 	// Run backend in a separate goroutine
 	go func() {
@@ -334,6 +351,13 @@ func main() {
 			}()
 
 			logger.Infof(context.Background(), "Server is running at %s (proxy -> %s)", tcpAddr.String(), app.backendURL)
+			if installed != nil {
+				if err := installed.writeCoreAddress(app.backendURL); err != nil {
+					_ = listener.Close()
+					return fmt.Errorf("write desktop Core address: %w", err)
+				}
+			}
+			close(serverReady)
 			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 				return fmt.Errorf("server error: %v", err)
 			}
@@ -346,15 +370,30 @@ func main() {
 		}
 	}()
 
-	// Give the server a moment to start and determine its port
-	time.Sleep(500 * time.Millisecond)
+	select {
+	case <-serverReady:
+	case <-serverErrCh:
+		return
+	}
 
 	// Create application with options
 	// macOS app menu
 	AppMenu := menu.NewMenu()
-	FileMenu := AppMenu.AddSubmenu("WeKnora Lite")
+	productName := "WeKnora Lite"
+	var windowsOptions *windows.Options
+	if installed != nil {
+		productName = "LanRAG Lite"
+		windowsOptions = &windows.Options{WebviewUserDataPath: filepath.Join(installed.profile, "webview")}
+	}
+	FileMenu := AppMenu.AddSubmenu(productName)
 	FileMenu.AddText("About WeKnora", keys.CmdOrCtrl("i"), func(_ *menu.CallbackData) {
 		if app.ctx == nil {
+			return
+		}
+		if installed != nil {
+			_, _ = wailsruntime.MessageDialog(app.ctx, wailsruntime.MessageDialogOptions{
+				Type: wailsruntime.InfoDialog, Title: productName, Message: "LanRAG Lite " + desktopAboutVersion(),
+			})
 			return
 		}
 		choice, err := wailsruntime.MessageDialog(app.ctx, wailsruntime.MessageDialogOptions{
@@ -373,15 +412,13 @@ func main() {
 		}
 	})
 	FileMenu.AddText("Check for Updates...", nil, func(_ *menu.CallbackData) {
-		if app.ctx == nil {
-			return
-		}
-		checkUpdate(app.ctx, desktopAboutVersion(), true, false)
+		app.CheckForUpdates()
 	})
 	FileMenu.AddSeparator()
 	FileMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
-		app.shutdown(context.Background())
-		os.Exit(0)
+		if app.ctx != nil {
+			wailsruntime.Quit(app.ctx)
+		}
 	})
 
 	AppMenu.Append(menu.EditMenu())
@@ -395,12 +432,22 @@ func main() {
 
 	// Wait for the backend URL to be set
 	targetURL, _ := url.Parse(app.backendURL)
-	proxy := desktopAPIProxy(targetURL)
+	var proxy http.Handler = desktopAPIProxy(targetURL)
+	if installed != nil {
+		core := proxy
+		proxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/extensions/models/") {
+				installed.supervisor.ServeHTTP(w, r)
+				return
+			}
+			core.ServeHTTP(w, r)
+		})
+	}
 
 	// Start Wails application
 	// We use a Reverse Proxy to seamlessly proxy Wails' frontend to our Go backend
-	err := wails.Run(&options.App{
-		Title:         "WeKnora Lite",
+	err = wails.Run(&options.App{
+		Title:         productName,
 		Width:         1280,
 		Height:        800,
 		DisableResize: false,
@@ -429,6 +476,7 @@ func main() {
 			app,
 		},
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
+		Windows:          windowsOptions,
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),
 			WebviewIsTransparent: false,

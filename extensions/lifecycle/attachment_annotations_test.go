@@ -92,6 +92,48 @@ func TestAttachmentEffectiveDatesFollowParent(t *testing.T) {
 	}
 }
 
+func TestAttachmentEffectiveStateFollowsParent(t *testing.T) {
+	db := database(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	m := NewMachine(db, func() time.Time { return now })
+	parent := Scope{TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: "parent"}
+	child := Scope{TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: "child"}
+	insertAttachmentLink(t, db, now)
+	mustApply(t, m, command(t, m, parent, "parent-init", "", Pending, Initialize))
+	mustApply(t, m, command(t, m, parent, "parent-active", Pending, Active, ParseCompleted))
+	mustApply(t, m, command(t, m, child, "child-init", "", Pending, Initialize))
+	mustApply(t, m, command(t, m, child, "child-active", Pending, Active, ParseCompleted))
+
+	if _, err := NewStore(db).Append(ctx, Event{EventID: "parent-superseded", TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: "parent", FromState: Active, ToState: "superseded", Reason: "family_replacement_effective", OccurredAt: now.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := m.Snapshot(ctx, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Current.State != Active || snap.EffectiveState != State("superseded") {
+		t.Fatalf("child current=%q effective=%q, want current=active effective=superseded", snap.Current.State, snap.EffectiveState)
+	}
+	if _, err := NewStore(db).Append(ctx, Event{EventID: "child-stale", TenantID: 7, KnowledgeBaseID: "kb-a", DocumentID: "child", FromState: Active, ToState: Stale, Reason: "expired", OccurredAt: now.Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err = m.Snapshot(ctx, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Current.State != Stale || snap.EffectiveState != State("superseded") {
+		t.Fatalf("stale child current=%q effective=%q, want current=stale effective=superseded", snap.Current.State, snap.EffectiveState)
+	}
+	parentSnap, err := m.Snapshot(ctx, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentSnap.Current.State != State("superseded") || parentSnap.EffectiveState != State("superseded") {
+		t.Fatalf("parent current=%q effective=%q", parentSnap.Current.State, parentSnap.EffectiveState)
+	}
+}
+
 func TestAttachmentExpiryFollowsParent(t *testing.T) {
 	db := database(t)
 	ctx := context.Background()

@@ -153,10 +153,11 @@ var (
 // also the accepted body of POST /instances, so every field carries an explicit
 // JSON name and nothing runtime-only lives here.
 type Spec struct {
-	ID       string   `json:"id"`
-	Model    string   `json:"model"`
-	TaskType TaskType `json:"task_type"`
-	Port     int      `json:"port"`
+	ID        string   `json:"id"`
+	Model     string   `json:"model"`
+	ModelPath string   `json:"model_path,omitempty"`
+	TaskType  TaskType `json:"task_type"`
+	Port      int      `json:"port"`
 	// UseGPU offloads layers to the GPU. It is a pointer so that "not specified"
 	// can mean "use the GPU": a plain bool would default to false and silently run
 	// CPU inference on a machine that has a perfectly good card.
@@ -241,11 +242,12 @@ type Health struct {
 // View is the read projection returned by the HTTP API. It intentionally omits
 // the model API key, the process handle and the resolved binary path.
 type View struct {
-	ID       string   `json:"id"`
-	Model    string   `json:"model"`
-	TaskType TaskType `json:"task_type"`
-	Port     int      `json:"port"`
-	Status   Status   `json:"status"`
+	ID        string   `json:"id"`
+	Model     string   `json:"model"`
+	ModelPath string   `json:"model_path,omitempty"`
+	TaskType  TaskType `json:"task_type"`
+	Port      int      `json:"port"`
+	Status    Status   `json:"status"`
 	// GPULayers is the resolved -ngl value, so a reader never has to reproduce
 	// the use_gpu/gpu_layers precedence to know what the process will do.
 	GPULayers int        `json:"gpu_layers"`
@@ -264,6 +266,7 @@ func ViewOf(s Spec) View {
 	return View{
 		ID:        s.ID,
 		Model:     s.Model,
+		ModelPath: s.ModelPath,
 		TaskType:  s.TaskType,
 		Port:      s.Port,
 		Status:    StatusStopped,

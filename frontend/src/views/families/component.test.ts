@@ -89,7 +89,7 @@ test('approving replacement requires confirmation and a write grant',async()=>{
     await vue.nextTick()
     view.state.family.value={business_family_id:'family',revision:2}
     const row={id:'proposal',business_family_id:'family',family_revision:2,status:'pending_review',
-      old_document_id:'old-policy',effective_at:'2026-11-15T00:00:00Z',revision:3}
+      old_document_id:'old-policy',effective_at:'2099-11-15T00:00:00Z',revision:3}
     view.state.canWrite.value=true
     view.state.approve(row)
     assert.equal(view.calls.length,0)

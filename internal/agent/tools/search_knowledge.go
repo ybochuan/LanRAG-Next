@@ -883,7 +883,7 @@ func (t *SearchKnowledgeTool) rerankResults(
 	}
 	if _, tracked := extensionbridge.SourceRunFromContext(ctx); tracked {
 		opts.BeforeScore = func(candidates []*types.SearchResult, passages []string, hasImages bool) error {
-			inputs, known := rerankSourceInputs(candidates, passages, hasImages)
+			inputs, known := rerankSourceInputs(ctx, candidates, passages, hasImages)
 			sourceKnown = known
 			return extensionbridge.CaptureSourceInputs(ctx, inputs, known)
 		}

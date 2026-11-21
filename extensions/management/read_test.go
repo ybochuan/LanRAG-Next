@@ -11,6 +11,74 @@ import (
 	"github.com/ybochuan/LanRAG-Next/extensions/lifecycle"
 )
 
+func TestOverviewAttachmentStateFollowsParent(t *testing.T) {
+	s := fixture(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "native.db")
+	native, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	if _, err = native.Exec("CREATE TABLE knowledges (id TEXT, tenant_id INTEGER, knowledge_base_id TEXT, title TEXT, deleted_at DATETIME); INSERT INTO knowledges VALUES ('parent',7,'kb','Main document',NULL),('child',7,'kb','annex-01.docx',NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	store := lifecycle.NewStore(s.db)
+	for _, event := range []lifecycle.Event{
+		{EventID: "parent-active", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "parent", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()},
+		{EventID: "parent-superseded", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "parent", FromState: lifecycle.Active, ToState: "superseded", Reason: "family_replacement_effective", OccurredAt: time.Now().Add(time.Second)},
+		{EventID: "child-active", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "child", ToState: lifecycle.Active, Reason: "fixture", OccurredAt: time.Now()},
+		{EventID: "child-stale", TenantID: 7, KnowledgeBaseID: "kb", DocumentID: "child", FromState: lifecycle.Active, ToState: lifecycle.Stale, Reason: "expired", OccurredAt: time.Now().Add(time.Second)},
+	} {
+		if _, err = store.Append(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = s.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO ext_attachment_links(import_id,tenant_id,knowledge_base_id,parent_document_id,parent_file_hash,attachment_sha256,attachment_file_hash,attachment_id,submitted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			"import-child", "7", "kb", "parent", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccccccccccccccccccc", "child", 1, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.WithNativeSQLite(path, nil)
+	w := call(s, `{"action":"overview","tenant_id":7,"knowledge_base_id":"kb","page_size":20}`, s.key)
+	var out struct {
+		Data struct {
+			Total     int
+			Documents []document
+			Counts    map[string]int
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != 200 {
+		t.Fatalf("overview=%d %s", w.Code, w.Body.String())
+	}
+	if out.Data.Counts["superseded"] != 2 || out.Data.Counts["active"] != 0 {
+		t.Fatalf("counts=%+v", out.Data.Counts)
+	}
+	found := false
+	for _, doc := range out.Data.Documents {
+		if doc.DocumentID == "child" {
+			found = true
+			if doc.State != "superseded" {
+				t.Fatalf("child state=%q, want superseded", doc.State)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("child missing from page: %+v", out.Data.Documents)
+	}
+	w = call(s, `{"action":"overview","tenant_id":7,"knowledge_base_id":"kb","state":"superseded","page_size":20}`, s.key)
+	var filtered struct {
+		Data struct {
+			Total int
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &filtered); err != nil || w.Code != 200 || filtered.Data.Total != 2 {
+		t.Fatalf("filtered overview=%d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestOverviewUsesNativeLiveDocumentSet(t *testing.T) {
 	s := fixture(t)
 	ctx := context.Background()

@@ -182,8 +182,8 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	}
 	service.TenantID = tenantID
 
-	// SSRF validation for MCP service URL
-	if service.URL != nil && *service.URL != "" {
+	// The Desktop endpoint is still checked by the shared authenticated-host policy below.
+	if service.URL != nil && *service.URL != "" && !mcpsecurity.IsDesktopHostMCP(&service) {
 		if err := secutils.ValidateURLForSSRF(*service.URL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for MCP service URL: %v", err)
 			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("MCP service URL", *service.URL, err)))

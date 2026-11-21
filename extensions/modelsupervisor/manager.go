@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -32,15 +33,16 @@ type Launcher func(argv []string) (*exec.Cmd, error)
 
 // Options configures a Manager.
 type Options struct {
-	Store       *Store
-	BinaryDir   string
-	ModelDir    string
-	APIKey      string
-	Job         *winjob.Job
-	Launch      Launcher
-	Now         func() time.Time
-	StopTimeout time.Duration
-	LogLines    int
+	Store              *Store
+	BinaryDir          string
+	ModelDir           string
+	AllowSelectedFiles bool
+	APIKey             string
+	Job                *winjob.Job
+	Launch             Launcher
+	Now                func() time.Time
+	StopTimeout        time.Duration
+	LogLines           int
 	// PortCheck reports whether a loopback port is free. It is a seam so tests
 	// can simulate an occupied port; the real check cannot be faked.
 	PortCheck func(port int) error
@@ -203,12 +205,9 @@ func (m *Manager) launch(inst *instance) error {
 	if err := checkRuntimePlatform(binary, runtime.GOOS); err != nil {
 		return err
 	}
-	modelPath, err := ResolveUnder(m.opts.ModelDir, inst.spec.Model)
+	modelPath, _, err := m.ModelPath(inst.spec)
 	if err != nil {
-		return fmt.Errorf("resolve model: %w", err)
-	}
-	if _, err := os.Stat(modelPath); err != nil {
-		return fmt.Errorf("model %s is not available: %w", inst.spec.Model, err)
+		return err
 	}
 	argv, err := inst.spec.Argv(binary, modelPath, m.opts.APIKey)
 	if err != nil {
@@ -428,13 +427,22 @@ func (m *Manager) ModelPath(spec Spec) (string, int64, error) {
 	if err := spec.Validate(); err != nil {
 		return "", 0, err
 	}
-	path, err := ResolveUnder(m.opts.ModelDir, spec.Model)
-	if err != nil {
-		return "", 0, err
+	path := spec.ModelPath
+	if path == "" {
+		var err error
+		path, err = ResolveUnder(m.opts.ModelDir, spec.Model)
+		if err != nil {
+			return "", 0, err
+		}
+	} else if !m.opts.AllowSelectedFiles || !filepath.IsAbs(path) || filepath.Base(path) != spec.Model {
+		return "", 0, ErrPathEscape
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", 0, fmt.Errorf("model %s is not available: %w", spec.Model, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", 0, ErrInvalidModel
 	}
 	return path, info.Size(), nil
 }
@@ -523,5 +531,5 @@ func execLaunch(argv []string) (*exec.Cmd, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("empty command line")
 	}
-	return exec.Command(argv[0], argv[1:]...), nil
+	return withoutConsole(exec.Command(argv[0], argv[1:]...)), nil
 }

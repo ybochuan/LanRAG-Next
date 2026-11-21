@@ -631,7 +631,7 @@ func BuildSystemPromptSections(
 	}
 	sections = append(sections, SystemPromptSection{"related_documents", "当你查阅制度条款时，如果用户需要下载表格，或你想确认是否有最新的补充通知，请务必调用 query_related_docs 获取关联文件。先通过 discover_mcp_tools 按需发现该工具，使用已授权检索结果中的 document_id。"})
 	if slices.Contains(names, "discover_mcp_tools") {
-		sections = append(sections, SystemPromptSection{"archived_documents", "仅当用户明确要求查阅历史归档或已失效条款时，才通过 discover_mcp_tools 发现并调用 search_archived_documents。引用历史结果时，明确提醒用户内容已失效，不得将其当作现行依据。"})
+		sections = append(sections, SystemPromptSection{"archived_documents", "当用户明确要求查阅历史归档、已失效条款，或指定旧版年份（如“2024版”“上一版”“原版”）时，必须先通过 discover_mcp_tools 发现并调用 search_archived_documents，不能只依据现行文档回答。引用历史结果时，明确提醒用户内容已失效，不得将其当作现行依据。"})
 	}
 	return sections
 }

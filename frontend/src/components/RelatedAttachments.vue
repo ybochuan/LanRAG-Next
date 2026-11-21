@@ -38,10 +38,10 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { relatedAttachments, type RelatedAttachment } from '@/utils/relatedAttachments'
+import { answerAttachments, type RelatedAttachment } from '@/utils/relatedAttachments'
 import { downloadRelatedAttachment } from '@/api/relatedAttachments'
-const props = defineProps<{ session: any }>()
-const items = computed(() => relatedAttachments(props.session))
+const props = defineProps<{ session: any; answer?: string }>()
+const items = computed(() => answerAttachments(props.session, props.answer ?? props.session?.content ?? ''))
 const mappedStates = new Set(['confirmed', 'candidate', 'manual', 'template'])
 const mappedItems = computed(() => items.value.filter(item => mappedStates.has(item.mapping_status || '')))
 const otherItems = computed(() => items.value.filter(item => !mappedStates.has(item.mapping_status || '')))

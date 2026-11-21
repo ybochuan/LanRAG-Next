@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -65,6 +67,10 @@ func isKnowledgeGreeting(query string) bool {
 	return false
 }
 
+var oldEditionPattern = regexp.MustCompile(`(19|20)(\d{2})\s*年?(?:修订)?版`)
+
+// requestsArchiveSearch routes explicit history requests to native MCP archive
+// lookup instead of letting the active-document search answer an old edition.
 func requestsArchiveSearch(query string) bool {
 	q := evidenceQueryPrefix(query)
 	for _, prefix := range []string{"仅查阅", "只查阅", "查阅", "查找", "查询", "查看", "find ", "look up ", "show me ", "search ", "retrieve "} {
@@ -76,6 +82,15 @@ func requestsArchiveSearch(query string) bool {
 				return true
 			}
 		}
+	}
+	for _, marker := range []string{"上一版", "旧版", "原版", "前一版", "历史版本"} {
+		if strings.Contains(q, marker) {
+			return true
+		}
+	}
+	if match := oldEditionPattern.FindStringSubmatch(q); len(match) == 3 {
+		year, err := strconv.Atoi(match[1] + match[2])
+		return err == nil && year < time.Now().Year()
 	}
 	return false
 }

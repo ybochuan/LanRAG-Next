@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // App holds Wails-bound state for the desktop shell.
@@ -19,6 +21,7 @@ type App struct {
 	shutdownCh    chan struct{}
 	shutdownDone  chan struct{}
 	pickingDir    atomic.Bool
+	installed     *installedDesktop
 }
 
 // NewApp creates a new App application struct.
@@ -32,9 +35,17 @@ func NewApp() *App {
 // startup is called when the application starts.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.installed != nil {
+		a.installed.supervisor.Start()
+		a.installed.host.Start(a.backendURL, a.setupToken, func(event string) { logger.Infof(ctx, "%s", event) })
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.installed != nil {
+		a.installed.supervisor.Stop()
+		a.installed.host.Stop()
+	}
 	select {
 	case a.shutdownCh <- struct{}{}:
 	default:
@@ -84,13 +95,19 @@ func (a *App) GetDesktopListenPublicActive() bool {
 // CheckForUpdates manually triggers the update check from the frontend.
 func (a *App) CheckForUpdates() {
 	if a.ctx != nil {
+		if a.installed != nil {
+			_, _ = wailsruntime.MessageDialog(a.ctx, wailsruntime.MessageDialogOptions{
+				Type: wailsruntime.InfoDialog, Title: "LanRAG Lite", Message: "Update using the LanRAG Lite installer for your release.",
+			})
+			return
+		}
 		checkUpdate(a.ctx, desktopAboutVersion(), true, false)
 	}
 }
 
 // AutoCheckForUpdates silently checks for updates and downloads them.
 func (a *App) AutoCheckForUpdates() {
-	if a.ctx != nil {
+	if a.ctx != nil && a.installed == nil {
 		checkUpdate(a.ctx, desktopAboutVersion(), false, true)
 	}
 }
@@ -119,6 +136,21 @@ func (a *App) GetProjectDirs() []string {
 // an authorization path.
 func (a *App) RemoveProjectDir(dir string) error {
 	return removeApprovedProjectDir(dir)
+}
+
+// PickModelFile opens the Windows file picker for the packaged model manager.
+func (a *App) PickModelFile() (string, error) {
+	if a.installed == nil || a.ctx == nil {
+		return "", fmt.Errorf("model picker requires the installed desktop")
+	}
+	if !a.pickingDir.CompareAndSwap(false, true) {
+		return "", fmt.Errorf("a file picker is already open")
+	}
+	defer a.pickingDir.Store(false)
+	return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title:   "选择 GGUF 模型文件",
+		Filters: []wailsruntime.FileFilter{{DisplayName: "GGUF 模型", Pattern: "*.gguf"}},
+	})
 }
 
 // PickProjectDir opens the system directory picker and appends the result to
