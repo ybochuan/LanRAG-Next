@@ -46,6 +46,25 @@ func TestConfigCorrectionRollout(t *testing.T) {
 	}
 }
 
+func TestConfigValidatesHookCredentialsAsSeparateAudiences(t *testing.T) {
+	values := workerEnv()
+	values["AGENTRAG_MANAGEMENT_KEY"] = strings.Repeat("m", 32)
+	values["AGENTRAG_CORRECTION_SOURCES_KEY"] = strings.Repeat("c", 32)
+	if _, err := LoadConfig(envReader(values)); err == nil {
+		t.Fatal("partial hook credentials accepted")
+	}
+	for _, key := range []string{values["AGENTRAG_MANAGEMENT_KEY"], values["AGENTRAG_CORRECTION_SOURCES_KEY"], "short"} {
+		values["AGENTRAG_BEFORE_GENERATE_KEY"] = key
+		if _, err := LoadConfig(envReader(values)); err == nil {
+			t.Fatal("reused or short hook credential accepted")
+		}
+	}
+	values["AGENTRAG_BEFORE_GENERATE_KEY"] = strings.Repeat("g", 32)
+	if _, err := LoadConfig(envReader(values)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConfigRejectsInvalidInputsWithoutEchoingValues(t *testing.T) {
 	for _, change := range []func(map[string]string){
 		func(e map[string]string) { delete(e, "AGENTRAG_WEKNORA_API_KEY") },

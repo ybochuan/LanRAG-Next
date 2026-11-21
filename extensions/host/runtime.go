@@ -245,7 +245,11 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs, NativeDBPath: cfg.NativeDBPath}
 		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
 		correctionService = corrections.New(db, time.Now)
-		services.CorrectionSources = &bridge.CorrectionSourcesHandler{Key: cfg.ManagementKey, TenantID: cfg.TenantID, KnowledgeBaseIDs: cfg.KnowledgeBaseIDs, EnabledKnowledgeBaseIDs: correctionKBs, Corrections: correctionService}
+		correctionKey := cfg.CorrectionSourcesKey
+		if correctionKey == "" {
+			correctionKey = cfg.ManagementKey // Compatibility for manually configured deployments.
+		}
+		services.CorrectionSources = &bridge.CorrectionSourcesHandler{Key: correctionKey, TenantID: cfg.TenantID, KnowledgeBaseIDs: cfg.KnowledgeBaseIDs, EnabledKnowledgeBaseIDs: correctionKBs, Corrections: correctionService}
 		if cfg.NativeDBPath != "" {
 			attachmentCleanup = attachmentcleanup.New(db, cfg.NativeDBPath, cfg.TenantID, cfg.KnowledgeBaseIDs, attachmentSource.DeleteAttachment, cfg.RetryDelay)
 			attachmentCleanup.WithResourceReclaimer(func(ctx context.Context, kb, doc, hash, resources string) (string, error) {
@@ -275,6 +279,23 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			return errors.New("initial lifecycle scan failed; Host not ready")
 		}
 	}
+	proofScopes := make([]provenance.Scope, 0, len(scopes))
+	for _, scope := range scopes {
+		proofScopes = append(proofScopes, provenance.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID})
+	}
+	proofs := provenance.NewHTTPServer(sourceRuns, sourceLedger, cfg.ManagementKey, proofScopes).WithCorrectionKBs(correctionKBs)
+	if cfg.BeforeGenerateKey != "" {
+		proofs.WithBeforeGenerateKey(cfg.BeforeGenerateKey)
+	}
+	if cfg.Mode == "worker" {
+		if sourceRuns == nil || sourceLedger == nil {
+			return errors.New("before-generate dependencies unavailable; Host not ready")
+		}
+		if cfg.ManagementKey != "" && cfg.BeforeGenerateKey == "" {
+			report("host_hook_credentials_legacy")
+		}
+		services.BeforeGenerate = proofs
+	}
 	server := bridge.NewServerWithServices(services)
 	{
 		original := server.Handler
@@ -283,13 +304,8 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			manager.WithNativeSQLite(cfg.NativeDBPath, upstream.DocumentTitles)
 			manager.WithRenditions(lineage.NewRenditions(sourceRegistry, upstream.OriginalSHA256))
 		}
-		proofScopes := make([]provenance.Scope, 0, len(scopes))
-		for _, scope := range scopes {
-			proofScopes = append(proofScopes, provenance.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID})
-		}
-		proofs := provenance.NewHTTPServer(sourceRuns, sourceLedger, cfg.ManagementKey, proofScopes).WithCorrectionKBs(correctionKBs)
 		server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/provenance/") || r.URL.Path == "/bridge/before-generate" {
+			if strings.HasPrefix(r.URL.Path, "/provenance/") {
 				proofs.ServeHTTP(w, r)
 				return
 			}

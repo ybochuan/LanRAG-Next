@@ -37,21 +37,28 @@ type HTTPRequest struct {
 // HTTPServer serves proof APIs on the existing loopback listener. A missing
 // worker DB/provider/key cannot fall back to an allow policy.
 type HTTPServer struct {
-	runs          *Runs
-	ledger        *Ledger
-	key           string
-	scopes        map[Scope]bool
-	correctionKBs []string
+	runs              *Runs
+	ledger            *Ledger
+	key               string
+	beforeGenerateKey string
+	scopes            map[Scope]bool
+	correctionKBs     []string
 }
 
 // NewHTTPServer installs no fixtures and owns no DB or goroutine lifetime.
 func NewHTTPServer(runs *Runs, ledger *Ledger, key string, scopes []Scope) *HTTPServer {
-	s := &HTTPServer{runs: runs, ledger: ledger, key: key, scopes: map[Scope]bool{}}
+	s := &HTTPServer{runs: runs, ledger: ledger, key: key, beforeGenerateKey: key, scopes: map[Scope]bool{}}
 	for _, scope := range scopes {
 		if validScope(scope) {
 			s.scopes[scope] = true
 		}
 	}
+	return s
+}
+
+// WithBeforeGenerateKey assigns a separate credential to the generation hook.
+func (s *HTTPServer) WithBeforeGenerateKey(key string) *HTTPServer {
+	s.beforeGenerateKey = key
 	return s
 }
 
@@ -70,7 +77,15 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "provenance_unavailable"})
 	}
-	if s == nil || !s.runs.available() || s.ledger == nil || len(s.key) < 32 {
+	if s == nil || !s.runs.available() || s.ledger == nil {
+		fail(503)
+		return
+	}
+	key := s.key
+	if r.URL.Path == "/bridge/before-generate" {
+		key = s.beforeGenerateKey
+	}
+	if len(key) < 32 {
 		fail(503)
 		return
 	}
@@ -78,7 +93,7 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(405)
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.key)) != 1 {
+	if len(r.Header.Values("Authorization")) != 1 || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+key)) != 1 {
 		fail(401)
 		return
 	}

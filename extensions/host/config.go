@@ -20,29 +20,31 @@ import (
 // Config enables background side effects only in explicit worker mode. APIKey
 // must never be logged; formatting and JSON serialization redact the credential.
 type Config struct {
-	ManagementKey     string                        `json:"-"`
-	Parser            *parser.NativeConfig          `json:"-"` // Optional authenticated native PDF route.
-	FamilyEmbedder    *business.LocalFamilyEmbedder `json:"-"`
-	Mode              string
-	DBPath            string
-	CorrectionDir     string   // Managed correction Markdown directory, defaults beside DBPath.
-	CorrectionKBIDs   []string // Nil enables evidence in all configured KBs.
-	NativeDBPath      string
-	UpstreamURL       string
-	APIKey            string `json:"-"`
-	TenantID          uint64
-	KnowledgeBaseIDs  []string
-	ReconcileInterval time.Duration
-	PollInterval      time.Duration
-	Lease             time.Duration
-	RetryDelay        time.Duration
-	MaxAttempts       int
-	ShutdownTimeout   time.Duration
-	CleanupRetention  time.Duration
-	CleanupInterval   time.Duration
-	CleanupAuto       bool
-	EvidenceRetention time.Duration
-	EvidenceInterval  time.Duration
+	ManagementKey        string                        `json:"-"`
+	CorrectionSourcesKey string                        `json:"-"`
+	BeforeGenerateKey    string                        `json:"-"`
+	Parser               *parser.NativeConfig          `json:"-"` // Optional authenticated native PDF route.
+	FamilyEmbedder       *business.LocalFamilyEmbedder `json:"-"`
+	Mode                 string
+	DBPath               string
+	CorrectionDir        string   // Managed correction Markdown directory, defaults beside DBPath.
+	CorrectionKBIDs      []string // Nil enables evidence in all configured KBs.
+	NativeDBPath         string
+	UpstreamURL          string
+	APIKey               string `json:"-"`
+	TenantID             uint64
+	KnowledgeBaseIDs     []string
+	ReconcileInterval    time.Duration
+	PollInterval         time.Duration
+	Lease                time.Duration
+	RetryDelay           time.Duration
+	MaxAttempts          int
+	ShutdownTimeout      time.Duration
+	CleanupRetention     time.Duration
+	CleanupInterval      time.Duration
+	CleanupAuto          bool
+	EvidenceRetention    time.Duration
+	EvidenceInterval     time.Duration
 }
 
 // String deliberately excludes configuration values, including KB metadata.
@@ -59,14 +61,13 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return c, errors.New("environment reader required")
 	}
 	c.ManagementKey = getenv("AGENTRAG_MANAGEMENT_KEY")
+	c.CorrectionSourcesKey = getenv("AGENTRAG_CORRECTION_SOURCES_KEY")
+	c.BeforeGenerateKey = getenv("AGENTRAG_BEFORE_GENERATE_KEY")
 	embedder, err := business.LoadFamilyEmbedder(getenv)
 	if err != nil {
 		return c, err
 	}
 	c.FamilyEmbedder = embedder
-	if c.ManagementKey != "" && len(c.ManagementKey) < 32 {
-		return c, errors.New("management credential must contain at least 32 bytes")
-	}
 	if mode := getenv("AGENTRAG_MODE"); mode != "" {
 		c.Mode = strings.TrimSpace(mode)
 	}
@@ -203,6 +204,15 @@ func defaultDBPath() string {
 
 // Validate is also required for programmatically constructed configurations.
 func (c Config) Validate() error {
+	if c.ManagementKey != "" && len(c.ManagementKey) < 32 {
+		return errors.New("management credential must contain at least 32 bytes")
+	}
+	if c.CorrectionSourcesKey != "" || c.BeforeGenerateKey != "" {
+		if len(c.ManagementKey) < 32 || len(c.CorrectionSourcesKey) < 32 || len(c.BeforeGenerateKey) < 32 ||
+			c.CorrectionSourcesKey == c.BeforeGenerateKey || c.CorrectionSourcesKey == c.ManagementKey || c.BeforeGenerateKey == c.ManagementKey {
+			return errors.New("correction-sources and before-generate require distinct credentials of at least 32 bytes, separate from management")
+		}
+	}
 	if c.Parser != nil {
 		if _, err := parser.NewNativeHandler(*c.Parser); err != nil {
 			return errors.New("invalid native parser configuration")

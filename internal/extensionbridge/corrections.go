@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -25,7 +24,7 @@ func (s CorrectionSource) MatchesContent(content string) bool {
 // CorrectionSources looks up candidates inside an already authorized document set.
 // No candidate body or authority comes from this optional lookup.
 func CorrectionSources(ctx context.Context, tenantID uint64, kbID string, allowedDocIDs []string, query, question string) []CorrectionSource {
-	key := os.Getenv("AGENTRAG_MANAGEMENT_KEY")
+	key := hookCredential("AGENTRAG_CORRECTION_SOURCES_KEY")
 	query = strings.TrimSpace(query)
 	if len(key) < 32 || tenantID == 0 || !sourceID(kbID) || len(allowedDocIDs) == 0 || len(allowedDocIDs) > MaxRetrieveDocuments || query == "" || len(query) > 4096 {
 		return nil

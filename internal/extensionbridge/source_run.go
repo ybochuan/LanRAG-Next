@@ -156,6 +156,9 @@ func sourceID(value string) bool {
 
 func sourceCall(ctx context.Context, path string, q sourceRequest, out any) error {
 	key := os.Getenv("AGENTRAG_MANAGEMENT_KEY")
+	if path == "/bridge/before-generate" {
+		key = hookCredential("AGENTRAG_BEFORE_GENERATE_KEY")
+	}
 	if len(key) < 32 || q.Scope.TenantID == 0 || !sourceID(q.Scope.KnowledgeBaseID) {
 		return ErrUnattributed
 	}
@@ -202,6 +205,13 @@ func sourceCall(ctx context.Context, path string, q sourceRequest, out any) erro
 		return ErrUnattributed
 	}
 	return nil
+}
+
+func hookCredential(setting string) string {
+	if os.Getenv("AGENTRAG_BEFORE_GENERATE_KEY") == "" && os.Getenv("AGENTRAG_CORRECTION_SOURCES_KEY") == "" {
+		return os.Getenv("AGENTRAG_MANAGEMENT_KEY")
+	}
+	return os.Getenv(setting)
 }
 
 type sourceRunKey struct{}

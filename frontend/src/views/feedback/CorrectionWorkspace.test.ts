@@ -19,6 +19,9 @@ function mountSetup({
   correctionDocument = async (_kb: string, _document: string, _version: string, _state: CorrectionState): Promise<CorrectionDocument> => {
     throw new Error('unexpected detail read')
   },
+  correctionMarkdown = async (_kb: string, _document: string, _version: string, _state: CorrectionState): Promise<CorrectionDocument> => {
+    throw new Error('unexpected Markdown export')
+  },
   canWrite = (_kb: string): boolean => false,
 } = {}) {
   const scope = vue.effectScope()
@@ -29,13 +32,13 @@ function mountSetup({
     vue: { ...vue, onBeforeUnmount: vue.onScopeDispose },
     'vue-router': { useRoute: () => route, useRouter: () => ({}) },
     dompurify: {},
-    '@/api/business': { correctionDocuments, correctionDocument },
+    '@/api/business': { correctionDocuments, correctionDocument, correctionMarkdown },
     '@/api/lifecycle': { authority: async (kb: string) => ({ can_write: canWrite(kb) }) },
     '@/utils/documentPreviewMarkdown': {},
     '../lifecycle/model': { requestFence },
     './model': model,
   }
-  const setup = new Function('require', 'defineProps', 'defineEmits', 'exports', code + '\nreturn { scopeMode, draft, applyFilters, detail, detailError, selectedItem, detailHeading, itemHeading };')
+  const setup = new Function('require', 'defineProps', 'defineEmits', 'exports', code + '\nreturn { scopeMode, draft, applyFilters, detail, detailError, download, selectedItem, detailHeading, itemHeading };')
   const state = scope.run(() => setup((id: string) => modules[id], () => props, () => () => {}, {}))
   state.detailHeading.value = { focus: () => focused.push('document') }
   state.itemHeading.value = { focus: () => focused.push('item') }
@@ -119,6 +122,23 @@ test('a late historic response cannot render after the KB leaves the authorized 
     view.props.knowledgeBases = [{ id: 'kb-a', name: 'A' }]
     release(projectedDocument('withdrawn'))
     await settle()
+    assert.equal(view.state.detail.value, undefined)
+    assert.ok(view.state.detailError.value)
+  } finally { view.stop() }
+})
+
+test('archive download reauthorizes using the exact library, version and state', async () => {
+  const calls: unknown[] = []
+  const view = mountSetup({
+    query: { ...query, correctionState: 'withdrawn' }, canWrite: () => true,
+    correctionDocument: async () => projectedDocument('withdrawn'),
+    correctionMarkdown: async (...args) => { calls.push(args); throw new Error('read_only') },
+  })
+  try {
+    await settle()
+    assert.ok(view.state.detail.value)
+    await view.state.download()
+    assert.deepEqual(calls, [['kb-b', 'doc', 'v1', 'withdrawn']])
     assert.equal(view.state.detail.value, undefined)
     assert.ok(view.state.detailError.value)
   } finally { view.stop() }

@@ -742,7 +742,13 @@ python3 extensions/scripts/startup_e2e.py
 
 统一启动器自动生成至少32字节的随机 `AGENTRAG_MANAGEMENT_KEY`，仅存入私密配置并同时传给Core/Host。分开启动时两进程必须设置相同值；不要放入VITE变量、URL、日志或提交文件。旧进程需重启以装载配置。Host离线或凭据缺失时页面显示不可用，业务检索继续Fail-Closed。
 
+统一启动器还为 `correction-sources` 和 `before-generate` 分别生成并保存 `AGENTRAG_CORRECTION_SOURCES_KEY` 与 `AGENTRAG_BEFORE_GENERATE_KEY`。手工启动时请同时为 Core 和 Host 配置这两个值，每个至少 32 字节，三项 Key 必须互不相同。手工部署同时省略两个 Hook Key 时进入旧版兼容模式，Host 记录 `host_hook_credentials_legacy`。标准启动和手工发布均需同步更新 Core 和 Host。`correction-sources` 每个 Host 每秒窗口最多接纳 32 次请求，最多 4 个在途。限流返回 `429` 和 `Retry-After: 1`，每个窗口最多记录一条无请求数据的限流日志。Core 继续使用已授权的检索结果。
+
 管理入口沿用原生JWT和KB权限。Viewer只读；同租户Contributor须为KB创建者才能编辑；管理员/Owner及原生认可的跨库Editor按权限编辑。API Key不能调用管理入口。worker仅管理配置的tenant/KB，不自动纳管其他知识库。
+
+勘误工作台通过 `GET /api/v1/knowledge-bases/:id/lifecycle/business/correction_markdown` 重新校验 JWT、知识库权限和源文档归属。默认 `state=active`，有原生读权限即可下载。显式下载 `inactive`、`withdrawn`、`superseded` 或 `all` 须有治理写权限。请求须带 `document_id` 和 `version_id`。历史审核定稿沿用现行保留政策，另行确定归档期限前继续保留。
+
+同一路径下的 `correction_history` 导出仅对有治理写权限的调用方开放。传入 `document_id`、`version_id` 和勘误 `id`，可用 `page` 与 `page_size` 分页。响应包含读取时的派生状态、UTC 观测时间和按序号排列的治理审计事件。历史迁移记录可能无可导出的事件。时间状态取决于当前来源和治理事实，审计事件可用于复核已记录的动作，任意历史时点的 `active` 状态需要相应时点的完整事实快照。
 
 文档页提供状态过滤、分页、日期和最近100条事件。日期按本机时区显示，提交UTC；保留原标签和未编辑日期精度。旧revision返回409，需重新载入；网络中断后先载入确认实际结果，不盲目重试。日期保存后独立重评估状态，暂未完成时明确提示待扫描。过期即失效，清空日期不会复活失效态。
 

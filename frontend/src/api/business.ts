@@ -143,6 +143,11 @@ export function correctionDocument(kb: string, document_id: string, version_id: 
   const query = new URLSearchParams({ document_id, version_id, state })
   return unwrap<CorrectionDocument>(get(`${base(kb)}correction_document?${query}`))
 }
+export function correctionMarkdown(kb: string, document_id: string, version_id: string, state: CorrectionState) {
+  const query = new URLSearchParams({ document_id, version_id, state })
+  type Download = Pick<CorrectionDocument, 'knowledge_base_id' | 'document_id' | 'version_id' | 'file_name' | 'markdown'>
+  return unwrap<Download>(get(`${base(kb)}correction_markdown?${query}`))
+}
 export async function verifyCorrectionRevision(kb: string, correction: CorrectionRevisionReference) {
   const result = await correctionDocument(kb, correction.document_id, correction.version_id)
   if (result.knowledge_base_id !== kb || result.document_id !== correction.document_id || result.version_id !== correction.version_id ||

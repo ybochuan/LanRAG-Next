@@ -98,6 +98,12 @@ class LauncherConfigTest(unittest.TestCase):
                         self.assertEqual(Path(restored[key]), Path(value), key)
                     else:
                         self.assertEqual(restored[key], value, key)
+                key_names = ("AGENTRAG_MANAGEMENT_KEY", *launcher.HOOK_CREDENTIALS)
+                keys = [restored[name] for name in key_names]
+                self.assertEqual(len(set(keys)), 3)
+                self.assertTrue(all(len(key) >= 32 for key in keys))
+                launcher.prepare(root / "private.env")
+                self.assertTrue(all(launcher.load()[name] == key for name, key in zip(key_names, keys)))
 
     def test_dotenv_export_spaces_quotes_and_complex_refusal(self):
         with tempfile.TemporaryDirectory() as directory:

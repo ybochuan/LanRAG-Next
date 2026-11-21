@@ -17,6 +17,7 @@ type Services struct {
 	Ready                  func(context.Context) bool // Local DB/services only; never depends on Core availability.
 	BeforeRetrieve         *RetrieveHandler
 	AfterRetrieve          *AttachmentHandler
+	BeforeGenerate         http.Handler
 	CorrectionSources      *CorrectionSourcesHandler
 	BeforeAttachmentDelete *AttachmentDeleteHandler
 	MCP                    http.Handler
@@ -89,6 +90,9 @@ func NewServerWithServices(services Services) *http.Server {
 		}
 		if path == "/bridge/after-retrieve" && services.AfterRetrieve != nil {
 			handler = services.AfterRetrieve.ServeHTTP
+		}
+		if path == "/bridge/before-generate" && services.BeforeGenerate != nil {
+			handler = services.BeforeGenerate.ServeHTTP
 		}
 		if path == "/bridge/correction-sources" && services.CorrectionSources != nil {
 			handler = services.CorrectionSources.ServeHTTP

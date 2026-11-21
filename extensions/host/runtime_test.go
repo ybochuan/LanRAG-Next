@@ -64,7 +64,7 @@ func TestProbeServesHealthButRefusesRetrievalWithoutDatabase(t *testing.T) {
 	go func() { done <- Serve(ctx, cfg, l, func(code string) { codes <- code }) }()
 	waitCode(t, codes, "host_probe_started")
 	client := &http.Client{Timeout: time.Second}
-	for _, path := range []string{"/bridge/healthz", "/healthz", "/readyz", "/bridge/ingest-event", "/bridge/before-retrieve"} {
+	for _, path := range []string{"/bridge/healthz", "/healthz", "/readyz", "/bridge/ingest-event", "/bridge/before-retrieve", "/bridge/before-generate"} {
 		method := "GET"
 		if strings.HasPrefix(path, "/bridge/") && path != "/bridge/healthz" {
 			method = "POST"
@@ -224,6 +224,10 @@ func TestRuntimeStartsScopedWorkersRetriesAndClosesDatabase(t *testing.T) {
 	env := workerEnv()
 	env["AGENTRAG_EXT_DB"] = path
 	env["AGENTRAG_WEKNORA_URL"] = api.URL
+	managementKey, correctionKey, generateKey := strings.Repeat("m", 32), strings.Repeat("c", 32), strings.Repeat("g", 32)
+	env["AGENTRAG_MANAGEMENT_KEY"] = managementKey
+	env["AGENTRAG_CORRECTION_SOURCES_KEY"] = correctionKey
+	env["AGENTRAG_BEFORE_GENERATE_KEY"] = generateKey
 	cfg, err := LoadConfig(envReader(env))
 	if err != nil {
 		t.Fatal(err)
@@ -245,6 +249,35 @@ func TestRuntimeStartsScopedWorkersRetriesAndClosesDatabase(t *testing.T) {
 		})
 	}()
 	waitCode(t, codes, "host_workers_started")
+	client := &http.Client{Timeout: time.Second}
+	for _, tc := range []struct {
+		path, key string
+		want      int
+	}{
+		{"/bridge/before-generate", managementKey, 401},
+		{"/bridge/before-generate", correctionKey, 401},
+		{"/bridge/before-generate", generateKey, 400}, // Passed auth; empty JSON has no source identity.
+		{"/bridge/correction-sources", managementKey, 401},
+		{"/bridge/correction-sources", generateKey, 401},
+		{"/bridge/correction-sources", correctionKey, 400},
+		{"/provenance/runs/begin", generateKey, 401},
+		{"/provenance/runs/begin", managementKey, 400},
+	} {
+		req, err := http.NewRequest(http.MethodPost, "http://"+l.Addr().String()+tc.path, strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tc.key)
+		req.Header.Set(bridge.VersionHeader, bridge.Version)
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != tc.want {
+			t.Fatalf("%s got %d, want %d", tc.path, res.StatusCode, tc.want)
+		}
+	}
 	monitor, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)

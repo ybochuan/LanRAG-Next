@@ -147,6 +147,16 @@ func TestCorrectionUpgradeBridgeManagementAndRetention(t *testing.T) {
 	if !strings.Contains(got, "5 个工作日") || strings.Contains(got, "private-") || strings.Contains(got, "invalid-pin") || strings.Contains(got, "cooling") {
 		t.Fatal("wrong detail migration or restricted content", got)
 	}
+	download := strings.Replace(detail, "business_correction_document", "business_correction_markdown", 1)
+	if got := call(manager, managementPath, download, key, "1", 200); !strings.Contains(got, "5 个工作日") || strings.Contains(got, `"items"`) {
+		t.Fatal("active download returned an unexpected payload", got)
+	}
+	audit := `{"action":"business_correction_history","tenant_id":7,"knowledge_base_id":"kb","document_id":"doc","version_id":"v1","business":{"id":"review"}}`
+	call(manager, managementPath, audit, key, "1", 403)
+	audit = strings.TrimSuffix(audit, "}") + `,"can_write":true,"page_size":1}`
+	if got := call(manager, managementPath, audit, key, "1", 200); !strings.Contains(got, `"current_state":"active"`) || !strings.Contains(got, `"events":[]`) {
+		t.Fatal("legacy record should report current state with an empty audit history", got)
+	}
 	call(manager, managementPath, strings.Replace(detail, `"v1"`, `"wrong"`, 1), key, "1", 404)
 	call(manager, managementPath, strings.TrimSuffix(detail, "}")+`,"state":"all"}`, key, "1", 403)
 	call(manager, managementPath, strings.Replace(detail, `"kb"`, `"foreign-kb"`, 1), key, "1", 403)
@@ -154,6 +164,12 @@ func TestCorrectionUpgradeBridgeManagementAndRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	call(manager, managementPath, detail, key, "1", 404)
+	call(manager, managementPath, download, key, "1", 404)
+	archivedDownload := strings.TrimSuffix(download, "}") + `,"state":"inactive"}`
+	call(manager, managementPath, archivedDownload, key, "1", 403)
+	if got := call(manager, managementPath, strings.TrimSuffix(archivedDownload, "}")+`,"can_write":true}`, key, "1", 200); !strings.Contains(got, "5 个工作日") || strings.Contains(got, "private-") {
+		t.Fatal("authorized archive download returned an unexpected payload", got)
+	}
 	root := t.TempDir()
 	scope := corrections.Scope{TenantID: 7, KnowledgeBaseID: "kb"}
 	if err := service.Project(ctx, root, scope); err != nil {
@@ -187,4 +203,40 @@ func TestCorrectionUpgradeBridgeManagementAndRetention(t *testing.T) {
 	if got := call(manager, managementPath, history, key, "1", 200); !strings.Contains(got, `"state":"inactive"`) {
 		t.Fatal("cleanup removed minimum correction audit identity", got)
 	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		for i, action := range []string{"feedback_approve", "feedback_activate", "revision_split"} {
+			if _, err := tx.Exec(`INSERT INTO ext_business_receipts VALUES('7','kb',?, 'hash','{}')`, action); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO ext_business_audit(tenant_id,knowledge_base_id,operation_id,actor_id,action,aggregate_id,revision,status,occurred_at,payload_json)
+ VALUES('7','kb',?,'reviewer',?,'review',?,'recorded','2026-01-04T00:00:00Z','{"text":"private-audit-payload"}')`, action, action, i+2); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.OpenDurable(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager = management.New(db, key, []lifecycle.PolicyScope{{TenantID: 7, KnowledgeBaseID: "kb"}})
+	for i, action := range []string{"feedback_approve", "feedback_activate"} {
+		if i == 1 {
+			audit = strings.TrimSuffix(audit, "}") + `,"page":2}`
+		}
+		got := call(manager, managementPath, audit, key, "1", 200)
+		var report struct {
+			Data corrections.HistoryReport `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(got), &report); err != nil || report.Data.State != "inactive" || report.Data.ObservedAt.IsZero() ||
+			len(report.Data.Events) != 1 || report.Data.Events[0].Action != action || report.Data.HasMore != (i == 0) || strings.Contains(got, "private-") {
+			t.Fatal("wrong reconstructed state or audit page", got, err)
+		}
+	}
+	call(manager, managementPath, strings.Replace(audit, `"v1"`, `"wrong-version"`, 1), key, "1", 404)
 }

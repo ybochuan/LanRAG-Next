@@ -5,10 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
+)
+
+const (
+	correctionSourcesPerSecond   = 32
+	correctionSourcesMaxInFlight = 4
 )
 
 // CorrectionSourcesHandler accepts only native calls in configured scopes.
@@ -18,6 +26,36 @@ type CorrectionSourcesHandler struct {
 	KnowledgeBaseIDs        []string
 	EnabledKnowledgeBaseIDs []string
 	Corrections             *corrections.Service
+
+	mu         sync.Mutex
+	window     time.Time
+	started    int
+	inFlight   int
+	loggedDrop bool
+}
+
+func (h *CorrectionSourcesHandler) admit(now time.Time) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if now.Sub(h.window) >= time.Second {
+		h.window, h.started, h.loggedDrop = now, 0, false
+	}
+	if h.started >= correctionSourcesPerSecond || h.inFlight >= correctionSourcesMaxInFlight {
+		if !h.loggedDrop {
+			log.Printf("bridge_correction_sources_throttled admitted=%d in_flight=%d", h.started, h.inFlight)
+			h.loggedDrop = true
+		}
+		return false
+	}
+	h.started++
+	h.inFlight++
+	return true
+}
+
+func (h *CorrectionSourcesHandler) release() {
+	h.mu.Lock()
+	h.inFlight--
+	h.mu.Unlock()
 }
 
 func (h *CorrectionSourcesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +67,12 @@ func (h *CorrectionSourcesHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		writeError(w, 401, "correction_sources_unauthorized")
 		return
 	}
+	if !h.admit(time.Now()) {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, "correction_sources_throttled")
+		return
+	}
+	defer h.release()
 	var req struct {
 		TenantID        uint64   `json:"tenant_id"`
 		KnowledgeBaseID string   `json:"knowledge_base_id"`

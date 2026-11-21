@@ -339,6 +339,35 @@ func TestFinalSynthesisClearsPartialAnswerBeforeOverflowRetry(t *testing.T) {
 	require.Equal(t, 1, done)
 }
 
+func TestFinalSynthesisRejectsProviderToolOutput(t *testing.T) {
+	for _, chunk := range []types.StreamResponse{
+		{ResponseType: types.ResponseTypeToolCall},
+		{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "tool_calls"},
+	} {
+		t.Run(string(chunk.ResponseType), func(t *testing.T) {
+			model := &finalSynthesisChat{}
+			engine := newTestEngine(t, model, withMaxContextTokens(64000), withMaxCompletionTokens(2048))
+			recorder := &truncationRecorder{}
+			recorder.attach(engine.eventBus)
+			model.synthesize = func(_ context.Context, _ []chat.Message, opts *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+				require.Empty(t, opts.Tools)
+				return finalSynthesisChunks(types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: "Discard this partial answer."}, chunk), nil
+			}
+			state := &types.AgentState{}
+			err := engine.streamFinalAnswerToEventBus(t.Context(), "Summarize", state, "session", nil)
+			require.ErrorContains(t, err, "final synthesis returned a tool call")
+			require.Empty(t, state.FinalAnswer)
+			require.Len(t, model.finals, 1)
+			events := recorder.snapshot()
+			require.NotEmpty(t, events)
+			require.True(t, events[len(events)-1].Replace)
+			for _, evt := range events {
+				require.False(t, evt.Done)
+			}
+		})
+	}
+}
+
 func TestFinalSynthesisRecoversContextLengthStopAndAccountsForBothAttempts(t *testing.T) {
 	model := &finalSynthesisChat{}
 	engine := newTestEngine(t, model, withMaxContextTokens(64000), withMaxCompletionTokens(2048))

@@ -110,8 +110,15 @@ func (e *AgentEngine) streamLLMToEventBus(
 	var protocolErr error
 	answerDecoder := e.modelContext.StreamDecoder()
 	thinkingDecoder := e.modelContext.StreamDecoder()
+	finalSynthesis := ctx.Value(finalSynthesisKey{}) == true
 
 	for chunk := range stream {
+		if finalSynthesis && (chunk.ResponseType == types.ResponseTypeToolCall || len(chunk.ToolCalls) != 0 || chunk.FinishReason == "tool_calls") {
+			if chunk.Usage != nil {
+				result.Usage = chunk.Usage
+			}
+			return result, errFinalSynthesisToolCall
+		}
 		sourceCall.Record(chunk)
 		lastChunkAt.Store(time.Now().UnixNano())
 		chunkCount++

@@ -27,23 +27,41 @@ func businessRead(action string) bool {
 		"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
 		"business_family_replacements", "business_family_backfill_plans", "business_family_workspace",
 		"business_family_suggestions", "business_cleanup_list", "business_attachment_list", "business_attachment_preview",
-		"business_correction_documents", "business_correction_document":
+		"business_correction_documents", "business_correction_document", "business_correction_markdown", "business_correction_history":
 		return true
 	default:
 		return false
 	}
 }
 func (s *Server) executeBusiness(ctx context.Context, r Request) (any, error) {
-	if r.Action == "business_correction_documents" || r.Action == "business_correction_document" {
-		if !r.CanWrite && r.State != "" && r.State != "active" {
+	switch r.Action {
+	case "business_correction_documents", "business_correction_document", "business_correction_markdown", "business_correction_history":
+		if !r.CanWrite && (r.Action == "business_correction_history" || r.State != "" && r.State != "active") {
 			return nil, errScopeNotConfigured
 		}
 		scope := corrections.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}
 		filter := corrections.Filter{DocumentID: r.DocumentID, VersionID: r.VersionID, Query: r.Query, State: r.State, ApprovedFrom: r.ApprovedFrom, ApprovedTo: r.ApprovedTo, Page: r.Page, PageSize: r.PageSize, History: r.CanWrite}
-		if r.Action == "business_correction_document" {
+		switch r.Action {
+		case "business_correction_document":
 			return s.corrections.Document(ctx, scope, filter, s.titles)
+		case "business_correction_markdown":
+			doc, err := s.corrections.Document(ctx, scope, filter, s.titles)
+			return struct {
+				KnowledgeBaseID string `json:"knowledge_base_id"`
+				DocumentID      string `json:"document_id"`
+				VersionID       string `json:"version_id"`
+				FileName        string `json:"file_name"`
+				Markdown        string `json:"markdown"`
+			}{doc.KnowledgeBaseID, doc.DocumentID, doc.VersionID, doc.FileName, doc.Markdown}, err
+		case "business_correction_history":
+			body, err := decodeBusiness(r.Business)
+			if err != nil {
+				return nil, err
+			}
+			return s.corrections.History(ctx, scope, r.DocumentID, r.VersionID, body.ID, r.Page, r.PageSize)
+		default:
+			return s.corrections.Documents(ctx, scope, filter, s.titles)
 		}
-		return s.corrections.Documents(ctx, scope, filter, s.titles)
 	}
 	if strings.HasPrefix(r.Action, "business_attachment_") {
 		return s.executeAttachment(ctx, r)

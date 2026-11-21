@@ -17,6 +17,8 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 STATE = Path(os.environ.get("AGENTRAG_LAUNCHER_CONFIG", ROOT / "data/agentrag-launcher.json")).resolve()
 ALLOWED = set("AGENTRAG_MANAGEMENT_KEY AGENTRAG_MODE AGENTRAG_EXT_DB AGENTRAG_TENANT_ID AGENTRAG_KB_IDS AGENTRAG_WEKNORA_URL AGENTRAG_WEKNORA_API_KEY AGENTRAG_RECONCILE_INTERVAL MINERU_ENDPOINT AGENTRAG_PARSER_UPSTREAM_URL AGENTRAG_PARSER_UPSTREAM_KEY AGENTRAG_PARSER_PROXY_KEY AGENTRAG_PARSER_ARTIFACT_ROOT AGENTRAG_PARSER_SCOPES ENV_FILE DB_PATH CORE_PORT WEKNORA_WEB_DIR AGENTRAG_PARSER_PROXY_ADDR SSRF_DISABLE DOCREADER_ADDR DOCREADER_TRANSPORT".split())
+HOOK_CREDENTIALS = ("AGENTRAG_CORRECTION_SOURCES_KEY", "AGENTRAG_BEFORE_GENERATE_KEY")
+ALLOWED.update(HOOK_CREDENTIALS)
 # Kept in the 0600 state file but never written into private.env: the Host and
 # Core have no use for a supervisor credential, and every extra copy is another
 # place for it to leak into a log or a child environment.
@@ -260,6 +262,10 @@ def prepare(output):
         "SSRF_DISABLE": setting("SSRF_DISABLE", "true"),
         "AGENTRAG_MANAGEMENT_KEY": setting("AGENTRAG_MANAGEMENT_KEY") or secrets.token_urlsafe(32),
     }
+    keys = [setting(name) or secrets.token_urlsafe(32) for name in HOOK_CREDENTIALS]
+    if len(set([values["AGENTRAG_MANAGEMENT_KEY"], *keys])) != 3 or any(len(key.encode()) < 32 for key in keys):
+        raise RuntimeError("hook credentials must be distinct, at least 32 bytes, and separate from management")
+    values.update(zip(HOOK_CREDENTIALS, keys))
     values.update(service_defaults(saved))
     if same_tenant and saved.get("MCP_ADMIN_KEY"):
         values["MCP_ADMIN_KEY"] = saved["MCP_ADMIN_KEY"]

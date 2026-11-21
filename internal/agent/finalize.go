@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+type finalSynthesisKey struct{}
+
+var errFinalSynthesisToolCall = errors.New("final synthesis returned a tool call")
 
 // streamFinalAnswerToEventBus streams the final answer generation through EventBus
 func (e *AgentEngine) streamFinalAnswerToEventBus(
@@ -67,6 +72,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	if ctx.Value(currentKnowledgeEvidenceKey{}) == true {
 		toolChoice = ""
 	}
+	synthesisCtx := context.WithValue(ctx, finalSynthesisKey{}, true)
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -78,7 +84,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 				"plus completion budget %d exceeds context window %d", inputTokens, budget, e.config.MaxContextTokens)
 		}
 		llmResult, err = e.streamLLMToEventBus(
-			ctx,
+			synthesisCtx,
 			messages,
 			&chat.ChatOptions{
 				RuntimeNotice:       runtimeNotice,
@@ -172,6 +178,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		return nil
 	}
 	if err != nil {
+		if err == errFinalSynthesisToolCall && answerStreamed {
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{Replace: true},
+			})
+		}
 		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
 			"session_id": sessionID,

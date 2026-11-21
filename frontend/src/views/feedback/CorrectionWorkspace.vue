@@ -81,7 +81,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DOMPurify from 'dompurify'
-import { correctionDocument, correctionDocuments, type CorrectionDocument, type CorrectionDocumentSummary, type CorrectionFilters, type CorrectionItem, type CorrectionState } from '@/api/business'
+import { correctionDocument, correctionDocuments, correctionMarkdown, type CorrectionDocument, type CorrectionDocumentSummary, type CorrectionFilters, type CorrectionItem, type CorrectionState } from '@/api/business'
 import { authority } from '@/api/lifecycle'
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown'
 import { requestFence } from '../lifecycle/model'
@@ -258,9 +258,11 @@ async function download() {
   downloading.value = true
   detailError.value = ''
   try {
-    const result = await correctionDocument(current.kb, current.document, current.version, current.state)
+    const result = await correctionMarkdown(current.kb, current.document, current.version, current.state)
     if (!downloadFence.current(token)) return
-    if (!matchesTarget(result, current)) throw new Error('correction_scope_unavailable')
+    if (result.knowledge_base_id !== current.kb || result.document_id !== current.document || result.version_id !== current.version) {
+      throw new Error('correction_scope_unavailable')
+    }
     const url = URL.createObjectURL(new Blob([result.markdown], { type: 'text/markdown;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url

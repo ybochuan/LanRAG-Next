@@ -184,6 +184,8 @@ def main():
         model = Model(); model_url = model.base.start()
         env = {key: value for key, value in os.environ.items() if not key.startswith("AGENTRAG_")}
         env["AGENTRAG_MANAGEMENT_KEY"] = secrets.token_hex(32)
+        env["AGENTRAG_CORRECTION_SOURCES_KEY"] = secrets.token_hex(32)
+        env["AGENTRAG_BEFORE_GENERATE_KEY"] = secrets.token_hex(32)
         empty_env = work / "isolated.env"
         empty_env.touch(mode=0o600)
         env.update(ENV_FILE=str(empty_env), DB_DRIVER="sqlite", DB_PATH=str(work / "core.db"), RETRIEVE_DRIVER="sqlite", STORAGE_TYPE="local", LOCAL_STORAGE_BASE_DIR=str(work / "files"), STREAM_MANAGER_TYPE="memory", SERVER_HOST=os.environ.get("AGENTRAG_E2E_SERVER_HOST", "127.0.0.1"), SERVER_PORT=str(port), WEKNORA_WEB_DIR=str(ROOT / "web"), SSRF_DISABLE="true", NEO4J_ENABLE="false", ENABLE_GRAPH_RAG="false", WEKNORA_SANDBOX_MODE="disabled", LOG_PATH="", JWT_SECRET=secrets.token_hex(32), SYSTEM_SIGNING_KEY=secrets.token_hex(32))
@@ -550,6 +552,8 @@ def main():
                 raise RuntimeError("Quick QA did not exercise a different exact source in the same knowledge base")
             diagnostic("source_mismatch")
             document_route = review_route + "correction_document?" + urllib.parse.urlencode({"document_id": doc["id"], "version_id": pin["version_id"]})
+            markdown_route = document_route.replace("correction_document?", "correction_markdown?")
+            history_route = document_route.replace("correction_document?", "correction_history?") + "&id=" + urllib.parse.quote(receipt["id"])
             page = http.api("GET", review_route + "correction_documents")["data"]
             if page.get("total") != 1 or page["items"][0]["active_count"] != 1 or page["items"][0]["version_id"] != pin["version_id"]:
                 raise RuntimeError("workbench did not show a single versioned correction document")
@@ -557,6 +561,11 @@ def main():
             if len(materials["items"]) != 1 or annotation not in materials["markdown"] or comment["text"] in json.dumps(materials):
                 raise RuntimeError("version preview did not contain exclusively the published correction")
             if os.environ.get("AGENTRAG_CORRECTION_ACL_E2E") == "1":
+                history = http.api("GET", history_route)["data"]
+                if history["current_state"] != "active" or not history["events"] or any(
+                    field in json.dumps(history) for field in (annotation, comment["text"], "payload_json")
+                ):
+                    raise RuntimeError("governance audit exported invalid state, decisions or private fields")
                 reader = helpers.HTTP(http.base_url)
                 reader_account = {"username": "reader_" + nonce, "email": "reader-" + nonce + "@example.invalid",
                                   "password": helpers.new_password()}
@@ -572,7 +581,7 @@ def main():
                     if code not in (403, 404) or annotation in body or comment["text"] in body:
                         raise RuntimeError("unauthorized reader received correction material")
 
-                for route in (review_route + "correction_documents", document_route):
+                for route in (review_route + "correction_documents", document_route, markdown_route, history_route):
                     deny_reader(route)
                 org = http.api("POST", "/organizations", {"name": "Correction readers"})["data"]
                 http.api("POST", "/organizations/" + org["id"] + "/invite", {"tenant_id": reader_tenant, "role": "viewer"})
@@ -580,15 +589,20 @@ def main():
                 share = http.api("POST", shares_route, {"organization_id": org["id"], "permission": "viewer"})["data"]
                 listed = reader.api("GET", review_route + "correction_documents")["data"]
                 readable = reader.api("GET", document_route)["data"]
+                downloadable = reader.api("GET", markdown_route)["data"]
                 if listed["total"] != 1 or readable["active_count"] != 1 or annotation not in readable["markdown"] or comment["text"] in json.dumps(readable):
                     raise RuntimeError("shared reader did not receive only the published correction projection")
+                if downloadable["markdown"] != readable["markdown"] or "items" in downloadable:
+                    raise RuntimeError("active download did not return the authorized Markdown")
                 deny_reader(document_route + "&state=all")
+                deny_reader(markdown_route + "&state=all")
+                deny_reader(history_route)
                 status, body = http.call("DELETE", http.base_url + "/api/v1" + shares_route + "/" + share["id"])
                 if status not in (200, 204):
                     raise RuntimeError("could not revoke the fixture’s read share")
-                for route in (review_route + "correction_documents", document_route):
+                for route in (review_route + "correction_documents", document_route, markdown_route, history_route):
                     deny_reader(route)
-                emit("[FEEDBACK-MATERIALS-ACL] PASS: access denied cross-tenant, active detail and counts via viewer share, private history denied, unchanged reader token denied after unsharing")
+                emit("[FEEDBACK-MATERIALS-ACL] PASS: cross-tenant and revoked shares denied; viewer active preview, counts and download; governance-only archive and redacted audit export")
             check_annotation("rag-materials-reverse-active", query=annotation)
             if any(phase == "rag-materials-reverse-active" and body_canary in passages for phase, passages in model.rerank_inputs):
                 raise RuntimeError("reverse recall positive did not exclude ordinary source retrieval")

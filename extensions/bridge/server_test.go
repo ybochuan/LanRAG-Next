@@ -72,6 +72,31 @@ func TestBridgeMetricsRouteWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestBeforeGenerateUsesRegisteredHandlerAndVersionGate(t *testing.T) {
+	calls := 0
+	server := bridge.NewServerWithServices(bridge.Services{
+		BeforeGenerate: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	})
+	for _, tc := range []struct {
+		version string
+		want    int
+	}{{"2", http.StatusBadRequest}, {"1", http.StatusNoContent}} {
+		req := httptest.NewRequest(http.MethodPost, "/bridge/before-generate", nil)
+		req.Header.Set("X-AgentRAG-Bridge-Version", tc.version)
+		res := httptest.NewRecorder()
+		server.Handler.ServeHTTP(res, req)
+		if res.Code != tc.want {
+			t.Fatalf("version %s: got %d, want %d", tc.version, res.Code, tc.want)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("handler called %d times", calls)
+	}
+}
+
 func TestBridgeHealthAndReadiness(t *testing.T) {
 	server := httptest.NewServer(bridge.NewServer().Handler)
 	t.Cleanup(server.Close)
