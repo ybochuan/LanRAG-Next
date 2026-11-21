@@ -309,7 +309,10 @@ onBeforeUnmount(() => { listFence.invalidate(); detailFence.invalidate(); downlo
   gap: 12px;
   margin-bottom: 16px;
 }
-.correction-filters label { display: grid; gap: 4px; width: min(100%, 180px); }
+.correction-filters label { display: grid; gap: 4px; min-width: 0; width: min(100%, 180px); }
+.correction-filters label :deep(.t-select__wrap),
+.correction-filters label :deep(.t-select),
+.correction-filters label :deep(.t-input) { width: 100%; min-width: 0; }
 .correction-table { overflow-x: auto; }
 .correction-table :deep(.t-table) { min-width: 712px; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
