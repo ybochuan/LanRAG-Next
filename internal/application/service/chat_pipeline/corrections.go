@@ -25,7 +25,7 @@ func (p *PluginSearchParallel) correctionSearchResults(ctx context.Context, cm *
 		return nil
 	}
 	tenantID, kbID := run.Scope.TenantID, run.Scope.KnowledgeBaseID
-	candidates := extensionbridge.CorrectionSources(ctx, tenantID, kbID, allowed, correctionQuery(cm))
+	candidates := extensionbridge.CorrectionSources(ctx, tenantID, kbID, allowed, correctionQuery(cm), cm.Query)
 	var results []*types.SearchResult
 	for _, candidate := range candidates {
 		chunk, err := p.chunkRepo.GetChunkByID(ctx, tenantID, candidate.ChunkID)

@@ -4495,6 +4495,9 @@ export default {
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
     truncatedHint: 'This answer was cut off at the per-response output limit. Above is what the model produced before the cut.',
+    correctionCheckUnavailable: 'Corrections could not be verified. Check the current approved corrections before relying on this answer.',
+    correctionCheckUnsupportedScope: 'Corrections could not be verified across the selected scope. Select one knowledge base.',
+    correctionCheckProjectRequired: 'Include the full project name in your question to verify the applicable correction.',
     rewind: {
       tooltip: 'Rewind to here',
       confirmTitle: 'Rewind to here?',

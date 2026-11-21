@@ -17,6 +17,7 @@ type GuidanceRequest struct {
 	CallID              string               `json:"call_id"`
 	CorrectionEvidence  bool                 `json:"correction_evidence,omitempty"`
 	Query               string               `json:"query,omitempty"`
+	Question            string               `json:"question,omitempty"`
 	ConsumedToolOutputs []ConsumedToolOutput `json:"consumed_tool_outputs,omitempty"`
 }
 
@@ -30,8 +31,13 @@ type ConsumedToolOutput struct {
 // GuidanceResult returns only the issued ephemeral addition and its bound step.
 type GuidanceResult struct {
 	guidance.Selection
-	StepID string `json:"step_id"`
+	StepID             string `json:"step_id"`
+	CorrectionDisabled bool   `json:"correction_disabled,omitempty"`
+	DeadlinePolicy     string `json:"deadline_policy,omitempty"`
 }
+
+const deadlineEvidencePolicy = "【期限证据规则】只回答来源明示的时长和单位。来源仅写‘活动结束后’等相对描述时，" +
+	"照原意转述。未明示的起算日、周末、节假日、调休、顺延和截止日期，答‘资料未明确，无法确定具体日期’；禁止推算、举例或列计算步骤。"
 
 // PrepareGuidance authenticates and issues instructions in one writer transaction.
 // Governance instructions are recorded separately from native document evidence.
@@ -39,7 +45,7 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 	if !r.available() {
 		return out, ErrUnavailable
 	}
-	if q.StepID != "" && !id(q.StepID) || !digest(q.CallID) || len(q.ConsumedToolOutputs) > 128 || !corrections.ValidQuery(q.Query) || q.StepID == "" && len(q.ConsumedToolOutputs) != 0 {
+	if q.StepID != "" && !id(q.StepID) || !digest(q.CallID) || len(q.ConsumedToolOutputs) > 128 || !corrections.ValidQuery(q.Query) || !corrections.ValidQuery(q.Question) || q.StepID == "" && len(q.ConsumedToolOutputs) != 0 {
 		return out, ErrInvalid
 	}
 	err = r.db.Write(ctx, func(tx *sql.Tx) error {
@@ -64,7 +70,7 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 		if err != nil {
 			return err
 		}
-		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID, StepID: q.StepID, ConsumedToolSteps: steps, CorrectionEvidence: q.CorrectionEvidence, Query: q.Query, Now: r.now()}
+		scope := guidance.Scope{TenantID: h.Scope.TenantID, KnowledgeBaseID: h.Scope.KnowledgeBaseID, UserID: run.Identity.UserID, SessionID: run.Identity.SessionID, RunID: h.RunID, StepID: q.StepID, ConsumedToolSteps: steps, CorrectionEvidence: q.CorrectionEvidence, Query: q.Query, Question: q.Question, Now: r.now()}
 		selection, err := guidance.SelectTx(ctx, tx, scope, q.CallID)
 		if err != nil {
 			return err
@@ -75,6 +81,9 @@ func (r *Runs) PrepareGuidance(ctx context.Context, h RunHandle, q GuidanceReque
 			}
 		}
 		out = GuidanceResult{Selection: selection, StepID: q.StepID}
+		if q.CorrectionEvidence && q.StepID != "" && len(selection.CorrectionItems) == 0 {
+			out.DeadlinePolicy = deadlineEvidencePolicy
+		}
 		if (selection.Content == "" && selection.AnnotationContent == "" && selection.CorrectionContent == "") || q.StepID == "" {
 			return nil
 		}

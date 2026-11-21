@@ -664,6 +664,13 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         item.agentEventStream = willContinueStream ? restoredEvents : markRaw(restoredEvents)
         item.hideContent = true
         if (agentStepsAreTruncated(item.agent_steps as unknown[])) item.truncated = true
+        const steps = item.agent_steps as ChatMessage[]
+        for (let index = steps.length - 1; index >= 0; index--) {
+          if (steps[index]?.correction_check) {
+            item.correction_check = steps[index].correction_check
+            break
+          }
+        }
       }
 
       if (awaiting) {
@@ -1422,6 +1429,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         if (dataPayload?.truncated) {
           answerEvent.truncated = true
           message.truncated = true
+        }
+        if (typeof dataPayload?.correction_check === 'string') {
+          message.correction_check = dataPayload.correction_check
         }
         if (data.done && !answerEvent.done) {
           answerEvent.done = true

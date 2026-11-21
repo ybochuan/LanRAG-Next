@@ -82,10 +82,11 @@ type AgentEngine struct {
 	// contextRewrites counts compactions and tool-result trims. Either one
 	// changes messages an earlier request already sent, so the next request
 	// cannot be compared with that one for calibration.
-	contextRewrites int
-	modelContext    *modelcontext.Registry // single request-local boundary for every model handle
-	searchOutputs   searchOutputReceipts
-	lastSearchRefs  []*types.SearchResult
+	contextRewrites     int
+	modelContext        *modelcontext.Registry // single request-local boundary for every model handle
+	searchOutputs       searchOutputReceipts
+	lastSearchRefs      []*types.SearchResult
+	lastCorrectionCheck string
 	// steerSink, when set, lets users append messages into the running turn.
 	// Drained at every round boundary; nil disables mid-run injection.
 	steerSink         types.SteerSink
@@ -648,9 +649,10 @@ func (e *AgentEngine) closeAnswerStream(ctx context.Context, sessionID, answerID
 		Type:      event.EventAgentFinalAnswer,
 		SessionID: sessionID,
 		Data: event.AgentFinalAnswerData{
-			Content:   "",
-			Done:      true,
-			Truncated: truncated,
+			Content:         "",
+			Done:            true,
+			Truncated:       truncated,
+			CorrectionCheck: e.lastCorrectionCheck,
 		},
 	})
 }

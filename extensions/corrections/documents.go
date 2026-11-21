@@ -232,7 +232,7 @@ func (s *Service) filtered(ctx context.Context, scope Scope, f Filter) ([]Entry,
 		if e.ApprovedAt.Before(from) || !to.IsZero() && e.ApprovedAt.After(to) {
 			continue
 		}
-		if terms != "" && !strings.Contains(strings.ToLower(e.AppliesWhen+"\n"+e.Correction+"\n"+e.ID+"\n"+e.ChunkID), terms) {
+		if terms != "" && !strings.Contains(strings.ToLower(e.AppliesWhen+"\n"+e.AppliesProject+"\n"+e.Correction+"\n"+e.ID+"\n"+e.ChunkID), terms) {
 			continue
 		}
 		out = append(out, e)
@@ -245,7 +245,11 @@ func markdown(title string, entries []Entry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n", plain(title))
 	for _, e := range entries {
-		fmt.Fprintf(&b, "## %d. %s\n\n- 反馈编号：%s\n- 原文分块：%s\n- 适用条件：%s\n- 修正口径：%s\n- 生效时间：%s\n- 状态：%s\n\n", e.Ordinal, e.ApprovedAt.Format(time.DateOnly), plain(e.ID), plain(e.ChunkID), plain(e.AppliesWhen), plain(e.Correction), e.EffectiveAt.Format(time.RFC3339), e.State)
+		fmt.Fprintf(&b, "## %d. %s\n\n- 反馈编号：%s\n- 原文分块：%s\n- 适用条件：%s\n", e.Ordinal, e.ApprovedAt.Format(time.DateOnly), plain(e.ID), plain(e.ChunkID), plain(e.AppliesWhen))
+		if e.AppliesProject != "" {
+			fmt.Fprintf(&b, "- 适用项目：%s\n", plain(e.AppliesProject))
+		}
+		fmt.Fprintf(&b, "- 修正口径：%s\n- 生效时间：%s\n- 状态：%s\n\n", plain(e.Correction), e.EffectiveAt.Format(time.RFC3339), e.State)
 	}
 	return b.String()
 }

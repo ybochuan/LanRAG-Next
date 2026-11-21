@@ -519,6 +519,8 @@ type AgentStep struct {
 	// looking finished. Live streaming carries the same fact on the answer
 	// event; this is what survives the round trip.
 	Truncated bool `json:"truncated,omitempty"`
+	// CorrectionCheck records the final model call's correction evidence status.
+	CorrectionCheck string `json:"correction_check,omitempty"`
 }
 
 // HostApprovalSnapshot is the Lite host card stored with a tool approval.

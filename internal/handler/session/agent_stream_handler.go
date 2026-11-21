@@ -68,6 +68,7 @@ type AgentStreamHandler struct {
 	toolApprovals   []types.ToolApprovalRecord
 	knowledgeRefs   []*types.SearchResult
 	finalAnswer     string
+	correctionCheck string
 	answerSegments  []*answerSegment     // Per-answer-event-ID accumulation, so superseded preambles can be dropped
 	eventStartTimes map[string]time.Time // Track start time for duration calculation
 	mu              sync.Mutex
@@ -735,6 +736,10 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	if data.Truncated {
 		metadata["truncated"] = true
 	}
+	if data.Done && data.CorrectionCheck != "" {
+		h.correctionCheck = data.CorrectionCheck
+		metadata["correction_check"] = data.CorrectionCheck
+	}
 	h.mu.Unlock()
 
 	// Append this chunk to stream (frontend will accumulate by event ID)
@@ -903,6 +908,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 				h.assistantMessage.AgentSteps = agenttools.SanitizeAgentStepsForStorage(steps)
 			}
 		}
+		recordCorrectionCheck(h.assistantMessage, h.correctionCheck)
 
 		// Persist the turn's aggregated LLM usage with the message so history
 		// reads still carry it after the live stream is gone.

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ybochuan/LanRAG-Next/extensions/corrections"
 	"github.com/ybochuan/LanRAG-Next/extensions/provenance"
 )
 
@@ -340,6 +341,13 @@ func (s *Service) approveQAFeedback(ctx context.Context, tx *sql.Tx, c Command, 
 	}
 	out := Result{ID: c.ID, Status: "approved", Revision: f.revision + 1}
 	text, condition := strings.TrimSpace(c.Payload.Text), strings.TrimSpace(c.Payload.AppliesWhen)
+	project := strings.Join(strings.Fields(c.Payload.AppliesProject), " ")
+	if !validFeedbackText(project, 160) || project != "" && utf8.RuneCountInString(project) < 2 {
+		return Result{}, ErrInvalid
+	}
+	if err := s.verifyReviewedCorrectionPeers(ctx, tx, c, pin); err != nil {
+		return Result{}, err
+	}
 	topic := "answer-feedback:" + c.ID
 	now := s.now()
 	if _, err = tx.ExecContext(ctx, `INSERT INTO ext_feedback_events VALUES(?,?,?,'manual',?,?,0,?)`,
@@ -350,7 +358,14 @@ func (s *Service) approveQAFeedback(ctx context.Context, tx *sql.Tx, c Command, 
 		args(c.Scope, c.ID, topic, guidanceInstruction(text, condition), out.Revision, now.Add(48*time.Hour).UTC().Format(time.RFC3339Nano))...); err != nil {
 		return Result{}, err
 	}
-	body, _ := json.Marshal(pin)
+	body, err := json.Marshal(struct {
+		*FeedbackCitation
+		AppliesProject string             `json:"applies_project,omitempty"`
+		ReviewedPeers  []corrections.Peer `json:"reviewed_peers,omitempty"`
+	}{pin, project, c.Payload.ReviewedCorrectionPeers})
+	if err != nil {
+		return Result{}, err
+	}
 	_, err = tx.ExecContext(ctx, `UPDATE ext_qa_feedback SET status=?,revision=?,feedback_anchor=?,applies_when=?,reviewed_guidance=?
   WHERE tenant_id=? AND knowledge_base_id=? AND feedback_id=?`,
 		append([]any{out.Status, out.Revision, string(body), condition, text}, args(c.Scope, c.ID)...)...)

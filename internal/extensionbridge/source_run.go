@@ -245,6 +245,9 @@ func BeginSourceRun(ctx context.Context, i SourceRunIdentity) (context.Context, 
 func BeginSourceRunForTargets(ctx context.Context, userID, sessionID, attemptID string, targets types.SearchTargets) (context.Context, error) {
 	kbs := targets.GetAllKnowledgeBaseIDs()
 	if len(kbs) != 1 {
+		if len(kbs) > 1 {
+			ctx = context.WithValue(ctx, correctionScopeUnsupportedKey{}, true)
+		}
 		return ctx, ErrUnattributed
 	}
 	tenant := targets.GetTenantIDForKB(kbs[0])
@@ -278,6 +281,13 @@ func BeginSourceRunForTargets(ctx context.Context, userID, sessionID, attemptID 
 		i.AuthorizedDocumentIDs = nil
 	}
 	return BeginSourceRun(ctx, i)
+}
+
+type correctionScopeUnsupportedKey struct{}
+
+// CorrectionScopeUnsupported reports scopes that the source ledger cannot bind.
+func CorrectionScopeUnsupported(ctx context.Context) bool {
+	return ctx.Value(correctionScopeUnsupportedKey{}) == true
 }
 
 // BeginSourceStep attaches a server-issued step to a child context for parallel calls.
@@ -333,6 +343,7 @@ type SourceCall struct {
 	output             hash.Hash
 	operation          string
 	annotationDelivery string
+	correctionCheck    string
 	correctionItems    []types.CorrectionReference
 	err                error
 }

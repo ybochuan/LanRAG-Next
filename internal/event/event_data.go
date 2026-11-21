@@ -221,7 +221,8 @@ type AgentFinalAnswerData struct {
 	// finished answer, so a client should say so rather than present it as
 	// complete. Carried on both the content event and the Done marker,
 	// because a live-streamed answer only learns of the cap at the close.
-	Truncated bool `json:"truncated,omitempty"`
+	Truncated       bool   `json:"truncated,omitempty"`
+	CorrectionCheck string `json:"correction_check,omitempty"`
 }
 
 // ContextCompactedData reports that older conversation was replaced by a

@@ -61,12 +61,23 @@
         <label class="review-field">适用场景
           <t-textarea v-model="scenario" :autosize="{ minRows: 2 }" :disabled="locked" placeholder="写明哪些问题适用这条批注" />
         </label>
+        <label class="review-field">适用项目
+          <t-input v-model="project" :disabled="locked" placeholder="按项目限定时输入项目全名" />
+        </label>
         <label class="review-field">审核批注
           <t-textarea v-model="annotation" :autosize="{ minRows: 3 }" :disabled="locked" placeholder="写下核对分块后应采用的说明" />
         </label>
         <label v-if="priorCorrections.length" class="review-field">替代同一分块的勘误
           <t-select v-model="supersededID" :options="supersessionOptions" :disabled="locked" />
         </label>
+        <template v-if="correctionsToKeep.length">
+          <ul>
+            <li v-for="item in correctionsToKeep" :key="item.id">
+              {{ item.applies_project ? item.applies_project + ' · ' : '' }}{{ item.applies_when }} · {{ item.correction }}
+            </li>
+          </ul>
+          <t-checkbox v-model="reviewedPeers" :disabled="locked">已确认以上勘误与本条适用范围互斥，或针对不同事实</t-checkbox>
+        </template>
         <p v-if="loadingCorrections" role="status" class="subtle">正在核对可替代的勘误…</p>
         <p v-if="correctionReadFailed" role="status" class="subtle">无法读取可替代的勘误。 <t-button variant="text" size="small" @click="readPriorCorrections">重试</t-button></p>
         <p v-if="approvalHint" class="subtle">{{ approvalHint }}</p>
@@ -75,6 +86,7 @@
       <template v-else>
         <h4 v-if="record.applies_when">适用场景</h4>
         <p v-if="record.applies_when" class="review-text">{{ record.applies_when }}</p>
+        <p v-if="record.feedback_anchor?.applies_project" class="review-text">适用项目：{{ record.feedback_anchor.applies_project }}</p>
         <h4>审核定稿</h4>
         <p class="review-text">{{ record.reviewed_guidance }}</p>
         <div v-if="record.annotation_checks" class="annotation-checks">
@@ -128,8 +140,11 @@ const canAnnotate = computed(() => props.canWrite && feedbackAwaiting(props.reco
 const selected = ref<FeedbackCitationChunk>()
 const anchor = computed(() => props.kb && !restricted.value ? selected.value || props.record.feedback_anchor : undefined)
 const showAnnotation = computed(() => canAnnotate.value || !!(props.kb && !restricted.value && props.record.reviewed_guidance))
-const scenario = ref(''), annotation = ref('')
+const scenario = ref(''), annotation = ref(''), project = ref('')
 const priorCorrections = ref<CorrectionItem[]>([]), supersededID = ref('')
+const reviewedPeers = ref(false)
+const correctionsToKeep = computed(() => priorCorrections.value.filter(item => item.id !== supersededID.value))
+watch(correctionsToKeep, () => { reviewedPeers.value = false })
 const loadingCorrections = ref(false), correctionReadFailed = ref(false)
 const supersessionOptions = computed(() => [
   { value: '', label: '保留现有勘误' },
@@ -178,6 +193,10 @@ async function toggleEvidence(chunk: FeedbackCitationChunk) {
 const approvalHint = computed(() => {
   if (!selected.value || evidence.value[selected.value.chunk_id]?.status !== 'verified') return '先选择一个已核对正文的分块。'
   if (!scenario.value.trim() || !annotation.value.trim()) return '填写适用场景和审核批注后即可批准。'
+  if (loadingCorrections.value || correctionReadFailed.value) return '核对同一分块的生效勘误后即可批准。'
+  if (correctionsToKeep.value.length && !reviewedPeers.value) return '确认可以保留的勘误，或选择需要替代的条目。'
+  const projectName = project.value.trim()
+  if (projectName && ([...projectName].length < 2 || new TextEncoder().encode(projectName).length > 160)) return '适用项目请填写 2 个字符以上、160 字节以内的全名。'
   const instruction = `适用条件：${scenario.value.trim()}
 ${annotation.value.trim()}`
   const bytes = new TextEncoder().encode(instruction).length
@@ -190,6 +209,8 @@ function approve() {
   const previous = priorCorrections.value.find(item => item.id === supersededID.value)
   emit('approve', {
     text: annotation.value.trim(), applies_when: scenario.value.trim(),
+    ...(project.value.trim() ? { applies_project: project.value.trim() } : {}),
+    ...(correctionsToKeep.value.length ? { reviewed_correction_peers: correctionsToKeep.value.map(({ id, revision }) => ({ id, revision })) } : {}),
     source_clause: { chunk_id: chunk.chunk_id, content_hash: chunk.content_hash },
     ...(previous ? { supersedes_correction_id: previous.id, supersedes_correction_revision: previous.revision } : {}),
   })

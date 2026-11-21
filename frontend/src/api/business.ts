@@ -41,8 +41,9 @@ export interface BusinessPayload {
   split_parts?: SplitPartInput[]
   effective_at?: string
   source_clause?: ClauseAnchor; target_clause?: ClauseAnchor
-  applies_when?: string; resolution?: string
+  applies_when?: string; applies_project?: string; resolution?: string
   supersedes_correction_id?: string; supersedes_correction_revision?: number
+  reviewed_correction_peers?: { id: string; revision: number }[]
 }
 export type AnnotationCheckOutcome = 'sent' | 'matched' | 'source_mismatch' | 'cooling_down'
   | 'awaiting_activation' | 'budget_or_limit' | 'withdrawn' | 'quarantined' | 'guidance_unavailable'
@@ -107,6 +108,7 @@ export interface CorrectionRevisionSource extends CorrectionRevisionReference {
 }
 export interface CorrectionItem extends CorrectionReference {
   applies_when: string
+  applies_project?: string
   correction: string
   state: Exclude<CorrectionState, 'all'>
   approved_at: string
@@ -191,6 +193,7 @@ export interface AnswerFeedbackContext extends AnswerFeedbackSnapshot {
   suggested_revision?: string
 }
 export interface FeedbackCitationChunk extends ClauseAnchor {
+  applies_project?: string
   document_id: string
   version_id: string
   chunk_index: number

@@ -253,9 +253,9 @@ func (s *sessionService) KnowledgeQA(
 	if hasKB {
 		ctx = chatpipeline.WithFreshKnowledgeHistory(ctx)
 	}
-	if sourceCtx, sourceErr := extensionbridge.BeginSourceRunForTargets(ctx, types.SessionOwnerIDFromContext(ctx), req.Session.ID, req.AssistantMessageID, searchTargets); sourceErr == nil {
-		ctx = sourceCtx
-	} else if len(searchTargets) != 0 {
+	sourceCtx, sourceErr := extensionbridge.BeginSourceRunForTargets(ctx, types.SessionOwnerIDFromContext(ctx), req.Session.ID, req.AssistantMessageID, searchTargets)
+	ctx = sourceCtx
+	if sourceErr != nil && len(searchTargets) != 0 {
 		logger.Warn(ctx, "[Bridge] source run unavailable; derived copies remain unreadable")
 	}
 	logger.Info(ctx, "Triggering question answering event")
@@ -1331,10 +1331,11 @@ func (s *sessionService) consumeFallbackStream(
 				Type:      types.EventType(event.EventAgentFinalAnswer),
 				SessionID: chatManage.SessionID,
 				Data: event.AgentFinalAnswerData{
-					Content:    response.Content,
-					Done:       response.Done,
-					IsFallback: true,
-					Truncated:  truncated,
+					Content:         response.Content,
+					Done:            response.Done,
+					IsFallback:      true,
+					Truncated:       truncated,
+					CorrectionCheck: unsupportedCorrectionCheck(ctx),
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
@@ -1394,15 +1395,23 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 		Type:      types.EventType(event.EventAgentFinalAnswer),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentFinalAnswerData{
-			Content:    content,
-			Done:       true,
-			IsFallback: true,
+			Content:         content,
+			Done:            true,
+			IsFallback:      true,
+			CorrectionCheck: unsupportedCorrectionCheck(ctx),
 		},
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to emit fallback answer event: %v", err)
 	} else {
 		logger.Infof(ctx, "Fallback answer event emitted successfully")
 	}
+}
+
+func unsupportedCorrectionCheck(ctx context.Context) string {
+	if extensionbridge.CorrectionScopeUnsupported(ctx) {
+		return "unsupported_scope"
+	}
+	return ""
 }
 
 // resolveWebSearchProviderID returns the web search provider ID to use for a pipeline request.

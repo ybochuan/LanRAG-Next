@@ -5151,6 +5151,9 @@ export default {
     referenceChunkCount: '{count}个片段',
     fallbackHint: '未从知识库中检索到相关内容，以上为模型直接回答',
     truncatedHint: '回答在模型单次输出上限处被截断，以上为截断前已生成的内容',
+    correctionCheckUnavailable: '勘误暂未核验。涉及制度口径时，请先核对当前生效勘误。',
+    correctionCheckUnsupportedScope: '选定范围无法核验勘误，请选择一个知识库。',
+    correctionCheckProjectRequired: '请在问题中提供适用项目的全名，以核对本条勘误。',
     rewind: {
       tooltip: '回滚到这里',
       confirmTitle: '回滚到这里？',

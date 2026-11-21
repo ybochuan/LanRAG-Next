@@ -34,6 +34,7 @@ func (h *CorrectionSourcesHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		KnowledgeBaseID string   `json:"knowledge_base_id"`
 		KnowledgeIDs    []string `json:"knowledge_ids"`
 		Query           string   `json:"query"`
+		Question        string   `json:"question,omitempty"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
@@ -49,7 +50,7 @@ func (h *CorrectionSourcesHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	if h.EnabledKnowledgeBaseIDs != nil && !slices.Contains(h.EnabledKnowledgeBaseIDs, req.KnowledgeBaseID) {
 		ids = nil
 	}
-	out, err := h.Corrections.Sources(r.Context(), corrections.Scope{TenantID: req.TenantID, KnowledgeBaseID: req.KnowledgeBaseID}, ids, req.Query)
+	out, err := h.Corrections.SourcesForQuestion(r.Context(), corrections.Scope{TenantID: req.TenantID, KnowledgeBaseID: req.KnowledgeBaseID}, ids, req.Query, req.Question)
 	if errors.Is(err, corrections.ErrInvalid) {
 		writeError(w, 400, "invalid_correction_sources_request")
 		return

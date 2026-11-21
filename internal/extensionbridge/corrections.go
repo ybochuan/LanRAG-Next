@@ -24,7 +24,7 @@ func (s CorrectionSource) MatchesContent(content string) bool {
 
 // CorrectionSources looks up candidates inside an already authorized document set.
 // No candidate body or authority comes from this optional lookup.
-func CorrectionSources(ctx context.Context, tenantID uint64, kbID string, allowedDocIDs []string, query string) []CorrectionSource {
+func CorrectionSources(ctx context.Context, tenantID uint64, kbID string, allowedDocIDs []string, query, question string) []CorrectionSource {
 	key := os.Getenv("AGENTRAG_MANAGEMENT_KEY")
 	query = strings.TrimSpace(query)
 	if len(key) < 32 || tenantID == 0 || !sourceID(kbID) || len(allowedDocIDs) == 0 || len(allowedDocIDs) > MaxRetrieveDocuments || query == "" || len(query) > 4096 {
@@ -35,7 +35,8 @@ func CorrectionSources(ctx context.Context, tenantID uint64, kbID string, allowe
 		KBID        string   `json:"knowledge_base_id"`
 		DocumentIDs []string `json:"knowledge_ids"`
 		Query       string   `json:"query"`
-	}{tenantID, kbID, allowedDocIDs, query}
+		Question    string   `json:"question,omitempty"`
+	}{tenantID, kbID, allowedDocIDs, query, boundedCorrectionQuestion(question)}
 	body, err := json.Marshal(payload)
 	if err != nil || len(body) > maxRetrieveBytes {
 		return nil
@@ -85,17 +86,32 @@ func CorrectionSources(ctx context.Context, tenantID uint64, kbID string, allowe
 
 type correctionQueryKey struct{}
 type correctionSourceHandlesKey struct{}
+type correctionQuery struct{ query, question string }
 
 // WithCorrectionSourceHandles resolves an original chunk to its current model label.
 func WithCorrectionSourceHandles(ctx context.Context, resolve func(string) string) context.Context {
 	return context.WithValue(ctx, correctionSourceHandlesKey{}, resolve)
 }
 
-// WithCorrectionQuery records the current question for the before-generate hook.
-func WithCorrectionQuery(ctx context.Context, query string) context.Context {
-	query = strings.TrimSpace(query)
-	if query == "" || len(query) > 4096 {
+// WithCorrectionQuery carries retrieval terms and the original question separately.
+func WithCorrectionQuery(ctx context.Context, query, question string) context.Context {
+	query = boundedCorrectionQuestion(query)
+	if query == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, correctionQueryKey{}, query)
+	return context.WithValue(ctx, correctionQueryKey{}, correctionQuery{query, boundedCorrectionQuestion(question)})
+}
+
+// OriginalCorrectionQuestion returns the user's original text, without model rewrites.
+func OriginalCorrectionQuestion(ctx context.Context) string {
+	query, _ := ctx.Value(correctionQueryKey{}).(correctionQuery)
+	return query.question
+}
+
+func boundedCorrectionQuestion(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 4096 {
+		return ""
+	}
+	return value
 }

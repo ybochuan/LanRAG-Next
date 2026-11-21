@@ -16,6 +16,7 @@ type generationRequest struct {
 	ConsumedToolOutputs []ConsumedToolOutput `json:"consumed_tool_outputs,omitempty"`
 	CorrectionEvidence  bool                 `json:"correction_evidence,omitempty"`
 	Query               string               `json:"query,omitempty"`
+	Question            string               `json:"question,omitempty"`
 }
 
 type generationResult struct {
@@ -28,9 +29,12 @@ type generationResult struct {
 		ID       string `json:"id"`
 		Revision int64  `json:"revision"`
 	} `json:"items"`
-	Units             int                         `json:"units"`
-	CorrectionContent string                      `json:"correction_content"`
-	CorrectionItems   []types.CorrectionReference `json:"correction_items"`
+	Units                  int                         `json:"units"`
+	CorrectionContent      string                      `json:"correction_content"`
+	CorrectionItems        []types.CorrectionReference `json:"correction_items"`
+	CorrectionDisabled     bool                        `json:"correction_disabled,omitempty"`
+	CorrectionNeedsProject bool                        `json:"correction_needs_project,omitempty"`
+	DeadlinePolicy         string                      `json:"deadline_policy,omitempty"`
 }
 
 // BeginGuidedSourceCall applies the trusted policy and existing source annotations
@@ -41,6 +45,14 @@ func BeginGuidedSourceCall(ctx context.Context, messages []chat.Message, opts *c
 	ctx, call, err := BeginSourceCall(ctx, "model", request, inputs, complete)
 	if err != nil {
 		return ctx, messages, call, err
+	}
+	retrievalQuestion, _ := ctx.Value(correctionQueryKey{}).(correctionQuery)
+	if CorrectionScopeUnsupported(ctx) {
+		call.correctionCheck = "unsupported_scope"
+		return ctx, messages, call, nil
+	}
+	if retrievalQuestion.query != "" {
+		call.correctionCheck = "unavailable"
 	}
 	handle, tracked := SourceRunFromContext(ctx)
 	step, _ := ctx.Value(sourceStepKey{}).(string)
@@ -53,10 +65,10 @@ func BeginGuidedSourceCall(ctx context.Context, messages []chat.Message, opts *c
 	q := generationRequest{StepID: step, CallID: SourceFieldHash(request)}
 	if step != "" {
 		q.ConsumedToolOutputs = consumedToolOutputsFromContext(ctx)
-		if query, _ := ctx.Value(correctionQueryKey{}).(string); query != "" {
-			q.Query = query
+		if retrievalQuestion.query != "" {
+			q.Query, q.Question = retrievalQuestion.query, retrievalQuestion.question
 			q.CorrectionEvidence = true
-			q.CallID = SourceFieldHash([]string{q.CallID, query})
+			q.CallID = SourceFieldHash([]string{q.CallID, q.Query, q.Question})
 		}
 	}
 	call.annotationDelivery = "unavailable"
@@ -67,9 +79,10 @@ func BeginGuidedSourceCall(ctx context.Context, messages []chat.Message, opts *c
 	if !validCorrectionResult(q, out, inputs) {
 		return ctx, messages, call, nil
 	}
-	if len(out.Items) == 0 && len(out.CorrectionItems) == 0 {
+	if len(out.Items) == 0 && len(out.CorrectionItems) == 0 && out.DeadlinePolicy == "" {
 		if out.Content == "" && out.AnnotationContent == "" && out.AnnotationPolicy == "" && out.Units == 0 {
 			call.annotationDelivery = ""
+			call.markCorrectionChecked(q, out)
 		}
 		return ctx, messages, call, nil
 	}
@@ -97,8 +110,14 @@ func BeginGuidedSourceCall(ctx context.Context, messages []chat.Message, opts *c
 		seen[item.ID] = true
 	}
 	messages = append([]chat.Message(nil), messages...)
-	if out.AnnotationContent != "" || out.CorrectionContent != "" {
-		annotation := out.AnnotationPolicy
+	if out.AnnotationContent != "" || out.CorrectionContent != "" || out.DeadlinePolicy != "" {
+		annotation := out.DeadlinePolicy
+		if out.AnnotationPolicy != "" {
+			if annotation != "" {
+				annotation += "\n"
+			}
+			annotation += out.AnnotationPolicy
+		}
 		if out.AnnotationContent != "" {
 			annotation += "\n\n" + out.AnnotationContent
 		}
@@ -132,7 +151,32 @@ func BeginGuidedSourceCall(ctx context.Context, messages []chat.Message, opts *c
 		call.annotationDelivery = "applied"
 	}
 	call.correctionItems = out.CorrectionItems
+	call.markCorrectionChecked(q, out)
 	return ctx, messages, call, nil
+}
+
+func (c *SourceCall) markCorrectionChecked(q generationRequest, result generationResult) {
+	if !q.CorrectionEvidence {
+		return
+	}
+	switch {
+	case result.CorrectionDisabled:
+		c.correctionCheck = "disabled"
+	case result.CorrectionNeedsProject:
+		c.correctionCheck = "project_required"
+	case len(result.CorrectionItems) > 0:
+		c.correctionCheck = "applied"
+	default:
+		c.correctionCheck = "checked_no_match"
+	}
+}
+
+// CorrectionCheck describes the attempted check for this model request.
+func (c *SourceCall) CorrectionCheck() string {
+	if c == nil {
+		return ""
+	}
+	return c.correctionCheck
 }
 
 // CorrectionItems returns the reviewed evidence included in this provider request.
@@ -161,6 +205,15 @@ func correctionSourceLabels(ctx context.Context, items []types.CorrectionReferen
 }
 
 func validCorrectionResult(q generationRequest, out generationResult, inputs []SourceInput) bool {
+	if out.DeadlinePolicy != "" && (!q.CorrectionEvidence || q.StepID == "" || out.CorrectionDisabled || len(out.DeadlinePolicy) > 800 || len(out.CorrectionItems) != 0) {
+		return false
+	}
+	if (out.CorrectionDisabled || out.CorrectionNeedsProject) && (out.CorrectionContent != "" || len(out.CorrectionItems) != 0) {
+		return false
+	}
+	if out.CorrectionNeedsProject && (!q.CorrectionEvidence || out.CorrectionDisabled) {
+		return false
+	}
 	if out.CorrectionContent == "" {
 		return len(out.CorrectionItems) == 0
 	}

@@ -185,7 +185,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	_, tail := splitter.Flush()
 	_ = e.eventBus.Emit(ctx, event.Event{
 		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
-		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true},
+		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true, CorrectionCheck: llmResult.CorrectionCheck},
 	})
 
 	// Safety net: strip any residual <think> blocks that may have leaked through

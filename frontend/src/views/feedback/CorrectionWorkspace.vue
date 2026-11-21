@@ -18,6 +18,7 @@
           <h3>勘误 {{ selectedItem.id }} · 修订 {{ selectedItem.revision }}</h3>
           <p class="metadata">分块 {{ selectedItem.chunk_id }}</p>
           <p v-if="selectedItem.applies_when">适用条件：{{ selectedItem.applies_when }}</p>
+          <p v-if="selectedItem.applies_project">适用项目：{{ selectedItem.applies_project }}</p>
           <p>{{ selectedItem.correction }}</p>
         </article>
         <div class="correction-markdown markdown-content" v-html="preview" />

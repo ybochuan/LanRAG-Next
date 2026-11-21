@@ -74,6 +74,7 @@ type Scope struct {
 	ConsumedToolSteps  []string
 	CorrectionEvidence bool
 	Query              string
+	Question           string
 	Now                time.Time
 }
 
@@ -86,14 +87,15 @@ type Item struct {
 // Selection carries ordinary guidance and verified source annotation data.
 // Units charges UTF-8 bytes and framing for each nonempty section.
 type Selection struct {
-	CallID            string                 `json:"call_id"`
-	Content           string                 `json:"content"`
-	AnnotationContent string                 `json:"annotation_content,omitempty"`
-	AnnotationPolicy  string                 `json:"annotation_policy,omitempty"`
-	CorrectionContent string                 `json:"correction_content,omitempty"`
-	CorrectionItems   []corrections.Identity `json:"correction_items,omitempty"`
-	Items             []Item                 `json:"items"`
-	Units             int                    `json:"units"`
+	CallID                 string                 `json:"call_id"`
+	Content                string                 `json:"content"`
+	AnnotationContent      string                 `json:"annotation_content,omitempty"`
+	AnnotationPolicy       string                 `json:"annotation_policy,omitempty"`
+	CorrectionContent      string                 `json:"correction_content,omitempty"`
+	CorrectionItems        []corrections.Identity `json:"correction_items,omitempty"`
+	CorrectionNeedsProject bool                   `json:"correction_needs_project,omitempty"`
+	Items                  []Item                 `json:"items"`
+	Units                  int                    `json:"units"`
 }
 
 func (s *Selection) appendText(text string, annotation bool) {
@@ -235,12 +237,13 @@ func currentTx(ctx context.Context, tx *sql.Tx, s Scope, selection Selection) (b
 		}
 		current.appendText(text, annotation)
 	}
-	if len(selection.CorrectionItems) != 0 {
+	if len(selection.CorrectionItems) != 0 || selection.CorrectionNeedsProject {
 		if err := addCorrections(ctx, tx, s, &current, selection.CorrectionItems); err != nil {
 			return false, err
 		}
 	}
 	return current.CorrectionContent == selection.CorrectionContent && slices.Equal(current.CorrectionItems, selection.CorrectionItems) &&
+		current.CorrectionNeedsProject == selection.CorrectionNeedsProject &&
 		current.Content == selection.Content && current.AnnotationContent == selection.AnnotationContent &&
 		current.AnnotationPolicy == selection.AnnotationPolicy && current.Units == selection.Units, nil
 }

@@ -99,7 +99,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
-	ctx = extensionbridge.WithCorrectionQuery(ctx, correctionQuery(chatManage))
+	if chatManage.NeedsRetrieval() && types.HasKnowledgeRetrievalScope(chatManage.SearchTargets, chatManage.KnowledgeBaseIDs, chatManage.KnowledgeIDs) {
+		ctx = extensionbridge.WithCorrectionQuery(ctx, correctionQuery(chatManage), chatManage.Query)
+	}
 	ctx = extensionbridge.WithCorrectionSourceHandles(ctx, modelContext.ChunkHandle)
 	inputs, complete := sourceInputsForModel(ctx, chatManage)
 	ctx, chatMessages, sourceCall, err := extensionbridge.BeginGuidedSourceCall(ctx, chatMessages, opt, inputs, complete)
@@ -293,9 +295,10 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
 						SessionID: chatManage.SessionID,
 						Data: event.AgentFinalAnswerData{
-							Content:   response.Content,
-							Done:      response.Done,
-							Truncated: truncated,
+							Content:         response.Content,
+							Done:            response.Done,
+							Truncated:       truncated,
+							CorrectionCheck: sourceCall.CorrectionCheck(),
 						},
 					})
 				}

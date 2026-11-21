@@ -156,10 +156,13 @@ func (s *HTTPServer) execute(ctx context.Context, path string, q HTTPRequest) (a
 	switch path {
 	case "/bridge/before-generate":
 		if q.Guidance != nil {
-			if s.correctionKBs != nil && !slices.Contains(s.correctionKBs, q.Handle.Scope.KnowledgeBaseID) {
+			disabled := q.Guidance.CorrectionEvidence && s.correctionKBs != nil && !slices.Contains(s.correctionKBs, q.Handle.Scope.KnowledgeBaseID)
+			if disabled {
 				q.Guidance.CorrectionEvidence = false
 			}
-			return s.runs.PrepareGuidance(ctx, *q.Handle, *q.Guidance)
+			result, err := s.runs.PrepareGuidance(ctx, *q.Handle, *q.Guidance)
+			result.CorrectionDisabled = disabled
+			return result, err
 		}
 	case "/provenance/runs/steps":
 		if q.Action == "begin" && q.Step != nil {

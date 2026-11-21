@@ -42,13 +42,21 @@ type Identity struct {
 // Entry contains only the approved wording and public source metadata.
 type Entry struct {
 	Identity
-	AppliesWhen string    `json:"applies_when"`
-	Correction  string    `json:"correction"`
-	State       string    `json:"state"`
-	ApprovedAt  time.Time `json:"approved_at"`
-	EffectiveAt time.Time `json:"effective_at"`
-	Ordinal     int       `json:"ordinal"`
-	contentHash string
+	AppliesWhen    string    `json:"applies_when"`
+	AppliesProject string    `json:"applies_project,omitempty"`
+	Correction     string    `json:"correction"`
+	State          string    `json:"state"`
+	ApprovedAt     time.Time `json:"approved_at"`
+	EffectiveAt    time.Time `json:"effective_at"`
+	Ordinal        int       `json:"ordinal"`
+	contentHash    string
+	reviewedPeers  []Peer
+}
+
+// Peer identifies the reviewed revision of an already active correction.
+type Peer struct {
+	ID       string `json:"id"`
+	Revision int64  `json:"revision"`
 }
 
 // Source identifies an original retrieval candidate without correction prose.
@@ -75,7 +83,8 @@ const activeSource = "c.state='active' AND " + store.LifecycleReadableSQL + " AN
   AND json_extract(leaf.value,'$.chunk_index')=p.chunk_index)`
 
 const recordsSQL = `SELECT p.feedback_id,s.revision,p.document_id,p.version_id,p.chunk_id,
- p.applies_when,p.correction,p.approved_at,p.effective_at,s.status,p.superseded_by,p.content_hash,
+ p.applies_when,coalesce(json_extract(q.feedback_anchor,'$.applies_project'),''),
+ coalesce(json_extract(q.feedback_anchor,'$.reviewed_peers'),'[]'),p.correction,p.approved_at,p.effective_at,s.status,p.superseded_by,p.content_hash,
  CASE WHEN ` + activeSource + ` AND NOT ` + store.FamilyReplacementDueSQL + ` THEN 1 ELSE 0 END,a.effective_from,a.effective_until
  FROM ext_feedback_corrections p
  JOIN ext_qa_feedback q USING(tenant_id,knowledge_base_id,feedback_id)
@@ -108,10 +117,13 @@ func readTx(ctx context.Context, tx *sql.Tx, s Scope, now time.Time, where strin
 	blocked := map[string]bool{}
 	for rows.Next() {
 		var item Entry
-		var approved, effective, stage string
+		var approved, effective, stage, peers string
 		var superseded, from, until sql.NullString
 		var allowed bool
-		if err = rows.Scan(&item.ID, &item.Revision, &item.DocumentID, &item.VersionID, &item.ChunkID, &item.AppliesWhen, &item.Correction, &approved, &effective, &stage, &superseded, &item.contentHash, &allowed, &from, &until); err != nil {
+		if err = rows.Scan(&item.ID, &item.Revision, &item.DocumentID, &item.VersionID, &item.ChunkID, &item.AppliesWhen, &item.AppliesProject, &peers, &item.Correction, &approved, &effective, &stage, &superseded, &item.contentHash, &allowed, &from, &until); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(peers), &item.reviewedPeers); err != nil {
 			return nil, err
 		}
 		item.ApprovedAt, err = time.Parse(time.RFC3339Nano, approved)
@@ -172,11 +184,16 @@ func ValidQuery(query string) bool {
 
 // Sources finds up to twelve distinct original chunks in the authorized scope.
 func (s *Service) Sources(ctx context.Context, scope Scope, ids []string, query string) ([]Source, error) {
+	return s.SourcesForQuestion(ctx, scope, ids, query, "")
+}
+
+// SourcesForQuestion separates retrieval terms from the user's project context.
+func (s *Service) SourcesForQuestion(ctx context.Context, scope Scope, ids []string, query, question string) ([]Source, error) {
 	out := []Source{}
 	if s == nil || s.db == nil {
 		return nil, ErrUnavailable
 	}
-	if scope.TenantID == 0 || !ValidID(scope.KnowledgeBaseID) || len(ids) > 10000 || !ValidQuery(query) {
+	if scope.TenantID == 0 || !ValidID(scope.KnowledgeBaseID) || len(ids) > 10000 || !ValidQuery(query) || !ValidQuery(question) {
 		return nil, ErrInvalid
 	}
 	for _, id := range ids {
@@ -197,7 +214,7 @@ func (s *Service) Sources(ctx context.Context, scope Scope, ids []string, query 
 		seen := map[Source]bool{}
 		for _, e := range entries {
 			source := Source{DocumentID: e.DocumentID, ChunkID: e.ChunkID, ContentHash: e.contentHash}
-			if e.State == "active" && !seen[source] && matches(terms, e) {
+			if e.State == "active" && !seen[source] && matches(terms, e) && appliesToProject(e.AppliesProject, question) {
 				out = append(out, source)
 				if len(out) == 12 {
 					break
@@ -212,10 +229,10 @@ func (s *Service) Sources(ctx context.Context, scope Scope, ids []string, query 
 
 // EvidenceTx matches only exact original chunks included in this model request.
 // The caller supplies verified same-run search steps for consumed tool outputs.
-func EvidenceTx(ctx context.Context, tx *sql.Tx, s Scope, now time.Time, run, step string, tools []string, query string) ([]Entry, error) {
+func EvidenceTx(ctx context.Context, tx *sql.Tx, s Scope, now time.Time, run, step string, tools []string, query, question string) ([]Entry, bool, error) {
 	terms := searchTerms(query)
 	if step == "" || len(terms) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	steps, _ := json.Marshal(tools)
 	rows, err := readTx(ctx, tx, s, now, activeOnly+` AND EXISTS (
@@ -225,15 +242,59 @@ func EvidenceTx(ctx context.Context, tx *sql.Tx, s Scope, now time.Time, run, st
   AND json_extract(ref.value,'$.document_id')=p.document_id AND json_extract(ref.value,'$.version_id')=p.version_id
  )`, run, step, string(steps))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out []Entry
+	needsProject := false
 	for _, e := range rows {
-		if e.State == "active" && matches(terms, e) {
-			out = append(out, e)
+		if e.State != "active" || !matches(terms, e) {
+			continue
+		}
+		if !appliesToProject(e.AppliesProject, question) {
+			needsProject = true
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, needsProject && len(out) == 0, nil
+}
+
+func normalizeProject(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(value)), " ")
+}
+
+func appliesToProject(project, question string) bool {
+	if project == "" {
+		return true
+	}
+	question = normalizeProject(question)
+	project = normalizeProject(project)
+	before, after, found := strings.Cut(question, project)
+	if !found {
+		return false
+	}
+	for _, denied := range []string{"非", "不是", "不含", "排除", "除", "not", "except", "excluding", "without"} {
+		if strings.HasSuffix(strings.TrimSpace(before), denied) {
+			return false
 		}
 	}
-	return out, nil
+	left, _ := utf8.DecodeLastRuneInString(before)
+	right, _ := utf8.DecodeRuneInString(after)
+	if unicode.IsLetter(left) || unicode.IsDigit(left) || unicode.Is(unicode.Pd, left) || left == '_' {
+		if !unicode.Is(unicode.Han, left) || !slices.ContainsFunc([]string{"按", "请问", "关于", "根据", "针对", "在", "以", "和", "与", "或"}, func(prefix string) bool {
+			return strings.HasSuffix(before, prefix)
+		}) {
+			return false
+		}
+	}
+	if unicode.IsLetter(right) || unicode.IsDigit(right) || unicode.Is(unicode.Pd, right) || right == '_' {
+		last, _ := utf8.DecodeLastRuneInString(project)
+		return unicode.Is(unicode.Han, last) && unicode.Is(unicode.Han, right) &&
+			slices.ContainsFunc([]string{"的", "报销", "差旅", "费用", "适用", "需要", "应当"}, func(suffix string) bool {
+				return strings.HasPrefix(after, suffix)
+			})
+	}
+	return true
 }
 
 // ActiveTx validates a published entry for replacement or revision proposals.
@@ -248,15 +309,23 @@ func ActiveTx(ctx context.Context, tx *sql.Tx, s Scope, now time.Time, doc, vers
 	return items[0], nil
 }
 
-// ConflictsTx detects different wording for one exact normalized condition.
-// Different conditions require a reviewer to determine semantic overlap.
+// ConflictsTx requires reviewed revisions for coexisting, different wording.
+// A reviewer cannot attest that identical conditions in the same scope are disjoint.
 func ConflictsTx(ctx context.Context, tx *sql.Tx, scope Scope, now time.Time, entry Entry, replaces string) (bool, error) {
 	items, err := readTx(ctx, tx, scope, now, activeOnly+" AND p.document_id=? AND p.version_id=? AND p.chunk_id=? AND p.feedback_id<>? AND p.feedback_id<>?", entry.DocumentID, entry.VersionID, entry.ChunkID, entry.ID, replaces)
 	if err != nil {
 		return false, err
 	}
 	for _, old := range items {
-		if old.State == "active" && normalizeCondition(old.AppliesWhen) == normalizeCondition(entry.AppliesWhen) && !strings.EqualFold(strings.Join(strings.Fields(old.Correction), " "), strings.Join(strings.Fields(entry.Correction), " ")) {
+		if old.State != "active" || strings.EqualFold(strings.Join(strings.Fields(old.Correction), " "), strings.Join(strings.Fields(entry.Correction), " ")) {
+			continue
+		}
+		oldProject, newProject := normalizeProject(old.AppliesProject), normalizeProject(entry.AppliesProject)
+		projectsOverlap := oldProject == "" || newProject == "" || oldProject == newProject
+		if projectsOverlap && normalizeCondition(old.AppliesWhen) == normalizeCondition(entry.AppliesWhen) {
+			return true, nil
+		}
+		if !slices.Contains(entry.reviewedPeers, Peer{ID: old.ID, Revision: old.Revision}) {
 			return true, nil
 		}
 	}
@@ -278,11 +347,11 @@ func LegacyAvailableTx(ctx context.Context, tx *sql.Tx, s Scope, now time.Time, 
 	if err != nil {
 		return false, err
 	}
-	_, err = ActiveTx(ctx, tx, s, now, doc, version, id)
+	entry, err := ActiveTx(ctx, tx, s, now, doc, version, id)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
-	return err == nil, err
+	return err == nil && entry.AppliesProject == "", err
 }
 
 func matches(terms map[string]bool, e Entry) bool {

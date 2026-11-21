@@ -4495,6 +4495,9 @@ export default {
     referenceChunkCount: '{count}件のチャンク',
     fallbackHint: 'ナレッジベースから関連する内容が見つかりませんでした。上記はモデルの直接回答です。',
     truncatedHint: 'モデルの1回あたりの出力上限で回答が途中で打ち切られました。上記は打ち切り前に生成された内容です。',
+    correctionCheckUnavailable: '訂正情報を確認できませんでした。制度に関する回答を利用する前に、現在有効な訂正を確認してください。',
+    correctionCheckUnsupportedScope: '選択した範囲では訂正情報を確認できません。ナレッジベースを1つ選択してください。',
+    correctionCheckProjectRequired: '該当する訂正を確認するため、質問にプロジェクトの正式名称を含めてください。',
     rewind: {
       tooltip: 'ここに巻き戻す',
       confirmTitle: 'ここに巻き戻しますか？',

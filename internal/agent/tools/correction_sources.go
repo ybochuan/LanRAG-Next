@@ -47,7 +47,7 @@ func (t *SearchKnowledgeTool) correctionCandidates(
 				active = append(active, id)
 			}
 		}
-		for _, source := range extensionbridge.CorrectionSources(kbCtx, tenant, kb.ID, active, query) {
+		for _, source := range extensionbridge.CorrectionSources(kbCtx, tenant, kb.ID, active, query, extensionbridge.OriginalCorrectionQuestion(ctx)) {
 			if !allowed[source.DocumentID] {
 				continue
 			}

@@ -1430,6 +1430,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				markQuickAnswerTruncated(streamCtx.assistantMessage)
 			}
 			if data.Done {
+				recordCorrectionCheck(streamCtx.assistantMessage, data.CorrectionCheck)
 				if completionHandled {
 					return nil
 				}

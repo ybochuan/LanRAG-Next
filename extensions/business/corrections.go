@@ -14,6 +14,31 @@ func correctionScope(scope provenance.Scope) corrections.Scope {
 	return corrections.Scope{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID}
 }
 
+func (s *Service) verifyReviewedCorrectionPeers(ctx context.Context, tx *sql.Tx, c Command, pin *FeedbackCitation) error {
+	peers := c.Payload.ReviewedCorrectionPeers
+	if len(peers) > maxFeedbackCitations {
+		return ErrInvalid
+	}
+	seen := make(map[string]bool, len(peers))
+	for _, peer := range peers {
+		if !validID(peer.ID) || peer.Revision <= 0 || peer.ID == c.Payload.SupersedesCorrectionID || seen[peer.ID] {
+			return ErrInvalid
+		}
+		seen[peer.ID] = true
+		active, err := corrections.ActiveTx(ctx, tx, correctionScope(c.Scope), s.now(), pin.DocumentID, pin.VersionID, peer.ID)
+		if errors.Is(err, corrections.ErrNotFound) {
+			return ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+		if active.Revision != peer.Revision || active.ChunkID != pin.ChunkID {
+			return ErrConflict
+		}
+	}
+	return nil
+}
+
 func (s *Service) stageCorrectionReplacement(ctx context.Context, tx *sql.Tx, c Command, pin *FeedbackCitation) error {
 	previous, revision := c.Payload.SupersedesCorrectionID, c.Payload.SupersedesCorrectionRevision
 	if previous == "" && revision == 0 {

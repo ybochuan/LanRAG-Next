@@ -132,3 +132,13 @@ func appendQuickAnswerToolCall(msg *types.Message, call types.ToolCall) {
 func markQuickAnswerTruncated(msg *types.Message) {
 	ensureQuickAnswerStep(msg).Truncated = true
 }
+
+func recordCorrectionCheck(msg *types.Message, status string) {
+	if status == "" {
+		return
+	}
+	if len(msg.AgentSteps) == 0 {
+		ensureQuickAnswerStep(msg)
+	}
+	msg.AgentSteps[len(msg.AgentSteps)-1].CorrectionCheck = status
+}

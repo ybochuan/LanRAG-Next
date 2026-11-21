@@ -185,8 +185,41 @@ func TestGuidanceUsesOnlyConsumedAgentSearchOutput(t *testing.T) {
 		if err != nil || !strings.Contains(out.CorrectionContent, "勘误 1\n  适用条件：Submission deadline\n  修正口径：Five working days") || out.AnnotationPolicy == "" || out.AnnotationContent != "" || len(out.Items) != 0 || out.Units != 0 || len(out.CorrectionItems) != 1 {
 			t.Fatalf("round %s issued wrong evidence: %+v %v", name, out, err)
 		}
+		if !strings.Contains(out.AnnotationPolicy, "起算日、周末、节假日、调休、顺延") ||
+			!strings.Contains(out.AnnotationPolicy, "只答已核实口径") ||
+			!strings.Contains(out.AnnotationPolicy, "无法确定具体日期") ||
+			!strings.Contains(out.AnnotationPolicy, "唯一现行口径") || len(out.AnnotationPolicy) > 800 {
+			t.Fatalf("round %s did not receive bounded deadline policy: %q", name, out.AnnotationPolicy)
+		}
 		if item := out.CorrectionItems[0]; item.ID != "review" || item.Revision != 3 || item.DocumentID != "doc" || item.VersionID != "v1" || item.ChunkID != "pin" {
 			t.Fatalf("incorrect evidence identity: %+v", item)
+		}
+	}
+	if err := r.db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("UPDATE ext_qa_feedback SET feedback_anchor=json_set(feedback_anchor,'$.applies_project','Project Apollo') WHERE feedback_id='review'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, question string
+		wantProject    bool
+	}{
+		{"missing", "What is the submission deadline?", false},
+		{"different", "What is the submission deadline for Project Apollo-2?", false},
+		{"applicable", "What is the submission deadline for Project Apollo?", true},
+	} {
+		sum := sha256.Sum256([]byte("reviewed-project-" + tc.name))
+		request := q
+		request.StepID = begin(h, "project-"+tc.name, "model")
+		request.CallID = hex.EncodeToString(sum[:])
+		request.Question = tc.question
+		out, err := r.PrepareGuidance(ctx, h, request)
+		if err != nil || out.CorrectionNeedsProject == tc.wantProject ||
+			strings.Contains(out.CorrectionContent, "适用项目：Project Apollo\n") != tc.wantProject ||
+			(len(out.CorrectionItems) != 0) != tc.wantProject ||
+			(out.DeadlinePolicy != "") == tc.wantProject {
+			t.Fatalf("%s: invalid scoped correction selection: %+v %v", tc.name, out, err)
 		}
 	}
 	other := q

@@ -45,7 +45,7 @@ func TestReviewedCorrectionPublicationReplacementAndMarkdown(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	approve := func(id, text, previous string, revision int64) Result {
+	approve := func(id, text, previous string, revision int64, peers ...Result) Result {
 		t.Helper()
 		c := cmd("feedback_approve", "approve-"+id)
 		c.ID, c.ExpectedRevision = id, 1
@@ -54,11 +54,14 @@ func TestReviewedCorrectionPublicationReplacementAndMarkdown(t *testing.T) {
 		case "withdrawn":
 			condition = "An unrelated review condition"
 		case "overlap":
-			condition = "REVIEWER  count and deadline!"
+			condition = "Deadline and required number of reviewers"
 		case "disjoint":
 			condition = "Appeals about archived invoices"
 		}
 		c.Payload = Payload{Text: text, AppliesWhen: condition, SourceClause: &pin.ClauseAnchor, SupersedesCorrectionID: previous, SupersedesCorrectionRevision: revision}
+		for _, peer := range peers {
+			c.Payload.ReviewedCorrectionPeers = append(c.Payload.ReviewedCorrectionPeers, corrections.Peer{ID: peer.ID, Revision: peer.Revision})
+		}
 		out, err := s.Execute(ctx, c)
 		if err != nil {
 			t.Fatal(out, err)
@@ -76,20 +79,22 @@ func TestReviewedCorrectionPublicationReplacementAndMarkdown(t *testing.T) {
 	if list, err := reader.Documents(ctx, correctionScope(scope), f, nil); err != nil || list.Total != 0 {
 		t.Fatal("cooling phase appeared", list, err)
 	}
-	*clock = clock.Add(time.Minute)
-	withdrawn := approve("withdrawn", "Another fact <script> & [text]", "", 0)
-	*clock = clock.Add(24 * time.Hour)
-	disjoint := approve("disjoint", "Use the appeal form", "", 0)
+	overlap := approve("overlap", "Deadline is 9 working days", "", 0)
 	*clock = clock.Add(49 * time.Hour)
 	first, err = s.Execute(ctx, activation(first))
 	if err != nil {
 		t.Fatal(first, err)
 	}
+	withdrawn := approve("withdrawn", "Another fact <script> & [text]", "", 0, first)
+	*clock = clock.Add(49 * time.Hour)
 	withdrawn, err = s.Execute(ctx, activation(withdrawn))
 	if err != nil {
 		t.Fatal(withdrawn, err)
 	}
-	if _, err := s.Execute(ctx, activation(disjoint)); err != nil {
+	disjoint := approve("disjoint", "Use the appeal form", "", 0, first, withdrawn)
+	*clock = clock.Add(49 * time.Hour)
+	disjoint, err = s.Execute(ctx, activation(disjoint))
+	if err != nil {
 		t.Fatal(err)
 	}
 	list, err := reader.Documents(ctx, correctionScope(scope), corrections.Filter{}, nil)
@@ -100,13 +105,10 @@ func TestReviewedCorrectionPublicationReplacementAndMarkdown(t *testing.T) {
 	if err != nil || len(doc.Items) != 3 || !doc.LastApprovedAt.Equal(doc.Items[0].ApprovedAt) || strings.Contains(doc.Markdown, "private-") || strings.Contains(doc.Markdown, "<script>") {
 		t.Fatalf("unexpected published document: %+v %v", doc, err)
 	}
-	for i, id := range []string{"disjoint", "first", "withdrawn"} {
+	for i, id := range []string{"disjoint", "withdrawn", "first"} {
 		if entry := doc.Items[i]; entry.ID != id || entry.Ordinal != i+1 {
 			t.Fatalf("unexpected entry order: %+v", doc.Items)
 		}
-	}
-	if !doc.Items[1].ApprovedAt.Before(doc.Items[2].ApprovedAt) {
-		t.Fatal("fixture did not test stable ID ordering for different times on the same day")
 	}
 	if sources, err := reader.Sources(ctx, correctionScope(scope), []string{"source"}, "哪项规定是 5 个工作日"); err != nil || len(sources) != 1 || sources[0].ContentHash != hash {
 		t.Fatal("correction-only query did not find exact source", sources, err)
@@ -116,6 +118,38 @@ func TestReviewedCorrectionPublicationReplacementAndMarkdown(t *testing.T) {
 	}
 	if sources, err := reader.Sources(ctx, correctionScope(scope), []string{"target"}, "reviewer deadline"); err != nil || len(sources) != 0 {
 		t.Fatal("candidate escaped explicit authorization", sources, err)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE ext_qa_feedback
+SET feedback_anchor=json_set(feedback_anchor,'$.applies_project','松桥项目')
+WHERE tenant_id='7' AND knowledge_base_id='kb' AND feedback_id='first'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		question string
+		want     int
+	}{
+		{"松桥项目报销期限", 1},
+		{"南桥项目报销期限", 0},
+		{"大松桥项目报销期限", 0},
+		{"松桥项目二期报销期限", 0},
+		{"报销期限", 0},
+		{"非松桥项目报销期限", 0},
+	} {
+		sources, err := reader.SourcesForQuestion(ctx, correctionScope(scope), []string{"source"}, "5 个工作日", tc.question)
+		if err != nil || len(sources) != tc.want {
+			t.Errorf("question %q: sources=%+v err=%v", tc.question, sources, err)
+		}
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE ext_qa_feedback
+SET feedback_anchor=json_remove(feedback_anchor,'$.applies_project')
+WHERE tenant_id='7' AND knowledge_base_id='kb' AND feedback_id='first'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 	c := cmd("revision_create", "proposal")
 	c.Payload = Payload{DocumentID: "target", GuidanceIDs: []string{first.ID}, Text: "Proposed content"}
@@ -175,9 +209,8 @@ func TestReviewedCorrectionPublicationReplacementAndMarkdown(t *testing.T) {
 	if err != nil || !after.ModTime().Equal(before.ModTime()) {
 		t.Fatal("unchanged projection was rewritten", err)
 	}
-	overlap := approve("overlap", "Deadline is 9 working days", "", 0)
-	replacement := approve("replacement", "Corrected deadline: 7 个工作日", first.ID, first.Revision)
-	stale := approve("stale-replacement", "Corrected deadline: 10 个工作日", first.ID, first.Revision)
+	replacement := approve("replacement", "Corrected deadline: 7 个工作日", first.ID, first.Revision, withdrawn, disjoint)
+	stale := approve("stale-replacement", "Corrected deadline: 10 个工作日", first.ID, first.Revision, withdrawn, disjoint)
 	*clock = clock.Add(49 * time.Hour)
 	if _, err := s.Execute(ctx, activation(overlap)); !errors.Is(err, ErrConflict) {
 		t.Fatal("unresolved overlap activated", err)

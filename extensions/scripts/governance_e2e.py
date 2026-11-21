@@ -87,6 +87,15 @@ class Model:
                 return
             if request.get("tools") and model.phase.startswith("agent-search-materials"):
                 model.agent_requests.append((model.phase, request.get("tool_choice"), messages))
+                if model.phase == "agent-search-materials-multiround-active" and model.tool_step == 0:
+                    model.tool_step += 1
+                    call = {"id": "call-materials-second-search", "type": "function",
+                            "function": {"name": "search_knowledge",
+                                         "arguments": json.dumps({"query": "AGENTRAG_E2E_MARKER", "mode": "keyword"})}}
+                    if request.get("stream"):
+                        call["index"] = 0
+                    model.respond(handler, {"tool_calls": [call]}, "tool_calls", bool(request.get("stream")))
+                    return
                 model.base.generation_calls += 1
                 model.respond(handler, {"content": helpers.ANSWER + " " + model.old_answer}, "stop", bool(request.get("stream")))
                 return
@@ -175,9 +184,13 @@ def main():
         model = Model(); model_url = model.base.start()
         env = {key: value for key, value in os.environ.items() if not key.startswith("AGENTRAG_")}
         env["AGENTRAG_MANAGEMENT_KEY"] = secrets.token_hex(32)
-        env.update(ENV_FILE=str(ROOT / ".env"), DB_DRIVER="sqlite", DB_PATH=str(work / "core.db"), RETRIEVE_DRIVER="sqlite", STORAGE_TYPE="local", LOCAL_STORAGE_BASE_DIR=str(work / "files"), STREAM_MANAGER_TYPE="memory", SERVER_HOST=os.environ.get("AGENTRAG_E2E_SERVER_HOST", "127.0.0.1"), SERVER_PORT=str(port), WEKNORA_WEB_DIR=str(ROOT / "web"), SSRF_DISABLE="true", NEO4J_ENABLE="false", ENABLE_GRAPH_RAG="false", WEKNORA_SANDBOX_MODE="disabled", LOG_PATH="", JWT_SECRET=secrets.token_hex(32), SYSTEM_SIGNING_KEY=secrets.token_hex(32))
+        empty_env = work / "isolated.env"
+        empty_env.touch(mode=0o600)
+        env.update(ENV_FILE=str(empty_env), DB_DRIVER="sqlite", DB_PATH=str(work / "core.db"), RETRIEVE_DRIVER="sqlite", STORAGE_TYPE="local", LOCAL_STORAGE_BASE_DIR=str(work / "files"), STREAM_MANAGER_TYPE="memory", SERVER_HOST=os.environ.get("AGENTRAG_E2E_SERVER_HOST", "127.0.0.1"), SERVER_PORT=str(port), WEKNORA_WEB_DIR=str(ROOT / "web"), SSRF_DISABLE="true", NEO4J_ENABLE="false", ENABLE_GRAPH_RAG="false", WEKNORA_SANDBOX_MODE="disabled", LOG_PATH="", JWT_SECRET=secrets.token_hex(32), SYSTEM_SIGNING_KEY=secrets.token_hex(32))
         if os.environ.get("AGENTRAG_FAMILY_BROWSER_NODE"):
             env["WEKNORA_WEB_DIR"] = str(ROOT / "frontend/dist")
+        if os.environ.get("AGENTRAG_E2E_WEB_DIR"):
+            env["WEKNORA_WEB_DIR"] = os.environ["AGENTRAG_E2E_WEB_DIR"]
         binary = Path(os.environ.get("CORE_BINARY", ROOT / "tmp/governance-WeKnora-lite"))
         output = (work / "core-private.log").open("w"); handles.append(output)
         core = subprocess.Popen([str(binary)], cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
@@ -203,9 +216,11 @@ def main():
             for lifecycle_state in ("pending", "active", "stale", "superseded"):
                 http.api("POST", "/knowledge-bases/" + kb["id"] + "/tags", {"name": "gov:state:" + lifecycle_state})
         api_key = http.api("POST", "/tenants/" + str(kb["tenant_id"]) + "/api-keys", {"name": "Gov isolated Host", "full_access": False, "knowledge_base_ids": [kb["id"]], "capabilities": ["retrieve", "ingest", "manage_kbs"]})["data"]["token"]
-        host_binary = work / "extension-host"
-        subprocess.run(["/usr/local/go/bin/go", "build", "-mod=readonly", "-o", str(host_binary), "./cmd/extension-host"], cwd=ROOT / "extensions", env=dict(env, CGO_ENABLED="0", GOWORK="off"), check=True)
+        host_binary = Path(os.environ.get("AGENTRAG_E2E_HOST_BINARY", work / "extension-host")).resolve()
+        if not os.environ.get("AGENTRAG_E2E_HOST_BINARY"):
+            subprocess.run(["/usr/local/go/bin/go", "build", "-mod=readonly", "-o", str(host_binary), "./cmd/extension-host"], cwd=ROOT / "extensions", env=dict(env, CGO_ENABLED="0", GOWORK="off"), check=True)
         host_env = dict(env, AGENTRAG_MODE="worker", AGENTRAG_EXT_DB=str(work / "ext.db"), AGENTRAG_WEKNORA_URL=http.base_url, AGENTRAG_WEKNORA_API_KEY=api_key, AGENTRAG_TENANT_ID=str(kb["tenant_id"]), AGENTRAG_KB_IDS=kb["id"], AGENTRAG_RECONCILE_INTERVAL="250ms")
+        host_env["AGENTRAG_CORRECTION_KB_IDS"] = kb["id"]
         if os.environ.get("AGENTRAG_FAMILY_SEMANTIC_E2E") == "1":
             host_env.update(AGENTRAG_FAMILY_EMBEDDING_ORIGIN=model_url.removesuffix("/v1"),
                             AGENTRAG_FAMILY_EMBEDDING_MODEL="family-fixture-embedding")
@@ -486,7 +501,7 @@ def main():
             with sqlite3.connect(work / "ext.db") as db:
                 db.execute("UPDATE ext_feedback_staging SET ready_at='2020-01-01T00:00:00Z' WHERE feedback_id=?", (receipt["id"],))
             active = http.api("PUT", review_route + "feedback_activate", payload(approved["revision"], {}))["data"]
-            def check_annotation(phase, agent=False, new_session=True, query=None):
+            def check_annotation(phase, agent=False, new_session=True, query=None, guided_calls=1):
                 if new_session:
                     sessions.pop("agent" if agent else "rag", None)
                 status, response, captured = ask(phase, agent, query=query)
@@ -502,9 +517,9 @@ def main():
                 guided = [messages for messages in prompts if messages
                           and "【已审核勘误】\n" in messages[-1].get("content", "")
                           and annotation in messages[-1]["content"].split("【已审核勘误】\n", 1)[1]]
-                if status != 200 or len(guided) != 1 or comment["text"] in captured:
+                if status != 200 or len(guided) != guided_calls or comment["text"] in captured:
                     raise RuntimeError("matching chunk did not receive only the reviewed correction: " + phase)
-                messages = guided[0]
+                messages = guided[-1]
                 system = messages[0].get("content", "")
                 evidence = messages[-1].get("content", "")
                 if messages[0].get("role") != "system" or annotation in system or "【已审核勘误】" not in system:
@@ -592,6 +607,15 @@ def main():
             first_agent_request = next((item for item in model.agent_requests if item[0] == "agent-search-materials-matching-active"), None)
             if not first_agent_request or first_agent_request[1] is not None or not any(message.get("role") == "tool" for message in first_agent_request[2]):
                 raise RuntimeError("Agent did not obtain native search evidence before the first provider generation")
+            multiround_phase = "agent-search-materials-multiround-active"
+            _, final_messages = check_annotation(multiround_phase, agent=True, query=natural_query, guided_calls=2)
+            requests = [item for item in model.agent_requests if item[0] == multiround_phase]
+            tool_messages = [message for message in final_messages if message.get("role") == "tool"]
+            if len(requests) != 2 or any(request[1] is not None for request in requests) or len(tool_messages) != 2 or not any(
+                message.get("tool_call_id") == "call-materials-second-search" for message in tool_messages
+            ):
+                raise RuntimeError("Agent did not consume native and model-initiated search results in the final model call")
+            emit("[AGENT-CORRECTION-MULTIROUND] PASS: native preflight, autonomous second search, exact evidence and persisted citations")
             http.api("PUT", quick_id, quick_update)
             if publication_mode in ("manual", "binary"):
                 def publish_action(action, data=None, proposal=None):
@@ -647,6 +671,21 @@ def main():
                 if status != 200 or model.old_answer not in response or revoked["status"] != "withdrawn" or annotation in after_withdrawal or receipt["id"] in response:
                     raise RuntimeError("withdrawn annotation still reached a new model call")
             diagnostic("withdrawn")
+            helpers.stop_owned(host)
+            host = None
+            host_env["AGENTRAG_CORRECTION_KB_IDS"] = "[]"
+            host = start_host()
+            status, response, captured = ask("rag-materials-rollback-active", False)
+            if status != 200 or model.old_answer not in response or annotation in captured or receipt["id"] in response or not any(
+                data.get("data", {}).get("correction_check") == "disabled"
+                for _, data in helpers.sse_records(response) if data.get("response_type") == "answer" and isinstance(data.get("data"), dict)
+            ):
+                raise RuntimeError("per-KB rollback did not preserve withdrawal or declare the disabled correction path")
+            helpers.stop_owned(host)
+            host = None
+            host_env["AGENTRAG_CORRECTION_KB_IDS"] = kb["id"]
+            host = start_host()
+            emit("[CORRECTION-ROLLBACK] PASS: KB rollout disabled and restored; withdrawn correction stayed out of generation and citations")
             http.api("PUT", quick_id, quick_update)
             sessions.clear()
             sessions.update(original_sessions)

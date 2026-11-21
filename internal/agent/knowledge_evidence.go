@@ -54,30 +54,15 @@ func evidenceQueryPrefix(query string) string {
 	return query
 }
 
-func asksForKnowledge(query string, hasPriorSource bool) bool {
+func isKnowledgeGreeting(query string) bool {
 	q := evidenceQueryPrefix(query)
 	plain := strings.TrimFunc(q, func(r rune) bool { return unicode.IsPunct(r) || unicode.IsSpace(r) })
 	switch plain {
 	case "", "你好", "您好", "在吗", "谢谢", "好的", "明白了", "早上好", "晚上好", "你好呀", "你好吗", "你是谁",
 		"hi", "hello", "hey", "thanks", "thank you", "good morning", "good evening", "how are you", "who are you":
-		return false
-	}
-	if IsKnowledgeFollowUp(q) && hasPriorSource {
 		return true
 	}
-	for _, phrase := range []string{"知识库", "文档", "原文", "制度", "规定", "条款", "勘误", "资料", "工作日", "自然日", "生效", "期限",
-		"knowledge base", "document", "clause", "policy", "procedure", "business days", "calendar days", "deadline", "correction"} {
-		if strings.Contains(q, phrase) {
-			return true
-		}
-	}
-	for _, prefix := range []string{"什么", "哪", "为什么", "如何", "怎么", "是否", "有没有", "总结", "解释", "查询", "查找", "列出",
-		"what ", "when ", "which ", "where ", "why ", "how ", "does ", "do ", "summarize ", "explain ", "find ", "list ", "tell me "} {
-		if strings.HasPrefix(q, prefix) {
-			return true
-		}
-	}
-	return strings.ContainsAny(q, "?？")
+	return false
 }
 
 func requestsArchiveSearch(query string) bool {
@@ -103,7 +88,7 @@ func (e *AgentEngine) initialKnowledgeEvidence(
 	req, _ := ctx.Value(knowledgeEvidenceKey{}).(knowledgeEvidenceRequest)
 	query := strings.TrimSpace(req.query)
 	previous := strings.TrimSpace(req.previous)
-	if (!req.selected && previous == "") || !asksForKnowledge(query, previous != "") {
+	if (!req.selected && previous == "") || isKnowledgeGreeting(query) {
 		return ctx, messages, true
 	}
 	if e.toolRegistry == nil {
@@ -111,6 +96,9 @@ func (e *AgentEngine) initialKnowledgeEvidence(
 	}
 	if requestsArchiveSearch(query) && e.toolRegistry.HasScopedArchiveService(ctx) {
 		return ctx, messages, true
+	}
+	if extensionbridge.CorrectionScopeUnsupported(ctx) {
+		return ctx, messages, false
 	}
 	if IsKnowledgeFollowUp(query) && previous != "" {
 		query = previous + "\n" + query
@@ -131,6 +119,7 @@ func (e *AgentEngine) initialKnowledgeEvidence(
 		ProviderMetadata: types.ToolCallMetadata{"thought_signature": json.RawMessage(`"skip_thought_signature_validator"`)},
 	}}}
 	step := types.AgentStep{Iteration: state.CurrentRound, Timestamp: time.Now()}
+	ctx = extensionbridge.WithCorrectionQuery(ctx, query, req.query)
 	searchCtx := agenttools.WithCorrectionSourceSearch(ctx)
 	if e.runRoundTools(searchCtx, state, response, &step, sessionID, messageID) {
 		return ctx, messages, true
@@ -149,7 +138,7 @@ func (e *AgentEngine) initialKnowledgeEvidence(
 				return ctx, messages, false
 			}
 			ctx = context.WithValue(ctx, currentKnowledgeEvidenceKey{}, true)
-			return extensionbridge.WithCorrectionQuery(ctx, query), e.appendToolImages(ctx, withSearch, step), true
+			return ctx, e.appendToolImages(ctx, withSearch, step), true
 		}
 	}
 	return ctx, messages, false
@@ -168,13 +157,22 @@ func (e *AgentEngine) publishSearchReferences(ctx context.Context, state *types.
 
 func (e *AgentEngine) finishWithoutKnowledgeEvidence(ctx context.Context, state *types.AgentState, sessionID string) {
 	answer := "The search did not provide usable evidence from the selected knowledge sources. I can’t verify an answer from them."
-	if strings.HasPrefix(types.LanguageFromContextOrDefault(ctx), "zh") {
+	chinese := strings.HasPrefix(types.LanguageFromContextOrDefault(ctx), "zh")
+	if chinese {
 		answer = "本轮未从选定的知识来源取得可用依据，无法据此确认答案。"
+	}
+	var check string
+	if extensionbridge.CorrectionScopeUnsupported(ctx) {
+		check = "unsupported_scope"
+		answer = "Evidence-verified answers require a single knowledge base. Select one and ask again."
+		if chinese {
+			answer = "当前证据核验仅支持单一知识库，请选择一个知识库后重试。"
+		}
 	}
 	state.FinalAnswer = answer
 	state.IsComplete = true
 	_ = e.eventBus.Emit(ctx, event.Event{
 		ID: generateEventID("answer"), Type: event.EventAgentFinalAnswer, SessionID: sessionID,
-		Data: event.AgentFinalAnswerData{Content: answer, Done: true},
+		Data: event.AgentFinalAnswerData{Content: answer, Done: true, CorrectionCheck: check},
 	})
 }

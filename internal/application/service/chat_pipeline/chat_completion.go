@@ -55,7 +55,9 @@ func (p *PluginChatCompletion) OnEvent(
 	chatMessages = modelContext.EncodeMessages(chatMessages)
 	reportModelContextLeaks(ctx, "Completion", modelContext, chatMessages)
 	ctx = withPromptCacheMetadata(ctx, chatModel, chatMessages, opt, "knowledge_qa")
-	ctx = extensionbridge.WithCorrectionQuery(ctx, correctionQuery(chatManage))
+	if chatManage.NeedsRetrieval() && types.HasKnowledgeRetrievalScope(chatManage.SearchTargets, chatManage.KnowledgeBaseIDs, chatManage.KnowledgeIDs) {
+		ctx = extensionbridge.WithCorrectionQuery(ctx, correctionQuery(chatManage), chatManage.Query)
+	}
 	ctx = extensionbridge.WithCorrectionSourceHandles(ctx, modelContext.ChunkHandle)
 	inputs, complete := sourceInputsForModel(ctx, chatManage)
 	ctx, chatMessages, sourceCall, err := extensionbridge.BeginGuidedSourceCall(ctx, chatMessages, opt, inputs, complete)

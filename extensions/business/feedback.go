@@ -131,7 +131,7 @@ func (s *Service) feedback(ctx context.Context, c Command) (Result, error) {
 		if e != nil && e != sql.ErrNoRows {
 			return Result{}, e
 		}
-		if e == sql.ErrNoRows && (p.SupersedesCorrectionID != "" || p.SupersedesCorrectionRevision != 0) {
+		if e == sql.ErrNoRows && (p.SupersedesCorrectionID != "" || p.SupersedesCorrectionRevision != 0 || p.AppliesProject != "" || len(p.ReviewedCorrectionPeers) != 0) {
 			return Result{}, ErrInvalid
 		}
 		if e == nil {

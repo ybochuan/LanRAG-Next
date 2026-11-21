@@ -33,6 +33,7 @@ type streamLLMResult struct {
 	FinishReason       string // actual finish_reason from LLM (captured from last stream chunk)
 	StreamError        string // error message from stream (e.g., timeout), kept separate from Content
 	SearchReferences   []*types.SearchResult
+	CorrectionCheck    string
 }
 
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
@@ -266,6 +267,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 	}
 
 	sourceSucceeded = result.FinishReason != "" && ctx.Err() == nil
+	result.CorrectionCheck = sourceCall.CorrectionCheck()
 	if complete && ctx.Err() == nil {
 		result.SearchReferences = e.searchOutputs.references(outputs, sourceCall.CorrectionItems())
 	}
@@ -560,6 +562,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls), emittedEventTypes)
 
 	e.lastSearchRefs = llmResult.SearchReferences
+	e.lastCorrectionCheck = llmResult.CorrectionCheck
 	inlineReasoning, cleanContent := agenttools.SplitThinkContent(llmResult.Content)
 	fullContent := strings.TrimSpace(cleanContent)
 

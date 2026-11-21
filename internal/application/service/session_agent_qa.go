@@ -312,9 +312,9 @@ func (s *sessionService) AgentQA(
 	})
 
 	// Create agent engine with EventBus
-	if sourceCtx, sourceErr := extensionbridge.BeginSourceRunForTargets(ctx, types.SessionOwnerIDFromContext(ctx), sessionID, req.AssistantMessageID, agentConfig.SearchTargets); sourceErr == nil {
-		ctx = sourceCtx
-	} else if len(agentConfig.SearchTargets) != 0 {
+	sourceCtx, sourceErr := extensionbridge.BeginSourceRunForTargets(ctx, types.SessionOwnerIDFromContext(ctx), sessionID, req.AssistantMessageID, agentConfig.SearchTargets)
+	ctx = sourceCtx
+	if sourceErr != nil && len(agentConfig.SearchTargets) != 0 {
 		logger.Warn(ctx, "[Bridge] source run unavailable; derived copies remain unreadable")
 	}
 	logger.Info(ctx, "Creating agent engine")
@@ -433,6 +433,7 @@ func (s *sessionService) AgentQA(
 			req.Resume.Snapshot, req.Resume.Prompt)
 	} else {
 		selected := len(req.KnowledgeBaseIDs) != 0 || len(req.KnowledgeIDs) != 0 || len(req.TagScopes) != 0
+		selected = selected || req.CustomAgent.ID == types.BuiltinSmartReasoningID && len(agentConfig.SearchTargets) != 0
 		var priorQuery string
 		if agentConfig.MultiTurnEnabled && agent.IsKnowledgeFollowUp(req.Query) {
 			priorQuery = s.priorAgentKnowledgeQuery(ctx, req, agentConfig.SearchTargets)

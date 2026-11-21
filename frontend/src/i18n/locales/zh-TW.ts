@@ -5151,6 +5151,9 @@ export default {
     referenceChunkCount: '{count}個片段',
     fallbackHint: '未從知識庫中檢索到相關內容，以上為模型直接回答',
     truncatedHint: '回答在模型單次輸出上限處被截斷，以上為截斷前已生成的內容',
+    correctionCheckUnavailable: '勘誤暫未驗證。涉及制度規定時，請先查閱目前生效的勘誤。',
+    correctionCheckUnsupportedScope: '無法驗證所選範圍的勘誤，請選擇單一知識庫。',
+    correctionCheckProjectRequired: '請在問題中提供適用專案的全名，以核對勘誤。',
     rewind: {
       tooltip: '回滾到這裡',
       confirmTitle: '回滾到這裡？',

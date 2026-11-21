@@ -5149,6 +5149,9 @@ export default {
     referenceChunkCount: '{count}개 청크',
     fallbackHint: '지식 베이스에서 관련 내용을 찾지 못했습니다. 위는 모델의 직접 응답입니다.',
     truncatedHint: '모델의 응답당 출력 한도에서 답변이 잘렸습니다. 위 내용은 잘리기 전까지 생성된 부분입니다.',
+    correctionCheckUnavailable: '정정 내용을 확인하지 못했습니다. 이 답변을 참고하기 전에 현재 적용되는 정정 내용을 확인해 주세요.',
+    correctionCheckUnsupportedScope: '선택한 범위의 정정 내용을 확인할 수 없습니다. 지식 베이스를 하나만 선택해 주세요.',
+    correctionCheckProjectRequired: '적용되는 정정 내용을 확인하려면 질문에 프로젝트의 전체 이름을 입력해 주세요.',
     rewind: {
       tooltip: '여기로 되돌리기',
       confirmTitle: '여기로 되돌릴까요?',

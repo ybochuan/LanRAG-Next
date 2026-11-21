@@ -36,9 +36,12 @@ func TestKnowledgeEvidenceRoutesBeforeFirstAnswer(t *testing.T) {
 		selected                   bool
 		count                      int
 		archive                    bool
+		multiKB                    bool
 	}{
 		{name: "empty native result", query: question, selected: true, search: question},
 		{name: "nonempty without acknowledged receipt", query: question, selected: true, search: question, count: 1},
+		{name: "selected scope without heuristics", query: "报销需要两人签批", selected: true, search: "报销需要两人签批"},
+		{name: "multi-KB scope has its own status", query: question, selected: true, multiKB: true},
 		{name: "verified follow-up without explicit selection", query: "那从哪天算？", prior: "报销制度里的五个工作日适用哪一条？", search: "报销制度里的五个工作日适用哪一条？\n那从哪天算？"},
 		{name: "greeting with KB selected", query: "您好！", selected: true},
 		{name: "existing authorized archive route", query: "仅查阅已经失效的历史条款，提醒我它是否仍有效。", selected: true, archive: true},
@@ -60,7 +63,22 @@ func TestKnowledgeEvidenceRoutesBeforeFirstAnswer(t *testing.T) {
 			e.toolRegistry.RegisterTool(search)
 			completions := 0
 			e.eventBus.On(event.EventAgentComplete, func(_ context.Context, _ event.Event) error { completions++; return nil })
+			var correctionCheck string
+			e.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+				if answer, ok := evt.Data.(event.AgentFinalAnswerData); ok && answer.Done {
+					correctionCheck = answer.CorrectionCheck
+				}
+				return nil
+			})
 			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+			if tc.multiKB {
+				var err error
+				ctx, err = extensionbridge.BeginSourceRunForTargets(ctx, "user", "session", "attempt", types.SearchTargets{
+					{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "first", TenantID: 7},
+					{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "second", TenantID: 7},
+				})
+				require.ErrorIs(t, err, extensionbridge.ErrUnattributed)
+			}
 			if tc.archive {
 				key := strings.Repeat("x", 32)
 				t.Setenv("AGENTRAG_MANAGEMENT_KEY", key)
@@ -79,6 +97,12 @@ func TestKnowledgeEvidenceRoutesBeforeFirstAnswer(t *testing.T) {
 			_, err := e.executeLoop(ctx, state, tc.query, messages, e.buildToolsForLLM(), "session", "message")
 			require.NoError(t, err)
 			require.Equal(t, 1, completions)
+			if tc.multiKB {
+				require.Empty(t, search.queries)
+				require.Zero(t, model.callCount)
+				require.Equal(t, "unsupported_scope", correctionCheck)
+				return
+			}
 			if tc.search == "" {
 				require.Empty(t, search.queries)
 				require.Equal(t, "ordinary response", state.FinalAnswer)
