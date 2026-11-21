@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: 'Автоматизация ждёт подтверждения',
       automation_paused: 'Автоматизация приостановлена',
       lifecycle_cleanup_due: 'Напоминание об очистке документов',
+      feedback_review_pending: 'Новая обратная связь ожидает проверки',
     },
   },
   toolbox: {

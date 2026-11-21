@@ -125,6 +125,7 @@
                     </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
+                <AnswerFeedback v-if="!embeddedMode" :message="session" :session-id="sessionId" inline />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                         aria-live="polite">
@@ -137,7 +138,6 @@
                 $t('common.loading') }}</span></div>
         </div>
         <RelatedAttachments :session="session" />
-        <AnswerFeedback :message="session" :session-id="sessionId" />
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"

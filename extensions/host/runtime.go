@@ -101,6 +101,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	// Set in worker mode; the notifiers drain alerts outside their write transactions.
 	var alertNotifier *reviewNotifier
 	var cleanupNotifier *cleanupNotifier
+	var feedbackNotifier *feedbackNotifier
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var reconcile *ingest.Reconciler
@@ -166,6 +167,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		// Signal is non-blocking; delivery happens on a background worker outside
 		// the review outbox transaction, so a slow Core never stalls projection.
 		alertNotifier = newReviewNotifier(cfg.UpstreamURL, cfg.ManagementKey)
+		feedbackNotifier = newFeedbackNotifier(cfg.UpstreamURL, cfg.ManagementKey)
 		alertHandler := reviewService.Handler(func(ctx context.Context, a review.Alert) error {
 			if alertNotifier != nil {
 				alertNotifier.Signal(ctx, a)
@@ -299,7 +301,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	server := bridge.NewServerWithServices(services)
 	{
 		original := server.Handler
-		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService).WithCleanup(cleanupService).WithAttachments(workbenchAttachments)
+		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService).WithCleanup(cleanupService).WithAttachments(workbenchAttachments).WithFeedbackNotifier(feedbackNotifier.Signal)
 		if upstream != nil {
 			manager.WithNativeSQLite(cfg.NativeDBPath, upstream.DocumentTitles)
 			manager.WithRenditions(lineage.NewRenditions(sourceRegistry, upstream.OriginalSHA256))
@@ -364,6 +366,9 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	}
 	if alertNotifier != nil {
 		launch(func(ctx context.Context) error { alertNotifier.Run(ctx, report); return nil })
+	}
+	if feedbackNotifier != nil {
+		launch(func(ctx context.Context) error { feedbackNotifier.Run(ctx, report); return nil })
 	}
 	if reconcile != nil {
 		businessScopes := make([]provenance.Scope, 0, len(scopes))

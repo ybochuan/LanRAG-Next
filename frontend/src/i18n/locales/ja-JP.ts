@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: 'オートメーション承認待ち',
       automation_paused: 'オートメーション一時停止',
       lifecycle_cleanup_due: 'ドキュメント整理の通知',
+      feedback_review_pending: '新しいフィードバックの確認待ち',
     },
   },
   toolbox: {

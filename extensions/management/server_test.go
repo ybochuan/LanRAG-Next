@@ -199,3 +199,29 @@ func TestManagementDatesPreserveLabelsAndExpire(t *testing.T) {
 		t.Fatal("clearing expiry revived document")
 	}
 }
+
+func TestFeedbackSubmitNotifiesOnlyWhenPendingReview(t *testing.T) {
+	s := fixture(t)
+	calls := 0
+	var gotTenant uint64
+	var gotKB, gotID string
+	s.WithFeedbackNotifier(func(_ context.Context, tenant uint64, kb, feedbackID string) {
+		calls++
+		gotTenant, gotKB, gotID = tenant, kb, feedbackID
+	})
+	pending := `{"action":"qa_feedback_submit","tenant_id":7,"knowledge_base_id":"kb","actor_id":"7:owner","operation_id":"feedback-pending","business":{"payload":{"session_id":"session-1","message_id":"message-1","text":"修正口径","reason":"inaccurate","feedback_context":{"rating":"correction","question":"问","answer_excerpt":"答"}}}}`
+	w := call(s, pending, s.key)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if calls != 1 || gotTenant != 7 || gotKB != "kb" || gotID == "" {
+		t.Fatalf("pending review notification calls=%d tenant=%d kb=%q id=%q", calls, gotTenant, gotKB, gotID)
+	}
+	like := `{"action":"qa_feedback_submit","tenant_id":7,"knowledge_base_id":"kb","actor_id":"7:owner","operation_id":"feedback-like","business":{"payload":{"session_id":"session-2","message_id":"message-2","feedback_context":{"rating":"like","question":"问","answer_excerpt":"答"}}}}`
+	if w := call(s, like, s.key); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("received feedback must not notify, calls=%d", calls)
+	}
+}

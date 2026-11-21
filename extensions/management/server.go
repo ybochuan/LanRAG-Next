@@ -25,17 +25,18 @@ import (
 
 // Server serves only server-authorized scopes; its credential never reaches a browser.
 type Server struct {
-	db          *store.DB
-	key         string
-	scopes      map[lifecycle.PolicyScope]bool
-	sources     *lineage.Registry
-	business    *business.Service
-	corrections *corrections.Service
-	cleanup     *cleanup.Service
-	attachments *attachmentworkbench.Service
-	renditions  *lineage.Renditions
-	nativeDB    string
-	titles      func(context.Context, string, []string) (map[string]string, error)
+	db             *store.DB
+	key            string
+	scopes         map[lifecycle.PolicyScope]bool
+	sources        *lineage.Registry
+	business       *business.Service
+	corrections    *corrections.Service
+	cleanup        *cleanup.Service
+	attachments    *attachmentworkbench.Service
+	renditions     *lineage.Renditions
+	nativeDB       string
+	titles         func(context.Context, string, []string) (map[string]string, error)
+	feedbackNotify func(context.Context, uint64, string, string)
 }
 
 // WithNativeSQLite supplies the read-only join and its scoped API fallback.
@@ -49,6 +50,12 @@ func (s *Server) WithBusiness(b *business.Service) *Server { s.business = b; ret
 
 // WithCleanup shares the worker's cleanup queue with workbench actions.
 func (s *Server) WithCleanup(c *cleanup.Service) *Server { s.cleanup = c; return s }
+
+// WithFeedbackNotifier wires the non-blocking review-notification path.
+func (s *Server) WithFeedbackNotifier(fn func(context.Context, uint64, string, string)) *Server {
+	s.feedbackNotify = fn
+	return s
+}
 
 func (s *Server) WithAttachments(a *attachmentworkbench.Service) *Server { s.attachments = a; return s }
 
@@ -183,6 +190,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		data, err = s.executeQAFeedback(r.Context(), req, configured)
 	} else {
 		data, err = s.execute(r.Context(), req)
+	}
+	if err == nil && req.Action == "qa_feedback_submit" && s.feedbackNotify != nil {
+		if result, ok := data.(business.Result); ok && result.Status == "pending_review" {
+			s.feedbackNotify(r.Context(), req.TenantID, req.KnowledgeBaseID, result.ID)
+		}
 	}
 	if err != nil {
 		status, code := 400, "invalid_configuration"

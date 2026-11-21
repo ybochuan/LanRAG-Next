@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: 'Automation needs approval',
       automation_paused: 'Automation paused',
       lifecycle_cleanup_due: 'Document cleanup reminder',
+      feedback_review_pending: 'New feedback awaiting review',
     },
   },
   toolbox: {

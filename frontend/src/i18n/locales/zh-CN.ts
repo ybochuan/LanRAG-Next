@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: '自动化等待审批',
       automation_paused: '自动化已暂停',
       lifecycle_cleanup_due: '文档清理提醒',
+      feedback_review_pending: '新的反馈待审核',
     },
   },
   toolbox: {

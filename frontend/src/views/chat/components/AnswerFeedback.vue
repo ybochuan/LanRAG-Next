@@ -1,11 +1,19 @@
 <template>
-  <div v-if="target" class="answer-feedback">
-    <span v-if="submitted" role="status">{{ t('chat.answerFeedback.sent') }}</span>
+  <div v-if="target" class="answer-feedback" :class="{ 'answer-feedback--inline': inline }">
+    <span v-if="submitted && inline" class="answer-feedback__done" role="status"
+      :aria-label="t('chat.answerFeedback.sent')" :title="t('chat.answerFeedback.sent')">
+      <t-icon name="check-circle" size="16px" />
+    </span>
+    <span v-else-if="submitted" role="status">{{ t('chat.answerFeedback.sent') }}</span>
+    <t-button v-else-if="inline" size="small" variant="outline" shape="round" @click="open"
+      :title="t('chat.answerFeedback.title')" :aria-label="t('chat.answerFeedback.title')">
+      <template #icon><t-icon name="chat" /></template>
+    </t-button>
     <t-button v-else size="small" variant="text" @click="open">
       <template #icon><t-icon name="chat" /></template>
       {{ t('chat.answerFeedback.title') }}
     </t-button>
-    <t-dialog v-model:visible="visible" :header="t('chat.answerFeedback.title')" :footer="false"
+    <t-dialog v-model:visible="visible" :header="t('chat.answerFeedback.title')" :footer="false" attach="body"
       width="min(520px, calc(100vw - 32px))" :close-btn="!sending" :close-on-overlay-click="false"
       :close-on-esc-keydown="!sending" destroy-on-close>
       <form class="answer-feedback-form" @submit.prevent="submit">
@@ -64,7 +72,7 @@ import {
 } from '@/api/business'
 import { persistedAssistantId, type ChatMessage } from '@/utils/steerStreamFork'
 
-const props = defineProps<{ message?: ChatMessage; sessionId: string }>()
+const props = defineProps<{ message?: ChatMessage; sessionId: string; inline?: boolean }>()
 const { t } = useI18n()
 const target = computed(() => {
   const message = props.message
@@ -220,6 +228,8 @@ async function submit() {
 
 <style scoped>
 .answer-feedback { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
+.answer-feedback--inline { display: inline-flex; align-items: center; }
+.answer-feedback__done { display: inline-flex; align-items: center; color: var(--td-success-color); }
 .answer-feedback-form { display: grid; gap: 12px; }
 .feedback-ratings { margin: 0; min-inline-size: 0; padding: 0; border: 0; }
 .feedback-ratings legend { margin-block-end: 6px; padding: 0; }

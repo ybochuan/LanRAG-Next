@@ -556,6 +556,7 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <AnswerFeedback v-if="!embeddedMode" :message="session" :session-id="sessionId || ''" inline />
                 <transition name="follow-up-toolbar-loading">
                   <span v-if="!embeddedMode && followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                     aria-live="polite">
@@ -791,6 +792,7 @@ import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';
 import { isHostApprovalEvent } from './hostApproval';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import AnswerFeedback from './AnswerFeedback.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';

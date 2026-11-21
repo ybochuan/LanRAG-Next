@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: '자동화 승인 필요',
       automation_paused: '자동화 일시 중지',
       lifecycle_cleanup_due: '문서 정리 알림',
+      feedback_review_pending: '새로운 피드백 검토 대기',
     },
   },
   toolbox: {
