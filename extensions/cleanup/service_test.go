@@ -370,3 +370,91 @@ func TestShortHoldCannotAdvanceCleanupAndFailureCanRetry(t *testing.T) {
 		t.Fatalf("due retry result=%+v err=%v", result, err)
 	}
 }
+
+func TestConfirmNowCleansExtensionRecordsBeforeRetentionDeadline(t *testing.T) {
+	db, nativePath, now, notices := fixture(t)
+	s := newService(db, nativePath, now, notices)
+	ctx := context.Background()
+	scope := Scope{TenantID: testTenant, KnowledgeBaseID: testKB}
+	if err := s.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.taskResult(ctx, scope, testDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.CanConfirm || !task.CanCleanupNow || task.Status != StatusPending {
+		t.Fatalf("task before retention deadline=%+v", task)
+	}
+	result, err := s.ConfirmNow(ctx, scope, testDoc, "actor:1", "cleanup-now", task.Revision)
+	if err != nil || result.Status != StatusCleaned {
+		t.Fatalf("confirm now result=%+v err=%v", result, err)
+	}
+	var current, events int
+	if err := db.View(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRow("SELECT count(*) FROM ext_lifecycle_current WHERE document_id=?", testDoc).Scan(&current); err != nil {
+			return err
+		}
+		return tx.QueryRow("SELECT count(*) FROM ext_lifecycle_events WHERE document_id=?", testDoc).Scan(&events)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if current != 0 || events != 0 {
+		t.Fatalf("projection still present current=%d events=%d", current, events)
+	}
+	var deletedAt string
+	if err := db.ViewNative(ctx, nativePath, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT COALESCE(deleted_at,'') FROM weknora.knowledges WHERE id=?", testDoc).Scan(&deletedAt)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if deletedAt == "" {
+		t.Fatal("native deleted document row was removed")
+	}
+	var action string
+	if err := db.View(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRow("SELECT action FROM ext_cleanup_audit WHERE document_id=? ORDER BY created_at DESC LIMIT 1", testDoc).Scan(&action)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if action != "cleaned_early" {
+		t.Fatalf("audit action=%q", action)
+	}
+}
+
+func TestConfirmNowRemovesDependentRowsBeforeParentProjections(t *testing.T) {
+	db, nativePath, now, notices := fixture(t)
+	s := newService(db, nativePath, now, notices)
+	ctx := context.Background()
+	scope := Scope{TenantID: testTenant, KnowledgeBaseID: testKB}
+	if err := s.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.task(ctx, scope, testDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO ext_lifecycle_decisions(event_id,tenant_id,knowledge_base_id,document_id,command_json,annotations_json,policy_json,evaluated_at) VALUES(?,?,?,?,?,?,?,?)`,
+			"e-"+testDoc, testTenant, testKB, testDoc, "{}", "{}", "{}", now.Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.ConfirmNow(ctx, scope, testDoc, "actor:1", "cleanup-dependent", task.Revision)
+	if err != nil || result.Status != StatusCleaned {
+		t.Fatalf("confirm now with dependent rows: result=%+v err=%v", result, err)
+	}
+	var decisions, events int
+	if err := db.View(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRow("SELECT count(*) FROM ext_lifecycle_decisions WHERE document_id=?", testDoc).Scan(&decisions); err != nil {
+			return err
+		}
+		return tx.QueryRow("SELECT count(*) FROM ext_lifecycle_events WHERE document_id=?", testDoc).Scan(&events)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if decisions != 0 || events != 0 {
+		t.Fatalf("dependent rows remain: decisions=%d events=%d", decisions, events)
+	}
+}

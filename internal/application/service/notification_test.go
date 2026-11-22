@@ -135,6 +135,30 @@ func TestNotificationPendingUsesLivePromptsNotReadHistory(t *testing.T) {
 	assertPending(0)
 }
 
+func TestNotificationNotifyOnceSuppressesDuplicateUnreadSource(t *testing.T) {
+	f := newAutomationFixture(t)
+	svc := NewNotificationService(f.db)
+	svc.now = func() time.Time { return f.now }
+	base := types.Notification{
+		TenantID: automationTenant, UserID: "u", Kind: "lifecycle.attachment_due",
+		SourceType: "attachment_alert", SourceID: "fingerprint", Title: "first", CreatedAt: f.now,
+	}
+	svc.NotifyOnce(f.ctx, &base)
+	duplicate := base
+	duplicate.ID = "duplicate"
+	duplicate.Title = "duplicate"
+	svc.NotifyOnce(f.ctx, &duplicate)
+	var rows []types.Notification
+	require.NoError(t, f.db.Order("created_at").Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, "first", rows[0].Title)
+	require.NoError(t, f.db.Model(&types.Notification{}).Where("id = ?", rows[0].ID).Update("read_at", f.now).Error)
+	svc.NotifyOnce(f.ctx, &duplicate)
+	rows = nil
+	require.NoError(t, f.db.Order("created_at").Find(&rows).Error)
+	require.Len(t, rows, 2, "a new occurrence after the prior one was read must stay visible")
+}
+
 func TestNotificationClearReadOnlyTouchesCallersReadHistory(t *testing.T) {
 	f := newAutomationFixture(t)
 	svc := NewNotificationService(f.db)

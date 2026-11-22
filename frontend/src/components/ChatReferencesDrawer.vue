@@ -49,7 +49,7 @@
         </header>
 
         <div v-if="sourceTarget?.knowledgeBaseId && sourceTarget.correctionItems?.length" class="reference-corrections">
-          <RouterLink v-for="item in sourceTarget.correctionItems" :key="item.id+':'+item.revision" :to="correctionRoute(sourceTarget.knowledgeBaseId, item.document_id, item.version_id, item)">{{ t('workbench.workspace.correctionDocuments') }} {{ item.id }}</RouterLink>
+          <t-button v-for="item in sourceTarget.correctionItems" :key="item.id+':'+item.revision" theme="primary" variant="text" size="small" @click="openCorrection(sourceTarget.knowledgeBaseId, item)">{{ t('workbench.workspace.correctionDocuments') }} {{ item.id }}</t-button>
         </div>
         <ChatReferenceSourceView
           v-if="sourceTarget"
@@ -165,7 +165,7 @@
                 </template>
               </component>
               <div v-if="!embeddedMode && item.knowledgeBaseId && item.correctionItems?.length" class="reference-corrections">
-                <RouterLink v-for="correction in item.correctionItems" :key="correction.id+':'+correction.revision" :to="correctionRoute(item.knowledgeBaseId, correction.document_id, correction.version_id, correction)">{{ t('workbench.workspace.correctionDocuments') }} {{ correction.id }}</RouterLink>
+                <t-button v-for="correction in item.correctionItems" :key="correction.id+':'+correction.revision" theme="primary" variant="text" size="small" @click="openCorrection(item.knowledgeBaseId, correction)">{{ t('workbench.workspace.correctionDocuments') }} {{ correction.id }}</t-button>
               </div>
             </article>
           </section>
@@ -396,6 +396,10 @@ function getDocumentHref(item: ReferenceListItem) {
     path: `/platform/knowledge-bases/${item.knowledgeBaseId}`,
     query,
   }).href
+}
+
+function openCorrection(kb: string, item: { id: string; document_id: string; version_id: string; revision: number }) {
+  void router.push(correctionRoute(kb, item.document_id, item.version_id, item))
 }
 
 function shouldShowItemTitle(item: ReferenceListItem) {
@@ -683,7 +687,7 @@ watch(visible, (open) => {
   padding: 8px 12px;
   overflow-wrap: anywhere;
 }
-.reference-corrections a { color: var(--td-brand-color); }
+.reference-corrections .t-button { color: var(--td-brand-color); }
 .reference-item__source {
   display: flex;
   align-items: center;

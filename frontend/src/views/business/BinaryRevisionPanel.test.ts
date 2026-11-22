@@ -39,6 +39,7 @@ function fixture(failOnce?: Stage) {
   }
   const modules: Record<string, unknown> = {
     vue,
+    'vue-router': { useRouter: () => ({ push() {} }) },
     '@/stores/auth': { useAuthStore: () => ({ user: { id: 'user' }, effectiveTenantId: 7 }) },
     '@/api/knowledge-base': {
       uploadKnowledgeFile: async (_kb: string, body: { file: File; metadata: string }) => {

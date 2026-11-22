@@ -1,7 +1,7 @@
 <template>
   <div class="feedback-review">
     <div class="feedback-layout" :class="{ 'with-evidence': kb && !restricted, 'with-annotation': showAnnotation }">
-      <section class="review-card" aria-label="问答快照">
+      <t-card class="review-card" aria-label="问答快照" :bordered="true">
         <h3>问答快照</h3>
         <p v-if="restricted" class="subtle">此反馈仅共享评价与处理状态。问答及用户说明受限。</p>
         <template v-else>
@@ -20,8 +20,8 @@
           <p v-if="!restricted && record.text" class="review-text">{{ record.text }}</p>
           <p v-else-if="!restricted" class="subtle">用户未填写补充说明。</p>
         </div>
-      </section>
-      <section v-if="kb && !restricted" class="review-card" aria-label="本轮引用分块">
+      </t-card>
+      <t-card v-if="kb && !restricted" class="review-card" aria-label="本轮引用分块" :bordered="true">
         <div class="citation-header"><h3>本轮引用分块</h3><span class="subtle">{{ citations.length }} 个分块</span></div>
         <p v-if="!citations.length" class="subtle">本轮没有可核验的引用。可仅记录、待补证或驳回。</p>
         <ol v-else class="citations">
@@ -48,8 +48,8 @@
             </template>
           </li>
         </ol>
-      </section>
-      <section v-if="showAnnotation" class="review-card annotation" aria-label="分块批注">
+      </t-card>
+      <t-card v-if="showAnnotation" class="review-card annotation" aria-label="分块批注" :bordered="true">
       <h3>分块批注</h3>
       <div v-if="anchor" class="feedback-note">
         <h4>批注锚点</h4>
@@ -102,7 +102,7 @@
           </ul>
         </div>
       </template>
-      </section>
+      </t-card>
     </div>
   </div>
 </template>
@@ -229,7 +229,9 @@ function approve() {
   .with-evidence.with-annotation { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .annotation { grid-column: auto; }
 }
-.review-card, .feedback-note, .citation { padding: 12px; border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); }
+.review-card { min-width: 0; }
+.review-card :deep(.t-card__body) { padding: 16px; }
+.feedback-note, .citation { padding: 12px; border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); }
 .review-card > :first-child, .feedback-note > :first-child, .citation-header h3, .citation-header h4 { margin-top: 0; }
 .review-card > :last-child, .feedback-note > :last-child { margin-bottom: 0; }
 .feedback-note { background: var(--td-bg-color-secondarycontainer); margin-top: 12px; }

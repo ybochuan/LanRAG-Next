@@ -50,6 +50,33 @@ export interface AttachmentExtractionIssue {
   reason: string
 }
 
+export interface AttachmentTaskItem {
+  id: string
+  title: string
+  native_title: string
+  file_name: string
+  display_name: string
+  mapping_status: string
+  reference_title: string
+  reference_location: string
+  title_state: string
+  reasons: string[]
+}
+
+export interface AttachmentTaskDocument {
+  parent_id: string
+  parent_title: string
+  parent_file_name: string
+  count: number
+  items: AttachmentTaskItem[]
+}
+
+export interface AttachmentTaskList {
+  documents: AttachmentTaskDocument[]
+  total: number
+  truncated: boolean
+}
+
 export interface AttachmentWorkbench {
   parent_id: string
   parent_version: string
@@ -68,6 +95,10 @@ async function unwrap<T>(request: Promise<unknown>): Promise<T> {
   const response = await request as Envelope<T>
   if (!response?.success || response.data == null) throw new Error(response?.error?.code || 'attachment_management_unavailable')
   return response.data
+}
+
+export function attachmentTasks(kb: string) {
+  return unwrap<AttachmentTaskList>(get(`${base(kb)}tasks`, { timeout: 50_000 }))
 }
 
 export function attachmentWorkbench(kb: string, doc: string, preview = false) {

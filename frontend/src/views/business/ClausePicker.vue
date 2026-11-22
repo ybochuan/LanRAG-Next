@@ -7,7 +7,7 @@
       <t-select :value="modelValue?.chunk_id || ''" :disabled="disabled || !documentId || loading || hashing" :options="options" :placeholder="documentId ? $t('workbench.picker.selectClause') : $t('workbench.picker.selectDocFirst')" @change="choose" />
     </label>
     <pre v-if="selectedText" class="content-preview">{{ selectedText }}</pre>
-    <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
+    <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
     <p v-else-if="documentId && !loading && !rows.length" class="subtle">{{ $t('workbench.picker.noChunks') }}</p>
     <p v-else-if="documentId && !loading" class="subtle">共 {{ rows.length }} 个分块<template v-if="keyword.trim()">，匹配 {{ filteredRows.length }} 个</template>。</p>
   </div>

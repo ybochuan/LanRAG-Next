@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: 'Automation needs approval',
       automation_paused: 'Automation paused',
       lifecycle_cleanup_due: 'Document cleanup reminder',
+      lifecycle_attachment_due: 'Attachment to-dos pending',
       feedback_review_pending: 'New feedback awaiting review',
     },
   },
@@ -9417,9 +9418,11 @@ export default {
       "subtitle": "Start and stop local llama-server instances and verify they are reachable from Core."
     },
     "reviews": {
-      "title": "Reviews",
-      "desc": "Reminders do not change a document's state. After you adjust a review date, the background scan refreshes the reminder.",
-      "loading": "Loading reminders…",
+      "title": "To-dos",
+      "desc": "Handle attachment names and body-reference confirmations, plus document reviews that are due.",
+      "loading": "Loading to-dos…",
+      "reviewTitle": "Document reviews",
+      "reviewDesc": "Reminders do not change a document's state. After you adjust a review date, the background scan refreshes the reminder.",
       "sortLabel": "By review due",
       "asc": "Ascending",
       "desc2": "Descending",
@@ -9427,7 +9430,23 @@ export default {
       "delivered": "Local delivery accepted {date}",
       "empty": "No reminders due.",
       "truncated": "Showing at most 1000 reminders; the list may not contain every open item.",
-      "note": "Delivery state comes from the notification queue; \"delivered\" means the local callback accepted the reminder, not that a person read it."
+      "note": "Delivery state comes from the notification queue; \"delivered\" means the local callback accepted the reminder, not that a person read it.",
+      "attachment": {
+        "title": "Attachment names and references",
+        "desc": "Attachments grouped by their parent document that need a name, body reference or title sync confirmed. A pending mapping applies only to its current parent document.",
+        "count": "{n} items",
+        "groupCount": "{n} attachments",
+        "open": "Open",
+        "originalFile": "Original file",
+        "currentTitle": "Current title",
+        "reference": "Body reference",
+        "empty": "No attachment to-dos.",
+        "reasonName": "Name needs review",
+        "reasonMapping": "Reference needs review",
+        "reasonDuplicate": "Duplicate name",
+        "reasonTitlePending": "Title sync pending",
+        "reasonTitleConflict": "Title sync conflict"
+      }
     },
     "rules": {
       "eyebrow": "Applies to documents initialised later",
@@ -9453,6 +9472,12 @@ export default {
       "colEffectiveUntil": "Effective until",
       "empty": "No matching documents.",
       "count": "{n} items · scroll the list to see them all",
+      "attachmentCount": "Attachments: {n}",
+      "groupedCount": "{docs} main documents · {attachments} attachments",
+      "originalFile": "Original file: {name}",
+      "orphanAttachments": "Unlinked attachments",
+      "expandAttachments": "Expand attachments",
+      "collapseAttachments": "Collapse attachments",
       "loading": "Reading lifecycle facts…",
       "unassigned": "Unassigned"
     },
@@ -9461,7 +9486,7 @@ export default {
     "tabs": {
       "documents": "All documents",
       "cleanup": "Cleanup",
-      "reviews": "Reviews",
+      "reviews": "To-dos",
       "rules": "KB rules"
     },
     "workspace": {

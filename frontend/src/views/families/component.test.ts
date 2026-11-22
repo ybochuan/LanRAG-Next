@@ -18,7 +18,7 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
   const prompts: string[] = []
   const modules: Record<string,unknown> = {
     vue: {...vue,onMounted(){},onBeforeUnmount(){}},
-    'vue-router': {useRoute:()=>({query:{}}),onBeforeRouteLeave(){}},
+    'vue-router': {useRoute:()=>({query:{}}),useRouter:()=>({push(){}}),onBeforeRouteLeave(){}},
     '@/stores/auth': {useAuthStore:()=>({effectiveTenantId:7})},
     'vue-i18n': {useI18n:()=>({t:(key:string)=>key})},
     '@/api/families': {workspace,listFamilies:async()=>[]},
@@ -30,6 +30,7 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
       return {id:'operation',status:'scheduled'}
     }},
     '../business/model':businessModel,'../lifecycle/model':lifecycleModel,
+    '@/utils/confirm': {confirmAction: async(options:{body:string})=>{prompts.push(options.body);return approved}},
     '../business/CreateForm.vue':{},'../business/DocumentPicker.vue':{},'./FamilyDocumentPanel.vue':{},'../business/business.css':{},
   }
   const window = {confirm(message:string){prompts.push(message);return approved}}
@@ -91,15 +92,15 @@ test('approving replacement requires confirmation and a write grant',async()=>{
     const row={id:'proposal',business_family_id:'family',family_revision:2,status:'pending_review',
       old_document_id:'old-policy',effective_at:'2099-11-15T00:00:00Z',revision:3}
     view.state.canWrite.value=true
-    view.state.approve(row)
+    await view.state.approve(row)
     assert.equal(view.calls.length,0)
     assert.match(view.prompts[0]!, /old-policy.*退出普通检索/)
     view.allow()
     view.state.canWrite.value=false
-    view.state.approve(row)
+    await view.state.approve(row)
     assert.equal(view.calls.length,0)
     view.state.canWrite.value=true
-    view.state.approve(row)
+    await view.state.approve(row)
     assert.equal(view.calls.length,1)
     assert.equal(view.calls[0]?.action,'family_replace_approve')
     assert.equal(view.calls[0]?.body.expected_revision,3)
@@ -117,8 +118,8 @@ test('a stale replacement or a replacement ahead of its predecessor cannot promp
     view.allow()
     const row={id:'proposal',business_family_id:'family',status:'pending_review',family_revision:6,
       old_document_id:'2018',old_version_node_id:'v2018',new_document_id:'2020',effective_at:'2020-01-01T00:00:00Z',revision:1}
-    view.state.approve(row)
-    view.state.approve({...row,family_revision:7,old_document_id:'2020',old_version_node_id:'v2020'})
+    await view.state.approve(row)
+    await view.state.approve({...row,family_revision:7,old_document_id:'2020',old_version_node_id:'v2020'})
     assert.equal(view.prompts.length,0)
     assert.equal(view.calls.length,0)
   } finally { view.stop() }
@@ -135,7 +136,7 @@ test('missing published head can be recovered through an explicit member selecti
     view.state.recoverDocument.value='new'
     view.state.recoverReason.value='old source deleted'
     view.allow()
-    view.state.recoverHead()
+    await view.state.recoverHead()
     assert.equal(view.calls.length,1)
     assert.equal(view.calls[0]?.action,'family_head_recover')
     assert.equal(view.calls[0]?.body.expected_revision,4)
@@ -152,4 +153,14 @@ test('embedded workspace reuses the authority supplied by LifecycleView without 
     assert.equal(view.state.canWrite.value,true)
     assert.equal(view.overviewCalls(),0)
   } finally { view.stop() }
+})
+
+test('family tabs render through the native workbench list skeleton', () => {
+  const file = readFileSync(new URL('./FamilyWorkspaceView.vue', import.meta.url), 'utf8')
+  const template = parse(file).descriptor.template?.content ?? ''
+  assert.ok(template.includes('class="workspace-list-panel family-list-panel"'), 'the family tab body must be a transparent native list panel')
+  assert.ok(template.includes('class="workspace-list-head"'), 'family lists need a sticky column header')
+  assert.ok(template.includes('class="workspace-list-row family-row"'), 'family members, relations, plans and activity use grid rows')
+  assert.ok(template.includes('class="workspace-list-scroll family-list-scroll"'), 'only the family list should scroll')
+  assert.ok(!template.includes('<ul v-if="members.length" class="family-items">'), 'members must not use the old plain list')
 })

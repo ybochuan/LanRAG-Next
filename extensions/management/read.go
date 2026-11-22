@@ -14,18 +14,21 @@ import (
 )
 
 type document struct {
-	DocumentID     string                `json:"document_id"`
-	Title          string                `json:"title,omitempty"`
-	NativeTitle    string                `json:"native_title,omitempty"`
-	DisplayName    string                `json:"display_name,omitempty"`
-	MappingStatus  string                `json:"mapping_status,omitempty"`
-	AnnexOriginal  string                `json:"annex_original,omitempty"`
-	State          string                `json:"state"`
-	LastEventID    string                `json:"last_event_id"`
-	Annotations    lifecycle.Annotations `json:"annotations"`
-	BusinessFamily *documentFamily       `json:"business_family,omitempty"`
-	Degraded       bool                  `json:"degraded,omitempty"`
-	DegradedReason string                `json:"degraded_reason,omitempty"`
+	DocumentID         string                `json:"document_id"`
+	ParentDocumentID   string                `json:"parent_document_id,omitempty"`
+	ParentTitle        string                `json:"parent_title,omitempty"`
+	AttachmentSequence int                   `json:"attachment_sequence,omitempty"`
+	Title              string                `json:"title,omitempty"`
+	NativeTitle        string                `json:"native_title,omitempty"`
+	DisplayName        string                `json:"display_name,omitempty"`
+	MappingStatus      string                `json:"mapping_status,omitempty"`
+	AnnexOriginal      string                `json:"annex_original,omitempty"`
+	State              string                `json:"state"`
+	LastEventID        string                `json:"last_event_id"`
+	Annotations        lifecycle.Annotations `json:"annotations"`
+	BusinessFamily     *documentFamily       `json:"business_family,omitempty"`
+	Degraded           bool                  `json:"degraded,omitempty"`
+	DegradedReason     string                `json:"degraded_reason,omitempty"`
 }
 
 type documentFamily struct {
@@ -36,7 +39,8 @@ type documentFamily struct {
 // enrichDocumentFamilies uses confirmed membership, independently of legacy projections.
 // enrichAttachmentTitles overlays a recognised attachment name on documents
 // whose native title is a generic annex filename. The native title survives in
-// NativeTitle; confirmed/candidate mappings are surfaced for the UI.
+// NativeTitle. Mapping status and original filename are exposed for every
+// attachment, including attachments whose native title has already been renamed.
 func (s *Server) enrichAttachmentTitles(ctx context.Context, r Request, documents []document) {
 	if len(documents) == 0 {
 		return
@@ -52,20 +56,21 @@ func (s *Server) enrichAttachmentTitles(ctx context.Context, r Request, document
 	for i := range documents {
 		d := &documents[i]
 		sem, ok := semantics[d.DocumentID]
-		if !ok || sem.DisplayName == "" {
+		if !ok {
 			continue
 		}
-		if !isGenericAnnexTitle(d.Title) || strings.EqualFold(sem.DisplayName, d.Title) {
-			if d.Title != "" {
-				d.NativeTitle = d.Title
-			}
-			continue
+		if d.Title != "" {
+			d.NativeTitle = d.Title
 		}
-		d.NativeTitle = d.Title
-		d.Title = sem.DisplayName
+		d.ParentDocumentID = sem.ParentDocumentID
+		d.ParentTitle = sem.ParentTitle
+		d.AttachmentSequence = sem.AttachmentSequence
 		d.DisplayName = sem.DisplayName
 		d.MappingStatus = sem.MappingStatus
 		d.AnnexOriginal = sem.OriginalFilename
+		if sem.DisplayName != "" && (d.Title == "" || (isGenericAnnexTitle(d.Title) && !strings.EqualFold(sem.DisplayName, d.Title))) {
+			d.Title = sem.DisplayName
+		}
 	}
 }
 

@@ -35,7 +35,7 @@
 
     <!-- Workspace switch is off: say so plainly instead of showing a personal
          toggle that would appear to work and change nothing. -->
-    <div v-if="settings && !settings.workspace_enabled" class="notice">
+    <div v-if="settings && !settings.workspace_enabled">
       <t-icon name="info-circle" />
       <span>{{ t('memorySettings.workspaceDisabled') }}</span>
     </div>

@@ -1,12 +1,12 @@
 <template>
-  <section class="panel binary-revision" aria-labelledby="binary-revision-title">
+  <section class="binary-revision" aria-labelledby="binary-revision-title">
     <div class="section-heading">
       <h2 id="binary-revision-title">正式修订文件</h2>
       <span class="subtle">PDF / DOCX / XLSX / PPTX</span>
     </div>
     <p class="subtle">上传修订后的正式源文件，解析完成后建立修订提案并绑定该文件。</p>
-    <t-alert v-if="differentRecovery" role="alert" theme="warning" class="notice">本知识库已有其他待核对的修订操作。请先在修订发布页完成核对。
-      <RouterLink :to="{ name: 'documents', query: { kb, view: 'revisions' } }">前往修订发布</RouterLink>
+    <t-alert v-if="differentRecovery" role="alert" theme="warning">本知识库已有其他待核对的修订操作。请先在修订发布页完成核对。
+      <t-button theme="primary" variant="text" size="small" @click="openRevisions">前往修订发布</t-button>
     </t-alert>
     <form v-else @submit.prevent="submit(false)">
       <p v-if="initialCorrection" class="subtle">源文档 · {{ initialCorrection.title || initialCorrection.document_id }} · 版本 {{ initialCorrection.version_id }}</p>
@@ -20,8 +20,8 @@
       <p v-if="recovery && !recovery.target && !file" class="subtle">可先核对上次上传。需要补传时，请重新选择同一份文件。</p>
       <p v-if="recovery?.target" class="subtle">修订文件标识：{{ recovery.target.id }}</p>
       <p v-if="recovery?.proposal" class="subtle">原提案标识：{{ recovery.proposal.id }}</p>
-      <t-alert v-if="error" role="alert" theme="error" class="notice">{{ error }}</t-alert>
-      <t-alert v-if="notice" role="status" theme="success" class="notice">{{ notice }}</t-alert>
+      <t-alert v-if="error" role="alert" theme="error">{{ error }}</t-alert>
+      <t-alert v-if="notice" role="status" theme="success">{{ notice }}</t-alert>
       <div class="recovery-actions">
         <t-button theme="primary" type="submit" :loading="uploading" :disabled="disabled || !scopeKey || storageUnavailable || (!recovery && (!sourceId || !file))">
           {{ uploading ? progress : recovery ? '核对并继续' : '上传并建立建议' }}
@@ -37,6 +37,7 @@
 
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import type { UploadFile } from 'tdesign-vue-next'
 import { batchQueryKnowledge, downKnowledgeDetails, listKnowledgeFiles, reparseKnowledge, uploadKnowledgeFile } from '@/api/knowledge-base'
 import { list, verifyCorrectionRevision, write, type CorrectionRevisionSource } from '@/api/business'
@@ -51,6 +52,7 @@ import {
 const props = defineProps<{ kb: string; disabled: boolean; initialCorrection?: CorrectionRevisionSource }>()
 const emit = defineEmits<{ created: []; locked: [value: boolean] }>()
 const auth = useAuthStore()
+const router = useRouter()
 const scopeKey = computed(() => recoveryKey(auth.user?.id, auth.effectiveTenantId, props.kb))
 const sourceId = ref('')
 const files = ref<UploadFile[]>([])
@@ -76,6 +78,9 @@ function stop() {
     uploading.value = false
     emit('locked', false)
   }
+}
+function openRevisions() {
+  void router.push({ name: 'documents', query: { kb: props.kb, view: 'revisions' } })
 }
 
 watch([scopeKey, () => props.initialCorrection], ([key, initial]) => {

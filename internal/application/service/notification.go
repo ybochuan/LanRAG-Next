@@ -45,6 +45,31 @@ func (s *NotificationService) Notify(ctx context.Context, n *types.Notification)
 	}
 }
 
+// NotifyOnce records n unless an unread notification with the same kind and
+// source already exists. It keeps periodic work reminders idempotent across
+// independent producer restarts without suppressing a later new occurrence.
+func (s *NotificationService) NotifyOnce(ctx context.Context, n *types.Notification) {
+	if s == nil || n == nil || n.TenantID == 0 || n.UserID == "" {
+		return
+	}
+	if n.SourceID == "" {
+		s.Notify(ctx, n)
+		return
+	}
+	var existing int64
+	if err := s.db.WithContext(context.WithoutCancel(ctx)).Model(&types.Notification{}).
+		Where("tenant_id = ? AND user_id = ? AND kind = ? AND source_type = ? AND source_id = ? AND read_at IS NULL",
+			n.TenantID, n.UserID, n.Kind, n.SourceType, n.SourceID).
+		Count(&existing).Error; err != nil {
+		logger.Warnf(ctx, "Check notification %s: %v", n.Kind, err)
+		s.Notify(ctx, n)
+		return
+	}
+	if existing == 0 {
+		s.Notify(ctx, n)
+	}
+}
+
 // PendingNotification is actionable state, independent of notification read state.
 // Its ID is the current prompt, so successive approvals in one run do not collide.
 type PendingNotification struct {

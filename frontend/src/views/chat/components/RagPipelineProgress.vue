@@ -143,25 +143,23 @@
       <div class="tool-event">
         <div class="action-card tree-root">
           <div class="tree-root-toolbar">
-            <button
+            <t-button
               type="button"
               class="tree-root-expand"
+              size="small"
+              variant="text"
               :aria-expanded="showExpandedTimeline"
-              :aria-label="collapsedStatusText"
               @click="toggleExpanded"
             >
-              <span class="tree-root-status">{{ collapsedStatusText }}</span>
-              <span
-                v-if="referenceSummaryText"
-                class="tree-root-reference"
-              >
-                {{ referenceSummaryText }}
-              </span>
-              <ChatTimelineIcon width="14" height="14"
-                class="tree-root-expand__icon"
-                :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'"
-              />
-            </button>
+              {{ referenceSummaryText || collapsedStatusText }}
+              <template #suffix>
+                <ChatTimelineIcon width="14" height="14"
+                  class="tree-root-expand__icon"
+                  :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'"
+                  aria-hidden="true"
+                />
+              </template>
+            </t-button>
           </div>
         </div>
       </div>
@@ -624,21 +622,9 @@ onBeforeUnmount(() => {
   }
 
   .tree-root-expand {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: var(--app-radius-xs);
-    background: transparent;
+    padding-inline: 0;
     color: var(--td-text-color-secondary);
-    font-size: var(--app-text-base);
-    line-height: 22px;
-    cursor: pointer;
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 100%;
+    font-size: var(--td-font-size-body-small);
 
     &:hover {
       background: transparent;
@@ -646,32 +632,9 @@ onBeforeUnmount(() => {
     }
   }
 
-  .tree-root-status,
-  .tree-root-reference {
-    flex: 0 1 auto;
-    min-width: 0;
-    white-space: nowrap;
-  }
-
-  .tree-root-reference {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-
-    &::before {
-      content: '';
-      width: 3px;
-      height: 3px;
-      border-radius: 50%;
-      background: currentColor;
-      opacity: 0.65;
-      flex-shrink: 0;
-    }
-  }
-
   .tree-root-expand__icon {
     flex-shrink: 0;
-    font-size: var(--app-text-base);
+    margin-inline-start: 4px;
     color: currentColor;
   }
 

@@ -23,6 +23,8 @@ func (s *Server) executeAttachment(ctx context.Context, r Request) (any, error) 
 	}
 	scope := attachmentworkbench.Scope{Tenant: r.TenantID, KB: r.KnowledgeBaseID}
 	switch r.Action {
+	case "business_attachment_tasks":
+		return s.attachments.Tasks(ctx, scope)
 	case "business_attachment_list":
 		if !weknora.ValidID(r.DocumentID) {
 			return nil, business.ErrInvalid

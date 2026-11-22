@@ -71,6 +71,7 @@ test('historical and removed statuses use the workbench vocabulary',()=>{
 
 test('errors describe conflict or unknown outcome without inventing rollback',()=>{
  assert.match(businessError({$httpStatus:409}),/重新载入/)
+ assert.doesNotMatch(businessError({$httpStatus:409}),/冷静期|主题复核/)
  assert.match(businessError({response:{status:403}}),/权限/)
  assert.match(businessError({$httpStatus:503}),/原请求/)
 })

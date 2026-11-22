@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: '자동화 승인 필요',
       automation_paused: '자동화 일시 중지',
       lifecycle_cleanup_due: '문서 정리 알림',
+      lifecycle_attachment_due: '문서 첨부파일 할 일',
       feedback_review_pending: '새로운 피드백 검토 대기',
     },
   },
@@ -9411,9 +9412,11 @@ export default {
       "subtitle": "로컬 llama-server 인스턴스를 시작·중지하고 Core에서 접근 가능한지 확인합니다."
     },
     "reviews": {
-      "title": "검토 대기",
-      "desc": "알림은 문서 상태를 변경하지 않습니다. 검토 날짜를 조정하면 백그라운드 스캔이 알림을 갱신합니다.",
-      "loading": "알림을 불러오는 중…",
+      "title": "할 일",
+      "desc": "첨부 파일 이름과 본문 참조 확인, 기한이 된 문서 검토를 한곳에서 처리합니다.",
+      "loading": "할 일을 불러오는 중…",
+      "reviewTitle": "문서 검토",
+      "reviewDesc": "알림은 문서 상태를 변경하지 않습니다. 검토 날짜를 조정하면 백그라운드 스캔이 알림을 갱신합니다.",
       "sortLabel": "검토 기한순",
       "asc": "오름차순",
       "desc2": "내림차순",
@@ -9421,7 +9424,23 @@ export default {
       "delivered": "로컬 전달 수락 {date}",
       "empty": "검토할 알림이 없습니다.",
       "truncated": "최대 1000건까지 표시하며 목록이 전체를 포함하지 않을 수 있습니다.",
-      "note": "전달 상태는 알림 큐에서 가져옵니다. '전달됨'은 로컬 콜백이 알림을 수락했다는 뜻이며 사람이 읽었다는 뜻은 아닙니다."
+      "note": "전달 상태는 알림 큐에서 가져옵니다. '전달됨'은 로컬 콜백이 알림을 수락했다는 뜻이며 사람이 읽었다는 뜻은 아닙니다.",
+      "attachment": {
+        "title": "첨부 파일 이름 및 참조",
+        "desc": "이름, 본문 참조 또는 제목 동기화 확인이 필요한 첨부 파일을 상위 문서별로 모읍니다. 대기 중인 매핑은 현재 상위 문서에만 적용됩니다.",
+        "count": "총 {n}건",
+        "groupCount": "첨부 {n}개",
+        "open": "처리",
+        "originalFile": "원본 파일",
+        "currentTitle": "현재 제목",
+        "reference": "본문 참조",
+        "empty": "현재 첨부 파일 할 일이 없습니다.",
+        "reasonName": "이름 확인",
+        "reasonMapping": "참조 확인",
+        "reasonDuplicate": "이름 중복",
+        "reasonTitlePending": "제목 동기화 대기",
+        "reasonTitleConflict": "제목 동기화 충돌"
+      }
     },
     "rules": {
       "eyebrow": "나중에 초기화되는 문서에만 적용됩니다",
@@ -9447,6 +9466,12 @@ export default {
       "colEffectiveUntil": "유효 기한",
       "empty": "일치하는 문서가 없습니다.",
       "count": "총 {n}건 · 목록을 스크롤하여 확인하세요",
+      "attachmentCount": "첨부 {n}",
+      "groupedCount": "기본 문서 {docs}개 · 첨부 {attachments}개",
+      "originalFile": "원본 파일: {name}",
+      "orphanAttachments": "연결되지 않은 첨부",
+      "expandAttachments": "첨부 펼치기",
+      "collapseAttachments": "첨부 접기",
       "loading": "수명 주기 정보를 읽는 중…",
       "unassigned": "미분류"
     },
@@ -9455,7 +9480,7 @@ export default {
     "tabs": {
       "documents": "전체 문서",
       "cleanup": "정리 대기",
-      "reviews": "검토 대기",
+      "reviews": "할 일",
       "rules": "지식베이스 규칙"
     },
     "workspace": {

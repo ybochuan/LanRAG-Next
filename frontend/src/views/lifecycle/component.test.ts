@@ -30,11 +30,18 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
       ...api,
     },
     './SupplementEditor.vue': {},
+    '@/api/attachmentWorkbench': {
+      attachmentTasks: async () => ({
+        documents: [{ parent_id: 'parent-doc', parent_title: '主件', parent_file_name: 'main.docx', count: 1, items: [{ id: 'annex-1', title: '中文名', native_title: 'annex-01.docx', file_name: 'annex-01.docx', display_name: '中文名', mapping_status: 'candidate', reference_title: '附件1', reference_location: '第一条', title_state: '', reasons: ['name_review', 'mapping_review'] }] }],
+        total: 1,
+        truncated: false,
+      }),
+    },
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup,cleanupPage,cleanupTotal,cleanupFilter,cleanupActionCount,allDocuments,loadMoreDocuments,documentPageError,nextDocumentPage,ruleForm,ruleDirty,ruleOutdated,resetRuleForm,submitRules};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,attachmentTaskList,attachmentTaskError,attachmentTaskDocuments,taskReasonLabel,collapsedTaskSections,isTaskSectionCollapsed,toggleTaskSection,openPendingAttachment,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup,cleanupPage,cleanupTotal,cleanupFilter,cleanupActionCount,cleanupSelected,cleanupSelectionCount,cleanupSelectable,cleanupPageAllSelected,cleanupPageIndeterminate,toggleCleanupSelection,toggleCleanupPageSelection,clearCleanupSelection,cleanupTask,batchCleanup,allDocuments,loadMoreDocuments,documentPageError,nextDocumentPage,documentGroups,mainDocumentCount,attachmentCount,isDocumentExpanded,toggleDocument,attachmentMatchesQuery,ruleForm,ruleDirty,ruleOutdated,resetRuleForm,submitRules};`)(
     (id: string) => modules[id], () => ({}), () => 0, () => {}, {}, { activeElement: null, querySelector: () => null }, {},
   ))
   return { state, route, stop: () => scope.stop() }
@@ -85,6 +92,42 @@ test('late reviews response from previous KB cannot replace current reviews', as
     await vue.nextTick(); await vue.nextTick()
     assert.equal(view.state.reviewItems.value[0]?.alert_id, 'new')
   } finally { view.stop() }
+})
+
+test('review tab loads attachment tasks alongside document reminders', async () => {
+  const view = mountSetup({
+    reviews: async () => ({ alerts: [{ alert_id: 'due-1', document_id: 'doc-1', review_due: '2026-01-01T00:00:00Z', delivery_state: 'pending' }], truncated: false }),
+  })
+  try {
+    view.state.kb.value = 'kb'; await vue.nextTick(); await vue.nextTick()
+    view.state.tab.value = 'reviews'; await vue.nextTick(); await vue.nextTick()
+    assert.equal(view.state.reviewItems.value[0]?.alert_id, 'due-1')
+    assert.equal(view.state.attachmentTaskList.value?.total, 1)
+    assert.equal(view.state.attachmentTaskDocuments.value[0]?.items[0]?.reasons.includes('mapping_review'), true)
+    assert.equal(view.state.taskReasonLabel('name_review'), 'workbench.reviews.attachment.reasonName')
+  } finally { view.stop() }
+})
+
+test('to-do sections collapse like native resource group headers', () => {
+  const view = mountSetup({})
+  try {
+    assert.equal(view.state.isTaskSectionCollapsed('attachments'), false)
+    assert.equal(view.state.isTaskSectionCollapsed('reviews'), false)
+    view.state.toggleTaskSection('attachments')
+    assert.equal(view.state.isTaskSectionCollapsed('attachments'), true)
+    assert.equal(view.state.isTaskSectionCollapsed('reviews'), false)
+    view.state.toggleTaskSection('attachments')
+    assert.equal(view.state.isTaskSectionCollapsed('attachments'), false)
+    view.state.toggleTaskSection('reviews')
+    assert.equal(view.state.isTaskSectionCollapsed('reviews'), true)
+  } finally { view.stop() }
+  const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
+  assert.ok(template.includes('class="task-section-header" role="button" tabindex="0"'), 'section headers must be native-style toggle rows')
+  assert.ok(template.includes(':aria-expanded="!isTaskSectionCollapsed(\'attachments\')"'), 'the attachment section must expose its expanded state')
+  assert.ok(template.includes(':aria-expanded="!isTaskSectionCollapsed(\'reviews\')"'), 'the review section must expose its expanded state')
+  assert.ok(template.includes('aria-controls="attachment-task-body"') && template.includes('aria-controls="review-task-body"'), 'each toggle must point at its body')
+  assert.ok(template.includes('class="task-section-toggle"') && template.includes("name=\"chevron-down\""), 'the toggle must use the native chevron affordance')
+  assert.ok(template.includes(':inert="isTaskSectionCollapsed(\'attachments\')"'), 'collapsed content must leave the tab order')
 })
 
 test('route query seeds the list tab, state and title', () => {
@@ -163,6 +206,44 @@ test('a failed cleanup refreshes the task so a retry uses the latest revision', 
     assert.equal(state.cleanupItems.value[0]?.status, 'failed')
     await state.confirmCleanup(state.cleanupItems.value[0])
     assert.deepEqual(revisions, [4, 5])
+  } finally { view.stop() }
+})
+
+test('cleanup selects only actionable records and cleans early records immediately', async () => {
+  const calls: Array<[string, string, number]> = []
+  let tasks = [
+    { knowledge_base_id: 'kb', document_id: 'due', revision: 1, status: 'awaiting_confirmation', can_confirm: true, can_cleanup_now: true },
+    { knowledge_base_id: 'kb', document_id: 'early', revision: 2, status: 'pending_cleanup', can_confirm: false, can_cleanup_now: true },
+    { knowledge_base_id: 'kb', document_id: 'blocked', revision: 3, status: 'pending_cleanup', can_confirm: false, can_cleanup_now: false },
+  ]
+  const view = mountSetup({
+    cleanupList: async () => ({ tasks, total: tasks.length }),
+    confirmCleanup: async (_kb: string, id: string, revision: number) => {
+      calls.push(['confirm', id, revision])
+      tasks = tasks.filter(task => task.document_id !== id)
+    },
+    confirmCleanupNow: async (_kb: string, id: string, revision: number) => {
+      calls.push(['now', id, revision])
+      tasks = tasks.filter(task => task.document_id !== id)
+    },
+  }, { kb: 'kb', tab: 'cleanup' })
+  try {
+    const state = view.state
+    await state.loadKnowledgeBases()
+    await vue.nextTick()
+    await state.loadCleanup()
+    assert.equal(state.cleanupSelectable(tasks[0]), true)
+    assert.equal(state.cleanupSelectable(tasks[1]), true)
+    assert.equal(state.cleanupSelectable(tasks[2]), false)
+    state.toggleCleanupSelection(tasks[2])
+    assert.equal(state.cleanupSelectionCount.value, 0)
+    state.toggleCleanupPageSelection(true)
+    assert.equal(state.cleanupSelectionCount.value, 2)
+    assert.equal(state.cleanupPageAllSelected.value, true)
+    state.clearCleanupSelection()
+    state.toggleCleanupSelection(tasks[1])
+    await state.batchCleanup('cleanup')
+    assert.deepEqual(calls, [['now', 'early', 2]])
   } finally { view.stop() }
 })
 
@@ -388,11 +469,73 @@ test('document list uses WeKnora text colour and shows all documents in a scroll
   assert.ok(file.includes('white-space:normal;'), 'document names must wrap onto multiple lines')
   assert.ok(file.includes('color:var(--td-text-color-primary);'), 'document names default to WeKnora primary text colour')
   assert.ok(script.includes('loadMoreDocuments'), 'document pages load on demand')
-  assert.ok(template.includes('v-for="doc in sortedDocuments"'), 'table renders the full sorted document set')
+  assert.ok(template.includes('v-for="group in documentGroups"'), 'table renders parent documents with their attachments')
   assert.ok(template.includes('<t-select id="lifecycle-state-filter"'), 'the state filter must be a TDesign select')
   assert.ok(template.includes('<t-input id="lifecycle-title-search"'), 'the title search must be a TDesign input')
   assert.ok(!template.includes('第 {{ page }} 页'), 'pagination footer must be removed')
-  assert.ok(file.includes('max-height:60vh;'), 'the list must be a bounded scroll area')
+  assert.ok(!template.includes('加载更多文档'), 'the list must not use a manual load-more button')
+  assert.ok(file.includes('.document-list-scroll {'), 'the list must use the native scroll container')
+  assert.ok(file.includes('overflow-y:auto;'), 'the list must scroll vertically inside the page')
+  assert.ok(file.includes('grid-template-columns:minmax(0,1fr) 100px minmax(180px,24%) 110px;'), 'document rows must use the native grid columns')
+  assert.ok(file.includes('@container (max-width:720px)'), 'the list must collapse secondary columns like the native list')
+})
+
+test('document and cleanup lists use compact row density', () => {
+  const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
+  assert.match(file, /\.document-table tbody tr\.document-row \{[\s\S]*?min-height:44px;[\s\S]*?padding:6px 8px;/, 'document rows must use the compact native density')
+  assert.match(file, /\.attachment-child \{[\s\S]*?padding:6px 8px 6px 44px;/, 'attachment rows must use the compact density')
+  assert.match(file, /\.cleanup-table tbody tr\.cleanup-row \{[\s\S]*?min-height:44px;[\s\S]*?padding:6px 8px;/, 'cleanup rows must use the compact native density')
+  assert.match(file, /\.cleanup-table \.cleanup-actions \{[\s\S]*?flex-wrap:nowrap;/, 'cleanup actions must stay on one line')
+})
+
+test('document list keeps attachment labels inline and fills the remaining viewport', () => {
+  const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
+  const template = parse(file).descriptor.template?.content ?? ''
+  assert.ok(template.includes('class="document-title-row"'), 'title and attachment label must share one flex row')
+  assert.ok(template.includes('>附件</t-tag>'), 'the list must show the plain attachment label')
+  assert.ok(template.includes('mappingTagHint(group.parent.mapping_status)'), 'the attachment label must carry its full explanation')
+  assert.ok(!template.includes('class="annex-original"'), 'the parent row must not repeat the original file name')
+  assert.ok(template.includes("$t('workbench.list.originalFile'"), 'expanded attachment rows show the original file name')
+  assert.ok(file.includes('.lifecycle-page--documents { display:flex; flex-direction:column; }'), 'the document tab must use a vertical flex layout')
+  assert.ok(file.includes('.lifecycle-page--documents > #panel-documents .document-list-scroll { flex:1; min-height:0; }'), 'the document list must fill the remaining height')
+})
+
+test('documents group attachments under their parent and expand them on demand', async () => {
+  const view = mountSetup({
+    overview: async () => ({
+      counts: {}, total: 2, page: 1, page_size: 50,
+      documents: [
+        { document_id: 'parent', title: '主件', state: 'active', annotations: { effective_from: '', effective_until: '2027-01-01', review_due: '', revision: 1 }, business_family: null, mapping_status: '' },
+        { document_id: 'annex', title: '附件中文名', native_title: 'annex-01.docx', annex_original: 'annex-01.docx', parent_document_id: 'parent', attachment_sequence: 1, state: 'active', annotations: { effective_from: '', effective_until: '2027-01-01', review_due: '', revision: 1 }, business_family: null, mapping_status: 'candidate' },
+      ],
+      rules: { rules: { effective_delay_days: 0, valid_days: 0, review_days: 0 }, source: { tenant_id: 1, knowledge_base_id: 'kb' }, revision: 0 },
+      rule_revision: 0, can_write: true,
+    }),
+  })
+  try {
+    view.state.kb.value = 'kb'
+    await view.state.loadOverview()
+    await vue.nextTick()
+    assert.equal(view.state.documentGroups.value.length, 1)
+    assert.equal(view.state.documentGroups.value[0]?.parent?.document_id, 'parent')
+    assert.equal(view.state.documentGroups.value[0]?.children[0]?.document_id, 'annex')
+    assert.equal(view.state.mainDocumentCount.value, 1)
+    assert.equal(view.state.attachmentCount.value, 1)
+    assert.equal(view.state.isDocumentExpanded('parent'), false)
+    view.state.toggleDocument('parent')
+    assert.equal(view.state.isDocumentExpanded('parent'), true)
+    view.state.toggleDocument('parent')
+    assert.equal(view.state.isDocumentExpanded('parent'), false)
+    view.state.titleQuery.value = '附件中文名'
+    await vue.nextTick()
+    await vue.nextTick()
+    assert.equal(view.state.isDocumentExpanded('parent'), true)
+  } finally { view.stop() }
+  const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
+  const template = parse(file).descriptor.template?.content ?? ''
+  assert.ok(template.includes('class="tree-toggle"'), 'the parent row needs a chevron toggle')
+  assert.ok(template.includes('class="attachment-expand-body"'), 'the attachment list must be an animated expand body')
+  assert.ok(file.includes('.attachment-expand-body.is-collapsed { grid-template-rows:0fr; opacity:0; }'), 'collapsed attachments animate closed')
 })
 
 test('the feedback sub-tabs write the writable ref, not the readonly kind computed', () => {
@@ -407,4 +550,100 @@ test('the workbench shows feedback review within its workspace', () => {
   const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template!.content
   assert.doesNotMatch(template, />未归属反馈<\/t-button>/)
   assert.match(template, /id="tab-feedback-review"/)
+})
+
+test('workspace pages fill the viewport through the native list height chain', () => {
+  const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
+  const template = parse(file).descriptor.template?.content ?? ''
+  const shared = readFileSync(new URL('../business/business.css', import.meta.url), 'utf8')
+  assert.ok(template.includes("'lifecycle-page--workspace':!!workspaceView"), 'workspace tabs must opt into the vertical shell')
+  assert.ok(file.includes('.lifecycle-page--workspace {'), 'the workspace shell must be a flex column')
+  assert.ok(file.includes('.lifecycle-page--workspace > #panel-workspace { flex:1; min-height:0; }'), 'the workspace panel must fill remaining height')
+  assert.ok(shared.includes('#panel-workspace > .business-page'), 'embedded business pages must share the height chain')
+  assert.ok(shared.includes('.workspace-list-scroll {'), 'the shared skeleton must expose a dedicated scroll region')
+  assert.ok(shared.includes('position:sticky;'), 'the shared list header must be sticky')
+})
+
+test('workspace lists use one compact toolbar and no duplicated page furniture', () => {
+  const read = (path: string) => parse(readFileSync(new URL(path, import.meta.url), 'utf8'))
+  const business = read('../business/BusinessView.vue')
+  const businessTpl = business.descriptor.template?.content ?? ''
+  assert.ok(businessTpl.includes('v-if="!scope && !inboxOnly" class="page-heading"'), 'embedded business views must hide the duplicate page heading')
+  assert.ok(businessTpl.includes('class="workspace-list-header"'), 'business records need one compact toolbar')
+  assert.ok(businessTpl.includes('class="relation-query-dialog"'), 'relation query must open from the toolbar, not take a permanent row')
+  assert.ok(businessTpl.includes('class="workspace-pager"'), 'business paging must be compact and inline')
+  assert.ok(!businessTpl.includes('<footer class="pagination">'), 'business list must not keep a fixed footer')
+  assert.ok(!businessTpl.includes('class="panel relation-query"'), 'relation query must not render as a panel card')
+
+  const family = read('../families/FamilyWorkspaceView.vue')
+  const familyTpl = family.descriptor.template?.content ?? ''
+  assert.ok(familyTpl.includes('v-if="!scope" class="page-heading"'), 'embedded family view must hide the duplicate page heading')
+  assert.ok(familyTpl.includes('class="family-summary"'), 'the family header must collapse into a compact summary strip')
+  assert.ok(familyTpl.includes('class="workspace-list-header family-list-header"'), 'family lists need one compact toolbar')
+  assert.ok(!familyTpl.includes('<footer class="pagination">'), 'family list must not keep a fixed footer')
+  assert.ok(family.descriptor.scriptSetup?.content.includes('currentListCount'), 'family toolbar must count the current list')
+
+  const correction = read('../feedback/CorrectionWorkspace.vue')
+  const correctionTpl = correction.descriptor.template?.content ?? ''
+  assert.ok(correctionTpl.includes('class="workspace-toolbar correction-toolbar"'), 'correction list needs one compact toolbar')
+  assert.ok(correctionTpl.includes('class="correction-filters-advanced"'), 'advanced filters must stay collapsible')
+  assert.ok(!correctionTpl.includes('class="correction-filters"'), 'the old permanent filter form must be gone')
+  assert.ok(!correctionTpl.includes('class="more-corrections"'), 'load more must move into the toolbar')
+
+  const shared = readFileSync(new URL('../business/business.css', import.meta.url), 'utf8')
+  assert.ok(shared.includes('.workspace-toolbar {'), 'the shared skeleton must define the compact toolbar')
+  assert.ok(shared.includes('.workspace-list-header .relation-filters {'), 'toolbar filters must lay out inline')
+  assert.ok(shared.includes('.relation-query-results {'), 'relation results must scroll inside their own region')
+})
+
+test('desktop internal links stay inside the router instead of native anchors', () => {
+  const files = [
+    ['family history', new URL('../families/FamilyWorkspaceView.vue', import.meta.url)],
+    ['binary revision', new URL('../business/BinaryRevisionPanel.vue', import.meta.url)],
+    ['correction workspace', new URL('../feedback/CorrectionWorkspace.vue', import.meta.url)],
+    ['chat references', new URL('../../components/ChatReferencesDrawer.vue', import.meta.url)],
+  ] as const
+  for (const [label, url] of files) {
+    const file = readFileSync(url, 'utf8')
+    assert.ok(!file.includes('<RouterLink'), label + ' must navigate through router.push, not RouterLink anchors')
+  }
+  const attachment = readFileSync(new URL('../lifecycle/AttachmentWorkbench.vue', import.meta.url), 'utf8')
+  assert.ok(!/<t-link[^>]*:href=/.test(attachment), 'attachment title must not carry a native href')
+  assert.ok(attachment.includes('@click="router.push(knowledgeRoute'), 'attachment title must navigate through the router')
+  const chatStream = readFileSync(new URL('../chat/components/AgentStreamDisplay.vue', import.meta.url), 'utf8')
+  assert.ok(chatStream.includes('void router.push(path)'), 'KB citations must use the router in desktop')
+  assert.ok(chatStream.includes('await router.push(route)'), 'entity citations must use the router in desktop')
+})
+
+test('superseded parent keeps attachment content and only corrects the error text', () => {
+  const lifecycle = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
+  assert.ok(lifecycle.includes(':parent-state="detail.snapshot.effective_state || detail.snapshot.current.state"'), 'the detail drawer must pass the effective parent state')
+  const attachment = readFileSync(new URL('./AttachmentWorkbench.vue', import.meta.url), 'utf8')
+  assert.ok(attachment.includes('parentState?: string'), 'the workbench must accept the parent state')
+  const failBody = attachment.match(/function fail\(err: unknown\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.ok(failBody.includes("props.parentState === 'superseded'"), 'error text must be corrected in fail(), not by hiding the workbench')
+  assert.ok(failBody.includes('主件已被替代，附件不可用。'), 'a superseded parent must explain that attachments are unavailable')
+  const loadBody = attachment.match(/async function load\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.ok(loadBody.includes('attachmentWorkbench(props.kb, props.documentId)'), 'attachment content must still load for a superseded parent')
+  assert.ok(!loadBody.includes("props.parentState === 'superseded'"), 'load must not skip requests or clear content based on parent state')
+})
+
+test('drawer-embedded workspaces expand forms inline and teleport remaining dialogs to body', () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+  const family = read('../families/FamilyWorkspaceView.vue')
+  const familyTpl = parse(family).descriptor.template?.content ?? ''
+  assert.ok(familyTpl.includes('class="family-action-panel"'), 'family actions must expand inline inside the workspace')
+  assert.ok(familyTpl.includes('familyActionOpen && activeFamilyAction'), 'the inline panel must keep the existing open state')
+  assert.ok(familyTpl.includes('>收起操作</t-button>'), 'the inline panel must be dismissible')
+  assert.ok(!/header="(加入成员|登记下一次更替|新增关联)"/.test(familyTpl), 'family actions must not open modal dialogs inside the drawer')
+  for (const [label, file] of [
+    ['family', family],
+    ['attachment', read('./AttachmentWorkbench.vue')],
+    ['business', read('../business/BusinessView.vue')],
+  ] as const) {
+    const dialogs = (file.match(/<t-dialog/g) ?? []).length
+    const attached = (file.match(/attach="body"/g) ?? []).length
+    assert.ok(dialogs > 0, label + ' must expose dialog markup to verify')
+    assert.equal(attached, dialogs, label + ' dialogs must teleport to body so the drawer transform cannot trap them')
+  }
 })

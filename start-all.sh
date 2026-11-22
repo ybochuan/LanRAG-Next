@@ -278,7 +278,7 @@ wait_health() {
 }
 preflight_windows
 start_core() {
-    if [[ -n "$HOST_BINARY" ]]; then
+    if [[ -n "$release_revision" ]]; then
         WEKNORA_WEB_DIR="$release_dir/web" setsid "$CORE_BINARY" >> "$RUN_DIR/core.log" 2>&1 &
     else
         setsid "$CORE_BINARY" >> "$RUN_DIR/core.log" 2>&1 &

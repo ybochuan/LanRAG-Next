@@ -1,6 +1,5 @@
 <template>
-  <section class="panel create-panel" aria-labelledby="create-title">
-    <h2 id="create-title">{{ kind==='relation'?'添加文档关联':kind==='revision'?'创建修订提案':kind==='guidance'?'添加种子指导':'录入反馈' }}</h2>
+  <section class="create-panel">
     <p v-if="kind==='revision'" class="subtle">填写完整的新 Markdown，提交后进入审核。自动发布支持在线 Markdown；上传文件先保存修订建议。</p>
     <p v-if="kind==='guidance'" class="subtle">种子指导立即进入指导清单；已触发主题复核的内容会进入隔离区。</p>
     <form @submit.prevent="submit">
@@ -12,7 +11,7 @@
       <p v-else-if="fixedDocument?.end==='source'" class="subtle">{{ sourceLabel }} · {{ fixedDocument.title }}</p>
       <DocumentPicker v-else-if="kind==='relation' || kind==='revision'" v-model="form.document_id" :kb="kb" :disabled="disabled" :searchable="kind==='relation'" :exclude="kind==='relation'&&!crossKB ? form.target_document_id : undefined" :label="sourceLabel" @selected="sourceSelection=$event" :show-identity="form.edge_type==='repeals'||clauseMode" />
       <p v-if="fixedDocument?.end==='target'" class="subtle">{{ targetLabel }} · {{ fixedDocument.title }}</p>
-      <t-alert v-if="targetSideCrossBlocked" theme="info" class="notice">从正文详情可新增同库补充说明和内容提示。其他关系请从源文档或文档关联页面创建。</t-alert>
+      <t-alert v-if="targetSideCrossBlocked" theme="info">从正文详情可新增同库补充说明和内容提示。其他关系请从源文档或文档关联页面创建。</t-alert>
       <template v-if="kind==='relation'&&fixedDocument?.end!=='target'">
         <label v-if="crossEligible" class="target-kb">目标知识库
           <t-select v-model="form.target_knowledge_base_id" :options="targetKBOptions" :disabled="disabled" />
@@ -53,7 +52,7 @@
       </div>
       <label v-else-if="kind!=='relation'">{{ kind==='revision' ? $t('workbench.form.fullText') : $t('workbench.form.content') }}<t-textarea v-model="form.text" :autosize="{minRows:kind==='revision'?12:5}" :disabled="disabled" :placeholder="kind==='revision'?'# 修订标题\n\n填写完整的新文档内容…':'填写可审阅的具体内容…'" /></label>
       <fieldset v-if="kind==='revision'" :disabled="disabled"><legend>选用 1–3 条生效指导</legend>
-        <t-alert v-if="guidanceError" role="alert" theme="error" class="notice">{{ guidanceError }}</t-alert>
+        <t-alert v-if="guidanceError" role="alert" theme="error">{{ guidanceError }}</t-alert>
         <label v-for="item in guidances.filter(v=>v.status==='active')" :key="item.id" class="guidance-choice"><t-checkbox :checked="selected.includes(item.id)" :disabled="disabled || item.id===initialCorrection?.id || (!selected.includes(item.id)&&selected.length>=3)" @change="toggleGuidance(item.id)"><span><strong>{{ item.topic }}</strong><small>{{ item.text }}</small></span></t-checkbox></label>
         <p v-if="!guidanceLoading&&!guidances.some(v=>v.status==='active')" class="subtle">本页没有生效指导，可翻页或先去反馈治理添加。</p>
         <div class="mini-pages"><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidancePage<=1" @click="moveGuidance(-1)">{{ $t('workbench.form.prev') }}</t-button><span>指导第 {{ guidancePage }} 页 · 已选 {{ selected.length }}/3</span><t-button variant="outline" size="small" :disabled="disabled||guidanceLoading||guidances.length<20" @click="moveGuidance(1)">{{ $t('workbench.form.next') }}</t-button></div>

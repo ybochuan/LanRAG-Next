@@ -20,6 +20,8 @@ func (s *Server) executeCleanup(ctx context.Context, r Request, id string, paylo
 		return s.cleanup.Hold(ctx, scope, id, payload.HoldDays, payload.Reason, r.ActorID, r.OperationID, r.ExpectedRevision)
 	case "cleanup_confirm":
 		return s.cleanup.Confirm(ctx, scope, id, r.ActorID, r.OperationID, r.ExpectedRevision)
+	case "cleanup_confirm_now":
+		return s.cleanup.ConfirmNow(ctx, scope, id, r.ActorID, r.OperationID, r.ExpectedRevision)
 	default:
 		return nil, business.ErrInvalid
 	}

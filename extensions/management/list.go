@@ -79,8 +79,8 @@ func (s *Server) overviewPage(ctx context.Context, r Request, tenant string) ([]
 	degraded := false
 	if s.nativeDB != "" {
 		err := s.db.ViewNative(ctx, s.nativeDB, func(tx *sql.Tx) error {
-			where := ` WHERE k.tenant_id=? AND k.knowledge_base_id=? AND COALESCE(k.deleted_at,'')='' AND (?='' OR ` + nativeOverviewState() + `=? ) AND (?='' OR instr(lower(k.title), lower(?))>0 OR EXISTS (SELECT 1 FROM ext_attachment_semantics s WHERE s.tenant_id=k.tenant_id AND s.knowledge_base_id=k.knowledge_base_id AND s.attachment_id=k.id AND instr(lower(s.display_name), lower(?))>0))`
-			params := []any{tenant, r.KnowledgeBaseID, r.State, r.State, r.Title, r.Title, r.Title}
+			where := ` WHERE k.tenant_id=? AND k.knowledge_base_id=? AND COALESCE(k.deleted_at,'')='' AND (?='' OR ` + nativeOverviewState() + `=? ) AND (?='' OR instr(lower(k.title), lower(?))>0 OR EXISTS (SELECT 1 FROM ext_attachment_semantics s WHERE s.tenant_id=k.tenant_id AND s.knowledge_base_id=k.knowledge_base_id AND s.attachment_id=k.id AND instr(lower(s.display_name), lower(?))>0) OR k.id IN (SELECT l.parent_document_id FROM ext_attachment_links l JOIN ext_attachment_semantics s ON s.tenant_id=l.tenant_id AND s.knowledge_base_id=l.knowledge_base_id AND s.attachment_id=l.attachment_id WHERE l.tenant_id=k.tenant_id AND l.knowledge_base_id=k.knowledge_base_id AND l.removed_at IS NULL AND l.retired_at IS NULL AND instr(lower(s.display_name), lower(?))>0))`
+			params := []any{tenant, r.KnowledgeBaseID, r.State, r.State, r.Title, r.Title, r.Title, r.Title}
 			if err := tx.QueryRowContext(ctx, `SELECT count(*)`+nativeOverviewFrom+where, params...).Scan(&total); err != nil {
 				return err
 			}

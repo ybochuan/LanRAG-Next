@@ -1,51 +1,57 @@
 <template>
   <div class="correction-workspace">
-    <section v-if="target" class="correction-panel" aria-labelledby="correction-detail-title">
-      <div class="detail-actions">
-        <t-button variant="outline" @click="returnToList">返回勘误列表</t-button>
-        <t-button v-if="detail" variant="outline" @click="emit('open', detail.document_id, detail.document_title, detail.knowledge_base_id)">打开原文详情</t-button>
-        <t-button v-if="detail" variant="outline" :loading="downloading" @click="download">下载 Markdown</t-button>
-      </div>
-      <h2 id="correction-detail-title" ref="detailHeading" tabindex="-1">{{ detail?.file_name || '勘误文档' }}</h2>
-      <p v-if="detailBusy" role="status">正在读取勘误文档…</p>
-      <t-alert v-if="detailError" theme="error" role="alert">
-        {{ detailError }} <t-button variant="text" size="small" @click="loadDetail">重新载入</t-button>
-      </t-alert>
-      <template v-if="detail">
-        <p class="metadata">{{ kbName(detail.knowledge_base_id) }} · {{ detail.document_title }} · 版本 {{ detail.version_id }}</p>
-        <t-alert v-if="target.item && !selectedItem" theme="info" role="status">所引用的勘误修订在当前权限和筛选范围内不可见。</t-alert>
-        <article v-if="selectedItem" :id="correctionItemId(selectedItem.id, selectedItem.revision)" ref="itemHeading" class="selected-item" tabindex="-1" aria-label="定位到的勘误条目">
-          <h3>勘误 {{ selectedItem.id }} · 修订 {{ selectedItem.revision }}</h3>
-          <p class="metadata">分块 {{ selectedItem.chunk_id }}</p>
-          <p v-if="selectedItem.applies_when">适用条件：{{ selectedItem.applies_when }}</p>
-          <p v-if="selectedItem.applies_project">适用项目：{{ selectedItem.applies_project }}</p>
-          <p>{{ selectedItem.correction }}</p>
-        </article>
-        <div class="correction-markdown markdown-content" v-html="preview" />
-        <section v-if="canWriteDetail && detail.items.some(item => item.state==='active')" aria-label="关联正式修订">
-          <h3>关联正式修订</h3>
-          <ul class="revision-links">
-            <li v-for="item in detail.items.filter(item => item.state==='active')" :key="correctionItemId(item.id, item.revision)">
-              <RouterLink :to="revisionRoute(item)">使用勘误 {{ item.id }} 创建修订提案</RouterLink>
-            </li>
-          </ul>
-        </section>
+    <SettingDrawer :visible="!!target" :title="detail?.file_name || '勘误文档'" icon="file" width="760px" :min-width="560" :max-width="1080" storage-key="setting-drawer:width:correction-detail" hide-footer @update:visible="onDetailVisible">
+      <template #subtitle>
+        <span v-if="detail" class="metadata">{{ kbName(detail.knowledge_base_id) }} · {{ detail.document_title }} · 版本 {{ detail.version_id }}</span>
+        <span v-else>勘误详情</span>
       </template>
-    </section>
-    <section v-else class="correction-panel" aria-labelledby="correction-list-title" :aria-busy="listBusy">
-      <h2 id="correction-list-title" ref="listHeading" tabindex="-1">{{ $t('workbench.workspace.correctionDocuments') }}</h2>
-      <form class="correction-filters" @submit.prevent="applyFilters">
+      <template #header-actions>
+        <t-button v-if="detail" variant="outline" size="small" @click="emit('open', detail.document_id, detail.document_title, detail.knowledge_base_id)">打开原文详情</t-button>
+        <t-button v-if="detail" variant="outline" size="small" :loading="downloading" @click="download">下载 Markdown</t-button>
+      </template>
+      <div class="correction-detail-body">
+        <p v-if="detailBusy" role="status">正在读取勘误文档…</p>
+        <t-alert v-if="detailError" theme="error" role="alert">
+          {{ detailError }} <t-button variant="text" size="small" @click="loadDetail">重新载入</t-button>
+        </t-alert>
+        <template v-if="detail">
+          <t-alert v-if="target?.item && !selectedItem" theme="info" role="status">所引用的勘误修订在当前权限和筛选范围内不可见。</t-alert>
+          <article v-if="selectedItem" :id="correctionItemId(selectedItem.id, selectedItem.revision)" ref="itemHeading" class="selected-item" tabindex="-1" aria-label="定位到的勘误条目">
+            <h3>勘误 {{ selectedItem.id }} · 修订 {{ selectedItem.revision }}</h3>
+            <p class="metadata">分块 {{ selectedItem.chunk_id }}</p>
+            <p v-if="selectedItem.applies_when">适用条件：{{ selectedItem.applies_when }}</p>
+            <p v-if="selectedItem.applies_project">适用项目：{{ selectedItem.applies_project }}</p>
+            <p>{{ selectedItem.correction }}</p>
+          </article>
+          <div class="correction-markdown markdown-content" v-html="preview" />
+          <section v-if="canWriteDetail && detail.items.some(item => item.state==='active')" aria-label="关联正式修订">
+            <h3>关联正式修订</h3>
+            <ul class="revision-links">
+              <li v-for="item in detail.items.filter(item => item.state==='active')" :key="correctionItemId(item.id, item.revision)">
+                <t-button variant="text" size="small" @click="router.push(revisionRoute(item))">使用勘误 {{ item.id }} 创建修订提案</t-button>
+              </li>
+            </ul>
+          </section>
+        </template>
+      </div>
+    </SettingDrawer>
+    <section class="correction-list-panel workspace-list-panel" :aria-label="$t('workbench.workspace.correctionDocuments')" :aria-busy="listBusy">
+      <div class="workspace-toolbar correction-toolbar">
+        <span ref="listHeading" tabindex="-1" class="workspace-toolbar-count">共 {{ rows.length }} 份</span>
+        <div class="workspace-toolbar-actions">
+          <t-input v-model="draft.keyword" class="correction-search" clearable :maxlength="160" placeholder="搜索关键词或编号" />
+          <t-select v-model="draft.state" class="correction-state" :options="stateOptions" />
+          <t-button variant="outline" :aria-expanded="advancedOpen" @click="advancedOpen=!advancedOpen">更多筛选</t-button>
+          <t-button theme="primary" @click="applyFilters">筛选</t-button>
+          <t-button v-if="nextScopes.length" variant="outline" :loading="listBusy" @click="loadPages(nextScopes)">加载更多</t-button>
+        </div>
+      </div>
+      <div v-if="advancedOpen" class="correction-filters-advanced">
         <label>知识库范围
           <t-select v-model="scopeMode" :options="scopeOptions" />
         </label>
         <label>原文编号
           <t-input v-model="draft.documentId" clearable :maxlength="160" />
-        </label>
-        <label>关键词
-          <t-input v-model="draft.keyword" clearable :maxlength="160" placeholder="搜索定稿关键词或编号" />
-        </label>
-        <label>状态
-          <t-select v-model="draft.state" :options="stateOptions" />
         </label>
         <label>审核日期起
           <t-date-picker v-model="draft.from" value-type="YYYY-MM-DD" format="YYYY-MM-DD" clearable />
@@ -53,8 +59,7 @@
         <label>审核日期止
           <t-date-picker v-model="draft.to" value-type="YYYY-MM-DD" format="YYYY-MM-DD" clearable />
         </label>
-        <t-button type="submit" theme="primary">筛选</t-button>
-      </form>
+      </div>
       <t-alert v-if="filterError" theme="warning" role="alert">{{ filterError }}</t-alert>
       <t-alert v-if="failedScopes.length" theme="error" role="alert">
         无法读取部分勘误文档：{{ failedScopes.map(kbName).join('、') }}。
@@ -62,17 +67,39 @@
       </t-alert>
       <p v-if="historyUnavailable" role="status" class="metadata">当前范围没有可查看历史勘误的知识库。</p>
       <p v-if="listBusy" role="status">正在读取勘误文档…</p>
-      <t-empty v-else-if="!rows.length && !failedScopes.length && !historyUnavailable" description="没有符合筛选条件的勘误文档。" />
-      <div v-if="rows.length" class="correction-table" tabindex="0" role="region" aria-label="勘误文档列表">
-        <t-table :data="rows" :columns="columns" row-key="rowId" size="medium" :hover="false">
-          <template #document_title="{ row }">
-            <RouterLink :id="row.rowId" :to="detailRoute(row)">{{ row.document_title }}</RouterLink>
-          </template>
-          <template #knowledge_base_id="{ row }">{{ kbName(row.knowledge_base_id) }}</template>
-          <template #last_approved_at="{ row }">{{ formatDate(row.last_approved_at) }}</template>
-        </t-table>
+      <div v-if="rows.length" class="workspace-list-scroll">
+        <div class="workspace-list-table" role="table" aria-label="勘误文档列表">
+          <div class="workspace-list-head" role="row">
+            <span role="columnheader">原文</span>
+            <span role="columnheader" class="workspace-head-kb">知识库</span>
+            <span role="columnheader" class="workspace-head-version">版本</span>
+            <span role="columnheader" class="workspace-head-count">有效条数</span>
+            <span role="columnheader" class="workspace-head-date">最近审核</span>
+          </div>
+          <div class="workspace-list-body" role="rowgroup">
+            <div v-for="row in rows" :key="row.rowId" class="workspace-list-row correction-row" role="row">
+              <div class="workspace-cell workspace-cell-main" role="cell">
+                <div class="workbench-title-line">
+                  <t-button :id="row.rowId" variant="text" size="small" class="workbench-row-title" @click="router.push(detailRoute(row))">{{ row.document_title }}</t-button>
+                </div>
+                <span class="workspace-compact-meta">
+                  <span>{{ kbName(row.knowledge_base_id) }}</span>
+                  <span>版本 {{ row.version_id }}</span>
+                  <span>{{ row.active_count }} 条有效</span>
+                  <span>{{ formatDate(row.last_approved_at) }}</span>
+                </span>
+              </div>
+              <div class="workspace-cell correction-kb" role="cell">{{ kbName(row.knowledge_base_id) }}</div>
+              <div class="workspace-cell correction-version" role="cell"><span class="workspace-ellipsis">{{ row.version_id }}</span></div>
+              <div class="workspace-cell correction-count" role="cell">{{ row.active_count }}</div>
+              <div class="workspace-cell correction-date" role="cell">{{ formatDate(row.last_approved_at) }}</div>
+            </div>
+          </div>
+        </div>
       </div>
-      <t-button v-if="nextScopes.length" class="more-corrections" variant="outline" :loading="listBusy" @click="loadPages(nextScopes)">加载更多</t-button>
+      <div v-else-if="!listBusy && !failedScopes.length && !historyUnavailable" class="workspace-list-empty-state">
+        <t-empty description="没有符合筛选条件的勘误文档。" />
+      </div>
     </section>
   </div>
 </template>
@@ -81,6 +108,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DOMPurify from 'dompurify'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { correctionDocument, correctionDocuments, correctionMarkdown, type CorrectionDocument, type CorrectionDocumentSummary, type CorrectionFilters, type CorrectionItem, type CorrectionState } from '@/api/business'
 import { authority } from '@/api/lifecycle'
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown'
@@ -98,6 +126,7 @@ const scopeOptions = computed(() => [
   { value: 'current', label: kbName(props.scope) }, { value: 'all', label: '全部有权限的知识库' },
 ])
 const stateOptions = Object.entries(correctionStateLabels).map(([value, label]) => ({ value, label }))
+const advancedOpen = ref(false)
 const draft = reactive({ documentId: routeText('sourceDocument'), keyword: '', state: 'active' as CorrectionState, from: '', to: '' })
 const filters = ref<CorrectionFilters>({ state: 'active', document_id: draft.documentId })
 const listFence = requestFence(), detailFence = requestFence(), downloadFence = requestFence()
@@ -107,13 +136,6 @@ const records = ref<CorrectionDocumentSummary[]>([])
 const scopes = computed(() => props.knowledgeBases.map(kb => kb.id).filter(kb => scopeMode.value==='all' || kb===props.scope))
 const nextScopes = computed(() => scopes.value.filter(kb => pages.value[kb] && !failedScopes.value.includes(kb)))
 const rows = computed(() => records.value.map(row => ({ ...row, rowId: correctionRowId(row) })))
-const columns = [
-  { colKey: 'document_title', title: '原文', minWidth: 180 },
-  { colKey: 'knowledge_base_id', title: '知识库', minWidth: 130 },
-  { colKey: 'version_id', title: '版本', minWidth: 160, ellipsis: true },
-  { colKey: 'active_count', title: '有效条数', width: 88 },
-  { colKey: 'last_approved_at', title: '最近审核', minWidth: 155 },
-]
 const target = computed(() => {
   const document = routeText('document_id'), version = routeText('version_id')
   if (!document || !version) return undefined
@@ -203,6 +225,10 @@ function revisionRoute(item: CorrectionItem) {
   }
 }
 
+function onDetailVisible(value: boolean) {
+  if (!value) void returnToList()
+}
+
 async function returnToList() {
   const current = target.value
   const query = { kb: props.scope, view: 'feedback-materials', sourceDocument: routeText('sourceDocument') || undefined }
@@ -289,35 +315,47 @@ onBeforeUnmount(() => { listFence.invalidate(); detailFence.invalidate(); downlo
 </script>
 
 <style scoped>
-.correction-panel {
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-medium);
-  padding: 16px;
+.correction-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.correction-detail-body {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.correction-panel h2 {
-  font-size: var(--td-font-size-title-medium);
-  margin: 0 0 12px;
+.correction-list-panel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
 }
-.correction-panel h3 { font-size: var(--td-font-size-title-medium); }
-.correction-filters {
+.correction-detail-body h3 { font-size: var(--td-font-size-title-medium); }
+.correction-toolbar .correction-search { width: 200px; }
+.correction-toolbar .correction-state { width: 140px; }
+.correction-filters-advanced {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
-  gap: 12px;
-  margin-bottom: 16px;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
-.correction-filters label { display: grid; gap: 4px; min-width: 0; width: min(100%, 180px); }
-.correction-filters label :deep(.t-select__wrap),
-.correction-filters label :deep(.t-select),
-.correction-filters label :deep(.t-input) { width: 100%; min-width: 0; }
-.correction-table { overflow-x: auto; }
-.correction-table :deep(.t-table) { min-width: 712px; }
+.correction-filters-advanced label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font-size: var(--td-font-size-body-medium);
+  white-space: nowrap;
+}
+.correction-filters-advanced :deep(.t-date-picker),
+.correction-filters-advanced :deep(.t-select) { width: 160px; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .metadata { color: var(--td-text-color-secondary); }
-.more-corrections { margin-top: 12px; }
 .correction-markdown { margin-block: 16px; overflow-x: auto; }
 .correction-markdown :deep(pre) { white-space: pre-wrap; }
 .selected-item {

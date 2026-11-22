@@ -107,9 +107,23 @@
 8. **控件尺寸统一**：默认 `size="medium"`（32px 高）；表格内操作按钮 `size="small"`。禁止用 padding 手工拼高度。
 9. **页面骨架**：根容器不自行绘制页面底色（跟随平台外壳），内容卡片 `background: var(--td-bg-color-container)` + `border: 1px solid var(--td-component-stroke)` + `border-radius: var(--td-radius-medium)`；页面左右留白 24–40px。
 
+### 8.4 原生页面骨架（强制，后续所有页面照此实现）
+
+事实基准：`views/settings/ModelSettings.vue` 的 `.section-header` + `.section-header__top` + `.section-description`；`views/settings/Settings.vue` 的 `.content-wrapper > .section`；`views/knowledge/KnowledgeBaseList.vue` 的 `--td-bg-color-container` 卡片。不得自造另一套页面外壳。
+
+1. **根容器**：平台级页面用 `<section class="section ...">`，不写 `<main class="page-...">`；不设 `max-width` 居中、不自定义页面底色，跟随平台外壳；只保留滚动所需的 `height/min-height/overflow`。嵌套设置页继续用 `.content-wrapper > .section`。
+2. **页头**：结构固定为 `.section-header > .section-header__top + .section-description`。标题用 `<h2>` 且必须 `$t()`，描述用 `<p class="section-description">` 且必须 `$t()`。操作按钮放进 `.section-header__top`，统一 `<t-button>`；禁止 `.page-heading` / `.page-subtitle` / `.title-block` 等自造页头类。
+3. **内容分区**：每个独立功能块用 `<t-card :bordered="true">` 或 `.section`；禁止 `<article class="card">` + 手写 border/background 冒充卡片。卡片内边距通过 `:deep(.t-card__body)` 设置，值取 TDesign 阶梯；状态边框只用 `--td-*` 语义 token。
+4. **表单**：一律 `<t-form label-align="top" @submit.prevent="...">` + `<t-form-item label="..." name="...">`；禁止 `<form class="...">` + `<label>` 手写字段，禁止用 padding 拼控件高度。表单项之间的间距交给 `.form-grid` 或 TDesign 默认值。
+5. **文案与 i18n**：新增或改动的可见文案必须 `$t()`，键同时加入 zh-CN / zh-TW / en-US / ru-RU / ko-KR / ja-JP 六个 locale 且键集完全一致（`localeKeyAudit.test.ts` 会拦截缺失/多余）；zh-CN、en-US 必须实译，其余语种提供对应语言译文，不得留空或复制中文。存量页面本次只迁移骨架时，已有硬编码文案可暂时保留，但不得新增硬编码文案。
+6. **状态反馈**：错误/提示用 `<t-alert theme="error|info|warning">`，状态用 `<t-tag>`，空态用 `<t-empty>`，加载用 `<t-loading>`；禁止手绘 `.notice` / `.error` 色块或硬编码 hex。
+7. **弹层归属**：抽屉/弹窗内再做操作时，`<t-dialog>` 必须 `attach="body"`；成员/更替/关联等表单优先内联展开或独立抽屉，禁止把页面级工作区塞进单文档详情抽屉形成“窗体套窗体”。
+
 ### 8.3 验收门禁
 
 - 每个自建页面必须通过：`npm run type-check`、`npm test`、**`npm run build`**。
 - **模板编译错误（如 `v-else-if` 失去前置 `v-if`）只有 `npm run build` 会报，`vue-tsc` 查不出来**；因此前端改动必须跑 build，不得只跑 type-check。
 - 构建产物必须部署到 `WEKNORA_WEB_DIR`（生产为 `/mnt/d/LanRAG-Next/web`，gitignored），并在浏览器硬刷新后核对；只提交源码不等于上线。
 - 新增页面验收时抽查：页面内 `<select>`/`<input>`/`<button>` 出现次数应为 0（由 `<t-*>` 替代）；CSS 中不应出现新增硬编码颜色。
+- 骨架抽查：页面内 `.page-heading` / `.page-subtitle` / `<article class="card">` / 裸 `<form class="...">` 出现次数应为 0；页头必须是 `.section-header__top + .section-description`，卡片必须是 `<t-card :bordered="true">`，表单必须是 `<t-form>` + `<t-form-item>`。
+- i18n 抽查：新增键必须在六个 locale 中键集一致；本地化审计测试（`localeKeyAudit.test.ts`）必须通过。

@@ -1,6 +1,6 @@
 <template>
   <section class="lineage-page" :class="{ 'embedded-lineage': scope }">
-    <header class="lineage-heading">
+    <header v-if="!scope" class="lineage-heading">
       <div><h2>{{ documentId ? '文档关系图' : '关系与溯源' }}</h2></div>
       <div class="heading-actions">
         <t-button v-if="associationReturn" variant="outline" size="small" @click="returnToAssociation">返回关联查询</t-button>
@@ -21,13 +21,13 @@
     <label v-if="mode==='relations'" class="cross-toggle"><t-checkbox v-model="includeCross">包含跨库关联</t-checkbox></label>
     <t-button v-if="documentId && mode!=='relations'" variant="text" class="return-all" @click="switchMode('relations')">返回文档关系图</t-button>
     <t-button v-else-if="root && !documentId" variant="text" class="return-all" @click="root = ''">返回全库视图</t-button>
-    <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="knowledgeBases.length ? loadGraph() : loadCatalog()">重试</t-button></t-alert>
+    <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="knowledgeBases.length ? loadGraph() : loadCatalog()">重试</t-button></t-alert>
     <t-empty v-if="catalogLoading || busy" class="empty" role="status" description="正在读取血缘关系…" />
     <t-empty v-else-if="!kb" class="empty" description="选择一个有查看权限的知识库，即可浏览已登记的血缘。" />
     <template v-else-if="data">
-      <t-alert v-if="data.truncated" theme="info" class="notice" role="status">当前最多展示 256 个节点和 512 条边。可选中节点，展开它的溯源或版本历史。</t-alert>
-      <t-alert v-if="data.titles_unavailable" theme="info" class="notice" role="status">文档名称暂时无法读取，当前以文档编号展示。</t-alert>
-      <t-alert v-if="layoutGraph(data).hasCycle" theme="info" class="notice" role="status">存在循环关系，图中已保留原始方向。</t-alert>
+      <t-alert v-if="data.truncated" theme="info" role="status">当前最多展示 256 个节点和 512 条边。可选中节点，展开它的溯源或版本历史。</t-alert>
+      <t-alert v-if="data.titles_unavailable" theme="info" role="status">文档名称暂时无法读取，当前以文档编号展示。</t-alert>
+      <t-alert v-if="layoutGraph(data).hasCycle" theme="info" role="status">存在循环关系，图中已保留原始方向。</t-alert>
       <div class="graph-toolbar">
         <span>{{ data.nodes.length }} 个节点 · {{ data.edges.length }} 条关系</span>
         <div class="zoom-actions"><t-button variant="outline" size="small" :disabled="!data.nodes.length" aria-label="缩小图谱" @click="canvas?.zoom(-0.15)">−</t-button><t-button variant="outline" size="small" :disabled="!data.nodes.length" aria-label="放大图谱" @click="canvas?.zoom(0.15)">＋</t-button><t-button variant="outline" size="small" :disabled="!data.nodes.length" @click="canvas?.fit()">适应画布</t-button></div>

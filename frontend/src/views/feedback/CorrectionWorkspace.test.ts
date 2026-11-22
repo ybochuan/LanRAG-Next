@@ -143,3 +143,13 @@ test('archive download reauthorizes using the exact library, version and state',
     assert.ok(view.state.detailError.value)
   } finally { view.stop() }
 })
+
+test('correction documents use the native workbench list skeleton', () => {
+  const file = readFileSync(new URL('./CorrectionWorkspace.vue', import.meta.url), 'utf8')
+  const template = parse(file).descriptor.template?.content ?? ''
+  assert.ok(template.includes('class="correction-list-panel workspace-list-panel"'), 'the list must be a transparent native panel')
+  assert.ok(template.includes('class="workspace-list-head"'), 'the list needs a sticky column header')
+  assert.ok(template.includes('class="workspace-list-row correction-row"'), 'correction documents render as grid rows')
+  assert.ok(!template.includes('<t-table'), 'the old fixed-width TDesign table must be gone')
+  assert.ok(file.includes('.correction-list-panel'), 'the scoped shell must expose the native list panel')
+})

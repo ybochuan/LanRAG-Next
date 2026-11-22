@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: 'オートメーション承認待ち',
       automation_paused: 'オートメーション一時停止',
       lifecycle_cleanup_due: 'ドキュメント整理の通知',
+      lifecycle_attachment_due: '添付ファイルの対応待ち',
       feedback_review_pending: '新しいフィードバックの確認待ち',
     },
   },
@@ -9411,9 +9412,11 @@ export default {
       "subtitle": "ローカルの llama-server を起動・停止し、Core から到達可能か確認します。"
     },
     "reviews": {
-      "title": "レビュー待ち",
-      "desc": "リマインダーはドキュメントの状態を変更しません。レビュー日を変更すると、バックグラウンドスキャンがリマインダーを更新します。",
-      "loading": "リマインダーを読み込み中…",
+      "title": "対応待ち",
+      "desc": "添付ファイルの名称と本文参照の確認、および期限到来したドキュメントレビューをまとめて処理します。",
+      "loading": "対応待ちを読み込み中…",
+      "reviewTitle": "ドキュメントレビュー",
+      "reviewDesc": "リマインダーはドキュメントの状態を変更しません。レビュー日を変更すると、バックグラウンドスキャンがリマインダーを更新します。",
       "sortLabel": "レビュー期限順",
       "asc": "昇順",
       "desc2": "降順",
@@ -9421,7 +9424,23 @@ export default {
       "delivered": "ローカル配信を受け付けました {date}",
       "empty": "レビュー待ちのリマインダーはありません。",
       "truncated": "最大 1000 件まで表示します。一覧にすべてが含まれない場合があります。",
-      "note": "配信状態は通知キューから取得します。「配信済み」はローカルコールバックがリマインダーを受け付けたことを示し、人が読んだことを示すものではありません。"
+      "note": "配信状態は通知キューから取得します。「配信済み」はローカルコールバックがリマインダーを受け付けたことを示し、人が読んだことを示すものではありません。",
+      "attachment": {
+        "title": "添付ファイルの名称と参照",
+        "desc": "名称、本文参照、タイトル同期の確認が必要な添付ファイルを親ドキュメントごとにまとめます。確認待ちの対応付けは現在の親ドキュメントにのみ適用されます。",
+        "count": "全 {n} 件",
+        "groupCount": "添付 {n} 件",
+        "open": "処理",
+        "originalFile": "元ファイル",
+        "currentTitle": "現在のタイトル",
+        "reference": "本文参照",
+        "empty": "現在、添付ファイルの対応待ちはありません。",
+        "reasonName": "名称の確認",
+        "reasonMapping": "参照の確認",
+        "reasonDuplicate": "名称の重複",
+        "reasonTitlePending": "タイトル同期待ち",
+        "reasonTitleConflict": "タイトル同期の競合"
+      }
     },
     "rules": {
       "eyebrow": "後から初期化されるドキュメントにのみ適用",
@@ -9447,6 +9466,12 @@ export default {
       "colEffectiveUntil": "有効期限",
       "empty": "一致するドキュメントはありません。",
       "count": "全 {n} 件 · リストをスクロールして表示",
+      "attachmentCount": "添付 {n}",
+      "groupedCount": "主文書 {docs} 件 · 添付 {attachments} 件",
+      "originalFile": "元ファイル：{name}",
+      "orphanAttachments": "未関連の添付ファイル",
+      "expandAttachments": "添付を展開",
+      "collapseAttachments": "添付を折りたたむ",
       "loading": "ライフサイクル情報を読み込み中…",
       "unassigned": "未分類"
     },
@@ -9455,7 +9480,7 @@ export default {
     "tabs": {
       "documents": "すべてのドキュメント",
       "cleanup": "整理待ち",
-      "reviews": "レビュー待ち",
+      "reviews": "対応待ち",
       "rules": "ナレッジベース規則"
     },
     "workspace": {

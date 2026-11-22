@@ -290,3 +290,14 @@ test('late list response from the previous business tab cannot replace current r
     assert.equal(view.state.records.value[0]?.id, 'guidance-record')
   } finally { view.stop() }
 })
+
+test('business records use the native workbench list skeleton', () => {
+  const file = readFileSync(new URL('./BusinessView.vue', import.meta.url), 'utf8')
+  const template = parse(file).descriptor.template?.content ?? ''
+  assert.ok(template.includes('class="records-panel workspace-list-panel"'), 'records panel must be a transparent native list panel')
+  assert.ok(template.includes('class="workspace-list-head"'), 'records need a sticky column header')
+  assert.ok(template.includes('class="workspace-list-row"'), 'records render as grid rows')
+  assert.ok(template.includes('workspace-cell workspace-cell-main'), 'records keep a flexible primary cell')
+  assert.ok(!template.includes('class="record-card"'), 'the old card-like button list must be gone')
+  assert.ok(template.includes('class="workspace-compact-meta"'), 'narrow layouts need the compact metadata fallback')
+})

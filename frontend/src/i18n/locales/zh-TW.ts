@@ -338,6 +338,7 @@ export default {
       automation_awaiting_approval: '自動化等待審批',
       automation_paused: '自動化已暫停',
       lifecycle_cleanup_due: '文件清理提醒',
+      lifecycle_attachment_due: '文件附件待辦',
       feedback_review_pending: '新的回饋待審核',
     },
   },
@@ -9407,9 +9408,11 @@ export default {
       "subtitle": "啟停本機的 llama-server 實例，並驗證它們的位址在 Core 一側確實可達。"
     },
     "reviews": {
-      "title": "待複核",
-      "desc": "到期提醒不會自動改變文件狀態。調整複核日期後，由後台掃描更新提醒。",
-      "loading": "正在載入提醒…",
+      "title": "待辦事項",
+      "desc": "集中處理附件名稱與正文引用確認，以及到期文件複核。",
+      "loading": "正在載入待辦…",
+      "reviewTitle": "文件複核",
+      "reviewDesc": "到期提醒不會自動改變文件狀態。調整複核日期後，由後台掃描更新提醒。",
       "sortLabel": "依複核到期",
       "asc": "正序",
       "desc2": "倒序",
@@ -9417,7 +9420,23 @@ export default {
       "delivered": "本機投遞已接受 {date}",
       "empty": "目前沒有待複核提醒。",
       "truncated": "最多顯示 1000 筆提醒；目前清單可能尚未包含全部待辦。",
-      "note": "投遞狀態取自通知佇列；「已投遞」表示本機回呼已接受該提醒，不代表人工已讀。"
+      "note": "投遞狀態取自通知佇列；「已投遞」表示本機回呼已接受該提醒，不代表人工已讀。",
+      "attachment": {
+        "title": "附件名稱與引用",
+        "desc": "依主件彙總需要確認名稱、正文引用或標題同步的附件。待確認對應僅用於目前主件。",
+        "count": "共 {n} 項",
+        "groupCount": "{n} 個附件",
+        "open": "處理",
+        "originalFile": "原檔案",
+        "currentTitle": "目前標題",
+        "reference": "正文引用",
+        "empty": "目前沒有附件待辦。",
+        "reasonName": "名稱待確認",
+        "reasonMapping": "引用待確認",
+        "reasonDuplicate": "名稱重複",
+        "reasonTitlePending": "標題待同步",
+        "reasonTitleConflict": "標題同步衝突"
+      }
     },
     "rules": {
       "eyebrow": "僅套用於後續初始化的文件",
@@ -9443,6 +9462,12 @@ export default {
       "colEffectiveUntil": "有效至",
       "empty": "目前沒有符合的文件。",
       "count": "共 {n} 項 · 列表可捲動檢視全部",
+      "attachmentCount": "附件 {n}",
+      "groupedCount": "共 {docs} 份主文件 · {attachments} 個附件",
+      "originalFile": "原始檔案：{name}",
+      "orphanAttachments": "未關聯附件",
+      "expandAttachments": "展開附件",
+      "collapseAttachments": "收合附件",
       "loading": "正在讀取生命週期事實…",
       "unassigned": "未歸族"
     },
@@ -9451,7 +9476,7 @@ export default {
     "tabs": {
       "documents": "全部文件",
       "cleanup": "待清理",
-      "reviews": "待複核",
+      "reviews": "待辦事項",
       "rules": "庫級規則"
     },
     "workspace": {

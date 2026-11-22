@@ -14,7 +14,7 @@
         @change="chooseValue"
       />
     </label>
-    <t-alert v-if="error" theme="error" class="notice">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
+    <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
     <p v-else-if="!loading && !items.length" class="subtle">{{ includeInactive?'没有符合条件的文档。':$t('workbench.picker.noDocuments') }}</p>
     <div v-if="serverMode && loading && keyword.trim()" class="wb-loading" role="status"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.picker.searching') }}</span></div>
     <p v-else-if="!loading" class="subtle"><template v-if="includeInactive">{{ serverMode ? '按标题搜索全部文档' : '可选文档 '+items.length+' 份' }}</template><template v-else><template v-if="serverMode">{{ $t('workbench.picker.serverHint', { total, shown: items.length }) }}</template><template v-else>{{ $t('workbench.picker.totalAll', { n: items.length }) }}</template></template></p>

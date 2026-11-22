@@ -1,32 +1,32 @@
 <template>
-  <main class="supervisor-page" aria-labelledby="supervisor-title">
-    <header class="page-heading">
-      <div class="title-block">
-        <h1 id="supervisor-title"><ResourceIcon type="server" :size="24" class="page-icon" />{{ $t('workbench.supervisor.title') }}</h1>
-        <p class="page-subtitle">{{ desktop ? '启停本机的 llama-server 实例，并检查 Windows 桌面能否访问模型。' : $t('workbench.supervisor.subtitle') }}</p>
+  <section class="section supervisor-page" aria-labelledby="supervisor-title">
+    <header class="section-header">
+      <div class="section-header__top">
+        <h2 id="supervisor-title"><ResourceIcon type="server" :size="24" class="page-icon" />{{ $t('workbench.supervisor.title') }}</h2>
+        <div class="heading-actions">
+          <t-button v-if="!desktop && hasToken" variant="outline" @click="toggleTokenForm">
+            {{ showTokenForm ? '取消' : '令牌' }}
+          </t-button>
+          <t-button variant="outline" :loading="busy" :disabled="!canManage" @click="reload">刷新</t-button>
+        </div>
       </div>
-      <div class="heading-actions">
-        <t-button v-if="!desktop && hasToken" variant="outline" @click="toggleTokenForm">
-          {{ showTokenForm ? '取消' : '令牌' }}
-        </t-button>
-        <t-button variant="outline" :loading="busy" :disabled="!canManage" @click="reload">刷新</t-button>
-      </div>
+      <p class="section-description">{{ desktop ? '启停本机的 llama-server 实例，并检查 Windows 桌面能否访问模型。' : $t('workbench.supervisor.subtitle') }}</p>
     </header>
 
-    <div v-if="tokenFormVisible" class="notice" role="status">
+    <div v-if="tokenFormVisible" role="status">
       <p v-if="tokenError" class="token-error" role="alert">{{ tokenError }}</p>
       <p v-else>模型管理器需要访问令牌。它的令牌和 Core 的登录态是两套，不会自动带上。</p>
-      <form class="token-form" @submit.prevent="saveToken">
-        <label>访问令牌
-          <t-input v-model="tokenDraft" type="password" autocomplete="off" placeholder="MODEL_SUPERVISOR_TOKEN" />
-        </label>
+      <t-form class="token-form" label-align="top" @submit.prevent="saveToken">
+        <t-form-item label="访问令牌" name="token">
+          <t-input v-model="tokenDraft" type="password" autocomplete="off" placeholder="MODEL_SUPERVISOR_TOKEN" class="token-input" />
+        </t-form-item>
         <t-button theme="primary" type="submit">保存</t-button>
-      </form>
+      </t-form>
       <p class="hint">令牌只保存在本机浏览器里；服务地址 {{ api.baseUrl() }}。</p>
     </div>
 
     <template v-if="canManage">
-      <t-alert v-if="error" theme="error" class="notice" role="alert">{{ error }}</t-alert>
+      <t-alert v-if="error" theme="error" role="alert">{{ error }}</t-alert>
 
       <section v-if="res" class="resource-bar" aria-label="主机资源">
         <div class="resource-head">
@@ -46,7 +46,7 @@
       </section>
 
       <section class="cards" aria-label="模型实例">
-        <article v-for="item in instances" :key="item.id" class="card" :class="item.status">
+        <t-card v-for="item in instances" :key="item.id" class="card" :class="item.status" :bordered="true">
           <header>
             <div>
               <h2>{{ item.id }}</h2>
@@ -119,7 +119,7 @@
 </span></code></pre>
             <p v-if="!logLines.length" class="hint">暂无输出。</p>
           </section>
-        </article>
+        </t-card>
 
         <t-empty v-if="!instances.length && !busy" class="empty" description="还没有配置任何实例。" />
       </section>
@@ -133,41 +133,54 @@
           从 <code>{{ catalogData?.model_dir || 'data/models' }}</code> 选择 .gguf，运行时固定用
           <code>{{ catalogData?.binary || 'data/bin/llama-server.exe' }}</code><span v-if="catalogData && !catalogData.binary_ready" class="warn">（未找到该文件）</span>
         </p>
-        <t-alert v-if="!desktop && catalogData?.note" theme="info" class="notice">{{ catalogData.note }}</t-alert>
-        <form class="add-form" @submit.prevent="doAdd">
+        <t-alert v-if="!desktop && catalogData?.note" theme="info">{{ catalogData.note }}</t-alert>
+        <t-form class="add-form" label-align="top" @submit.prevent="doAdd">
           <div class="form-grid">
-            <label class="field">标识<t-input v-model="form.id" placeholder="embedding" /></label>
-            <div v-if="desktop" class="field">
-              <span>模型文件</span>
-              <t-button variant="outline" :disabled="busy" @click="chooseModelFile">选择 GGUF 文件</t-button>
-              <span v-if="selectedModelPath" class="model-name" :title="selectedModelPath">{{ form.model }}</span>
-            </div>
-            <label v-else class="field">模型文件<t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" /></label>
-            <label class="field">任务<t-select v-model="form.task_type" :options="taskTypeOptions" /></label>
-            <label class="field">端口<t-input-number v-model="form.port" :min="1" :max="65535" /></label>
-            <label class="field field-gpu">GPU 层数
-              <span class="gpu-row">
-                <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" class="gpu-layers" />
-                <t-switch v-model="form.use_gpu" />
+            <t-form-item label="标识" name="id">
+              <t-input v-model="form.id" placeholder="embedding" />
+            </t-form-item>
+            <t-form-item v-if="desktop" label="模型文件" name="model">
+              <div class="model-picker">
+                <t-button variant="outline" :disabled="busy" @click="chooseModelFile">选择 GGUF 文件</t-button>
+                <span v-if="selectedModelPath" class="model-name" :title="selectedModelPath">{{ form.model }}</span>
+              </div>
+            </t-form-item>
+            <t-form-item v-else label="模型文件" name="model">
+              <t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" />
+            </t-form-item>
+            <t-form-item label="任务" name="task_type">
+              <t-select v-model="form.task_type" :options="taskTypeOptions" />
+            </t-form-item>
+            <t-form-item label="端口" name="port">
+              <t-input-number v-model="form.port" :min="1" :max="65535" />
+            </t-form-item>
+            <t-form-item label="GPU 设置" name="gpu_layers" class="field-gpu">
+              <div class="gpu-row">
+                <t-switch v-model="form.use_gpu" aria-label="使用 GPU" />
                 <span class="gpu-label">使用 GPU</span>
-                <t-button theme="primary" type="submit" class="gpu-submit" :loading="busy" :disabled="desktop ? !selectedModelPath : !catalogData?.models.length">启动</t-button>
-              </span>
-            </label>
+                <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" class="gpu-layers" aria-label="GPU 层数" />
+                <span class="gpu-label">层数</span>
+              </div>
+            </t-form-item>
+          </div>
+          <div class="form-actions">
+            <t-button theme="primary" type="submit" :loading="busy" :disabled="desktop ? !selectedModelPath : !catalogData?.models.length">启动</t-button>
           </div>
           <p class="hint">
             层数对应 llama-server 的 <code>-ngl</code>：留空表示把整模型卸载到显卡（99）；显卡装不下时填一个较小值做部分卸载；0 等于纯 CPU。
           </p>
-        </form>
-        <t-alert v-if="formError" theme="error" class="notice">{{ formError }}</t-alert>
+        </t-form>
+        <t-alert v-if="formError" theme="error">{{ formError }}</t-alert>
       </section>
     </template>
-  </main>
+  </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import * as api from '@/api/modelSupervisor'
+import { confirmAction } from '@/utils/confirm'
 
 const desktop = api.isPackagedDesktop()
 const statusLabel: Record<api.InstanceStatus, string> = {
@@ -401,9 +414,12 @@ async function doStart(item: api.Instance) {
   } catch (cause) {
     if (api.isCapacityRefusal(cause)) {
       const detail = cause.detail ?? {}
-      const proceed = window.confirm(
-        `显存不足：需要约 ${detail.estimated_gb} GB，可用 ${detail.free_gb} GB（预留 ${detail.reserve_gb} GB）。\n仍然强行启动吗？`
-      )
+      const proceed = await confirmAction({
+        title: '显存不足',
+        body: `需要约 ${detail.estimated_gb} GB，可用 ${detail.free_gb} GB（预留 ${detail.reserve_gb} GB）。仍然强行启动吗？`,
+        confirmText: '仍然启动',
+        danger: true
+      })
       if (proceed) {
         try {
           await api.start(
@@ -541,19 +557,26 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 </script>
 
 <style scoped>
-.supervisor-page { padding: 24px 32px 48px; max-width: 1100px; }
-.page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
-.page-heading h1 { margin: 0; font-size: var(--td-font-size-headline-small); font-weight: 600; line-height: 32px; display: flex; align-items: center; gap: 8px; color: var(--td-text-color-primary); }
+.section.supervisor-page {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  scrollbar-gutter: stable;
+  padding: 24px 32px 48px;
+}
+.section-header { display: flex; flex-direction: column; gap: 4px; margin-bottom: 20px; }
+.section-header__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.section-header h2 { margin: 0; font-size: var(--td-font-size-title-large); font-weight: 600; line-height: var(--td-line-height-title-large); display: flex; align-items: center; gap: 8px; color: var(--td-text-color-primary); }
+.section-description { margin: 0; color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-medium); font-weight: 400; line-height: 20px; }
 .page-icon { color: var(--td-text-color-primary); }
-.title-block { display: flex; flex-direction: column; gap: 4px; }
-.page-subtitle { margin: 0; color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-medium); font-weight: 400; line-height: 20px; }
 .heading-actions { display: flex; gap: 8px; }
-.notice { padding: 12px 16px; border-radius: var(--td-radius-medium); background: var(--td-bg-color-secondarycontainer); font-size: var(--td-font-size-body-medium); }
-.notice.error { background: var(--td-error-color-1); color: var(--td-error-color); }
 .token-error { margin: 0 0 6px; color: var(--td-error-color); }
-.token-form { display: flex; gap: 8px; align-items: flex-end; margin: 10px 0; }
-.token-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--td-font-size-body-small); }
-.token-form input { min-width: 320px; padding: 6px 8px; border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); }
+.token-form { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; }
+.token-form .t-form-item { margin-bottom: 0; }
+.token-form .token-input { width: 360px; max-width: 100%; }
 .hint { font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); margin: 6px 0 0; }
 .resource-bar { border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); padding: 16px; margin-bottom: 16px; }
 .resource-head { display: flex; gap: 12px; align-items: baseline; font-size: var(--td-font-size-body-medium); }
@@ -563,11 +586,12 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .meter span { display: block; height: 100%; background: var(--td-brand-color); }
 .gpu-list { margin: 4px 0 0; padding-left: 16px; font-size: var(--td-font-size-body-small); color: var(--td-text-color-secondary); }
 .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-.card { border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-large); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.card { display: flex; flex-direction: column; }
+.card :deep(.t-card__body) { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
 .card.running { border-color: var(--td-success-color-3); }
 .card.failed { border-color: var(--td-error-color-3); }
 .card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-.card h2 { margin: 0; font-size: var(--td-font-size-body-large); }
+.card h2 { margin: 0; font-size: var(--td-font-size-title-medium); }
 .model-name { margin: 2px 0 0; font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); word-break: break-all; }
 
 .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0; }
@@ -584,28 +608,26 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .log-panel { border-top: 1px dashed var(--td-component-stroke); padding-top: 10px; }
 .log-panel header { display: flex; justify-content: space-between; font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); }
-.log-panel pre { margin: 6px 0 0; max-height: 260px; overflow: auto; background: #1e1e1e; color: #ddd; border-radius: var(--td-radius-medium); padding: 8px; font-size: var(--td-font-size-body-small); line-height: 1.5; }
+.log-panel pre { margin: 6px 0 0; max-height: 260px; overflow: auto; background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); padding: 8px; font-size: var(--td-font-size-body-small); line-height: 1.5; }
 .log-line { display: block; white-space: pre-wrap; word-break: break-all; }
-.log-time { color: #7f8c9b; margin-right: 6px; }
-.log-repeat { color: #f0c674; margin-left: 6px; }
+.log-time { color: var(--td-text-color-placeholder); margin-right: 6px; }
+.log-repeat { color: var(--td-warning-color); margin-left: 6px; }
 .empty { color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-medium); }
 .add-panel { margin-top: 22px; border-top: 1px solid var(--td-component-stroke); padding-top: 16px; }
-.add-panel h2 { font-size: var(--td-font-size-body-large); margin: 0 0 4px; }
+.add-panel h2 { font-size: var(--td-font-size-title-medium); margin: 0 0 4px; }
 .add-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .add-head h2 { margin: 0; }
 .warn { color: var(--td-error-color); }
 .add-form { margin-top: 16px; }
-/* Fields share one grid; controls are TDesign components, so no bare input rules. */
-.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; align-items: end; }
-.field { display: flex; flex-direction: column; gap: 8px; font-size: var(--td-font-size-body-medium); color: var(--td-text-color-primary); }
-/* The layers input needs room for the "留空=全部" placeholder; the switch sits
-   after it with the same 12px rhythm the other fields use. */
+/* Native WeKnora forms: t-form-item supplies the label, the grid only positions fields. */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; align-items: start; }
+.form-grid .t-form-item { margin-bottom: 0; }
+.model-picker { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .field-gpu { grid-column: span 2; }
-.gpu-row { display: flex; align-items: center; gap: 12px; }
+.gpu-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
 .gpu-row .gpu-layers { flex: 1 1 200px; min-width: 180px; }
 .gpu-label { white-space: nowrap; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); }
+.form-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 700px) { .field-gpu { grid-column: auto; } }
 .add-form .hint { margin: 12px 0 0; }
-.gpu-row .gpu-submit { flex: 0 0 auto; margin-left: 8px; }
-button:disabled { opacity: .55; cursor: not-allowed; }
 </style>

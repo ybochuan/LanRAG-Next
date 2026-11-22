@@ -1116,6 +1116,10 @@ const wikiGraphHref = computed(() => {
 });
 
 const openRouteInNewTab = (path: string) => {
+  if ((window as Window & { runtime?: unknown }).runtime) {
+    void router.push(path);
+    return;
+  }
   const href = router.resolve(path).href;
   window.open(href, '_blank', 'noopener,noreferrer');
 };
@@ -1140,10 +1144,17 @@ const openWeKnoraEntity = async (el: HTMLElement) => {
   const kind = el.getAttribute('data-entity-kind') as WeKnoraEntityKind | null;
   const id = el.getAttribute('data-entity-id') || '';
   if (!kind || !id || props.embedToken) return;
-  const win = kind === 'kb' ? null : window.open('about:blank', '_blank');
+  // Desktop keeps entity links inside the app; a blank popup would become a
+  // native browser window in Wails.
+  const desktop = !!(window as Window & { runtime?: unknown }).runtime;
+  const win = desktop || kind === 'kb' ? null : window.open('about:blank', '_blank');
   try {
     const route = await resolveEntityRoute(kind, id);
     if (!route) throw new Error('entity has no knowledge base');
+    if (desktop) {
+      await router.push(route);
+      return;
+    }
     const href = router.resolve(route).href;
     if (win) {
       win.opener = null;
@@ -1165,6 +1176,7 @@ const entityLinkLabels = computed(() => ({
 }));
 
 const handleWikiDrawerClick = (e: MouseEvent) => {
+  if (e.defaultPrevented) return;
   const target = e.target as HTMLElement;
   if (target.closest('.citation-wiki')) {
     e.preventDefault();
@@ -1181,6 +1193,7 @@ const handleWikiDrawerClick = (e: MouseEvent) => {
     // @ts-ignore
     if (aEl && aEl.href && window.runtime && window.runtime.BrowserOpenURL) {
       if (aEl.href.startsWith('http://') || aEl.href.startsWith('https://')) {
+        if (new URL(aEl.href).origin === window.location.origin) return;
         e.preventDefault();
         // @ts-ignore
         window.runtime.BrowserOpenURL(aEl.href);
@@ -2651,6 +2664,7 @@ const getKbIdForWiki = (slug: string): string => {
 };
 
 const onRootClick = (e: Event) => {
+  if (e.defaultPrevented) return;
   const target = e.target as HTMLElement;
   if (!target) return;
   const attachment = attachmentAtTarget(target, props.session);
@@ -2755,6 +2769,7 @@ const onRootClick = (e: Event) => {
   // @ts-ignore
   if (aEl && aEl.href && window.runtime && window.runtime.BrowserOpenURL) {
     if (aEl.href.startsWith('http://') || aEl.href.startsWith('https://')) {
+      if (new URL(aEl.href).origin === window.location.origin) return;
       e.preventDefault();
       // @ts-ignore
       window.runtime.BrowserOpenURL(aEl.href);

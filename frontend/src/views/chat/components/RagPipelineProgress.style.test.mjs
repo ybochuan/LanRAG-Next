@@ -19,15 +19,14 @@ test('rag pipeline uses agent-style timeline structure', () => {
 
 test('rag pipeline persists and collapses after the answer arrives', () => {
   assert.match(source, /showCollapsedRoot/)
-  assert.match(source, /tree-root-status/)
-  assert.match(source, /collapsedStatusText/)
-  assert.match(source, /referenceSummaryText/)
+  assert.match(source, /\{\{ referenceSummaryText \|\| collapsedStatusText \}\}/)
   assert.match(source, /hasThinking\.value/)
   assert.match(source, /const visible = computed\([\s\S]*showPrePipelineWait\.value/)
 })
 
 test('rag pipeline toggles expand and collapse from the root header', () => {
   assert.match(source, /class="tree-root-expand"/)
+  assert.match(source, /:aria-expanded="showExpandedTimeline"/)
   assert.match(source, /@click="toggleExpanded"/)
   assert.match(source, /showExpandedTimeline \? 'chevron-down' : 'chevron-right'/)
   assert.doesNotMatch(source, /refsExpanded \? 'chevron/)

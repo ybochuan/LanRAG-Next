@@ -11,8 +11,8 @@
     <t-button v-if="canWrite && selected.length" theme="primary" :disabled="disabled" @click="confirmSelected">
       批量确认（{{ selected.length }}）
     </t-button>
-    <ul v-if="inbox.items.length" class="suggestion-list">
-      <li v-for="item in inbox.items" :key="item.id">
+    <div v-if="inbox.items.length" class="suggestion-list">
+      <div v-for="item in inbox.items" :key="item.id" class="suggestion-row">
         <label v-if="canWrite && item.edge_type!=='supersedes'" class="selection">
           <t-checkbox :checked="selected.includes(item.id)" :disabled="disabled" @change="toggleSelection(item.id)">
           选中 {{ title(item.document_id) }} 的建议</t-checkbox>
@@ -39,19 +39,22 @@
             <t-button variant="outline" :disabled="disabled" @click="$emit('ignore',item)">忽略</t-button>
           </div>
         </template>
-      </li>
-    </ul>
-    <details>
-      <summary>知识库评分设置</summary>
-      <form @submit.prevent="savePolicy">
-        <label>相似度权重<t-input-number v-model="settings.similarity_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></label>
-        <label>声明线索权重<t-input-number v-model="settings.declaration_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></label>
-        <label>分块证据权重<t-input-number v-model="settings.structure_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></label>
-        <label>候选阈值<t-input-number v-model="settings.threshold" :min="0.01" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></label>
-        <p class="subtle">三项权重之和应为 1。保存后重新扫描以应用新设置。</p>
-        <t-button v-if="canWrite" theme="primary" type="submit" :disabled="disabled || queued || !validWeights">保存本库设置</t-button>
-      </form>
-    </details>
+      </div>
+    </div>
+    <t-collapse v-model="policyOpen">
+      <t-collapse-panel value="policy" header="知识库评分设置">
+        <t-form label-align="top" @submit="savePolicy">
+          <div class="policy-grid">
+            <t-form-item label="相似度权重"><t-input-number v-model="settings.similarity_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+            <t-form-item label="声明线索权重"><t-input-number v-model="settings.declaration_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+            <t-form-item label="分块证据权重"><t-input-number v-model="settings.structure_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+            <t-form-item label="候选阈值"><t-input-number v-model="settings.threshold" :min="0.01" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+          </div>
+          <p class="subtle">三项权重之和应为 1。保存后重新扫描以应用新设置。</p>
+          <t-button v-if="canWrite" theme="primary" type="submit" :disabled="disabled || queued || !validWeights">保存本库设置</t-button>
+        </t-form>
+      </t-collapse-panel>
+    </t-collapse>
   </section>
 </template>
 
@@ -82,6 +85,7 @@ const effectiveDates = reactive<Record<string,string>>({})
 const pickerValue=(value?:string)=>value?value.replace('T',' '):''
 const fromPickerValue=(value:string)=>value?value.replace(' ','T'):''
 const selected = ref<string[]>([])
+const policyOpen = ref<string[]>([])
 // TDesign checkbox is boolean; the batch selection stays an id array.
 function toggleSelection(id:string){const at=selected.value.indexOf(id);if(at>=0)selected.value.splice(at,1);else selected.value.push(id)}
 const settings = reactive({similarity_weight:0,declaration_weight:0,structure_weight:0,threshold:0})
@@ -114,34 +118,11 @@ function confirm(item:FamilySuggestion){
 </script>
 
 <style scoped>
-.suggestion-list { padding-inline-start:1.25rem; }
-.suggestion-list > li { padding:.75rem 0; border-bottom:1px solid var(--td-component-border); }
-.suggestion-list .state-badge { margin-inline-start:.6rem; }
-.selection { display:flex; align-items:center; gap:.5rem; font-size:var(--td-font-size-body-small); }
-.evidence { font-size:var(--td-font-size-body-small); color:var(--td-text-color-secondary); }
-details { margin-top:1rem; }
-summary { cursor:pointer; }
-
-/* Disclosure control: a TDesign-style chevron instead of the browser marker. */
-details > summary {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:8px 0;
-  cursor:pointer;
-  font-weight:600;
-  color:var(--td-text-color-primary);
-  list-style:none;
-}
-details > summary::-webkit-details-marker { display:none; }
-details > summary::before {
-  content:"";
-  width:0;
-  height:0;
-  border-left:6px solid currentColor;
-  border-top:4px solid transparent;
-  border-bottom:4px solid transparent;
-  transition:transform var(--app-motion-fast) ease;
-}
-details[open] > summary::before { transform:rotate(90deg); }
+.suggestion-list { display:flex; flex-direction:column; }
+.suggestion-row { display:flex; flex-direction:column; gap:6px; padding:12px 0; border-bottom:1px solid var(--td-component-stroke); }
+.suggestion-row:last-child { border-bottom:0; }
+.selection { display:flex; align-items:center; gap:8px; font-size:var(--td-font-size-body-small); }
+.evidence { margin:0; padding-left:18px; font-size:var(--td-font-size-body-small); color:var(--td-text-color-secondary); }
+.policy-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px 16px; }
+:deep(.t-collapse) { margin-top:8px; border-top:1px solid var(--td-component-stroke); }
 </style>

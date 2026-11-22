@@ -176,7 +176,7 @@ export function httpStatus(error: unknown): number | undefined {
 export function businessError(error: unknown): string {
   const status = httpStatus(error)
   if (status === 403) return '当前账号没有此知识库的操作权限。'
-  if (status === 409) return '记录或业务条件已改变，请重新载入。激活还需满足冷静期与主题复核条件。'
+  if (status === 409) return '记录或业务条件已改变，请重新载入。'
   if (status === 400) return '提交内容无效，请检查文档、指导和完整正文。'
   if (status === 404) return '记录已不可访问，请重新载入。'
   return '服务暂不可用，结果尚未确认。请刷新核对，或用原请求重试。'

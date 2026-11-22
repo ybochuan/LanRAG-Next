@@ -26,7 +26,7 @@ func businessRead(action string) bool {
 	case "business_lineage_graph", "business_related", "business_relation_list", "business_feedback_list",
 		"business_guidance_list", "business_revision_list", "business_family_list", "business_family_members",
 		"business_family_replacements", "business_family_backfill_plans", "business_family_workspace",
-		"business_family_suggestions", "business_cleanup_list", "business_attachment_list", "business_attachment_preview",
+		"business_family_suggestions", "business_cleanup_list", "business_attachment_list", "business_attachment_preview", "business_attachment_tasks",
 		"business_correction_documents", "business_correction_document", "business_correction_markdown", "business_correction_history":
 		return true
 	default:

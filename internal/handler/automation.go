@@ -520,6 +520,9 @@ type reviewAlertNotification struct {
 	SourceID        string `json:"source_id"       binding:"required,max=64"`
 	KnowledgeBaseID string `json:"knowledge_base_id" binding:"required,max=64"`
 	TenantID        uint64 `json:"tenant_id"       binding:"required"`
+	// Kind is empty for document review alerts. The attachment work queue uses
+	// lifecycle.attachment_due so the bell can label it independently.
+	Kind string `json:"kind,omitempty"`
 }
 
 func (h *AutomationHandler) NotifyReviewAlert(c *gin.Context) {
@@ -539,20 +542,32 @@ func (h *AutomationHandler) NotifyReviewAlert(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
 		return
 	}
+	kind, sourceType := "lifecycle.review_due", "review_alert"
+	if req.Kind != "" {
+		if req.Kind != "lifecycle.attachment_due" {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
+			return
+		}
+		kind, sourceType = req.Kind, "attachment_alert"
+	}
 	ctx := c.Request.Context()
 	kb, err := h.knowledgeBases.GetKnowledgeBaseByIDOnly(ctx, req.KnowledgeBaseID)
 	if err != nil || kb == nil || kb.TenantID != req.TenantID || kb.CreatorID == "" {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "knowledge_base_not_found"})
 		return
 	}
-	h.notifications.Notify(ctx, &types.Notification{
+	notify := h.notifications.Notify
+	if kind == "lifecycle.attachment_due" {
+		notify = h.notifications.NotifyOnce
+	}
+	notify(ctx, &types.Notification{
 		TenantID:   req.TenantID,
 		UserID:     kb.CreatorID,
-		Kind:       "lifecycle.review_due",
+		Kind:       kind,
 		Title:      req.Title,
 		Body:       req.Content,
 		Link:       req.Link,
-		SourceType: "review_alert",
+		SourceType: sourceType,
 		SourceID:   req.SourceID,
 	})
 	c.JSON(http.StatusOK, gin.H{"success": true})

@@ -66,6 +66,7 @@ type Task struct {
 	HoldReason      string `json:"hold_reason,omitempty"`
 	RetainedUntil   string `json:"retained_until,omitempty"`
 	CanConfirm      bool   `json:"can_confirm"`
+	CanCleanupNow   bool   `json:"can_cleanup_now"`
 	LastError       string `json:"last_error,omitempty"`
 	Revision        int64  `json:"revision"`
 	CleanedAt       string `json:"cleaned_at,omitempty"`
@@ -108,6 +109,7 @@ func (s *Service) projectTask(t *Task, now time.Time) (time.Time, bool) {
 		t.RetainedUntil = deadline.UTC().Format(time.RFC3339Nano)
 		t.CanConfirm = t.confirmableStatus() && !now.Before(deadline)
 	}
+	t.CanCleanupNow = t.confirmableStatus()
 	if t.Status == StatusPending || t.Status == StatusAwaiting {
 		t.EffectiveStatus = StatusPending
 		if t.CanConfirm {
@@ -451,7 +453,7 @@ func (s *Service) promoteDue(ctx context.Context, now time.Time) error {
 	if s.autoConfirm {
 		for _, t := range due {
 			scope := Scope{TenantID: t.TenantID, KnowledgeBaseID: t.KnowledgeBaseID}
-			if err := s.cleanTask(ctx, scope, t, "", ""); err != nil {
+			if err := s.cleanTask(ctx, scope, t, "", "", false); err != nil {
 				_ = s.markFailed(ctx, scope, t, err)
 			}
 		}
@@ -514,7 +516,7 @@ func (s *Service) sendNotice(ctx context.Context, scope Scope, stage string, cou
 		return nil
 	}
 	text := map[string]string{
-		"detected": "已进入 30 天清理保留期",
+		"detected": "已进入 30 天记录保留期",
 		"7d":       "将在 7 天后进入清理确认",
 		"1d":       "将在 1 天后进入清理确认",
 		"due":      "已到清理确认时间",
@@ -522,7 +524,7 @@ func (s *Service) sendNotice(ctx context.Context, scope Scope, stage string, cou
 	if text == "" {
 		text = "清理状态有更新"
 	}
-	s.notify(Notice{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, Title: "文档清理提醒", Body: fmt.Sprintf("本知识库有 %d 份已删除文档%s，点击查看。", count, text), Link: "/platform/documents?tab=cleanup&kb=" + url.QueryEscape(scope.KnowledgeBaseID), SourceID: key, Kind: NoticeKind})
+	s.notify(Notice{TenantID: scope.TenantID, KnowledgeBaseID: scope.KnowledgeBaseID, Title: "扩展记录清理提醒", Body: fmt.Sprintf("本知识库有 %d 份已删除文档的扩展治理记录%s，点击查看。", count, text), Link: "/platform/documents?tab=cleanup&kb=" + url.QueryEscape(scope.KnowledgeBaseID), SourceID: key, Kind: NoticeKind})
 	return nil
 }
 
@@ -629,16 +631,38 @@ func (s *Service) Confirm(ctx context.Context, scope Scope, id, actor, operation
 	if t.Revision != expected || !t.confirmableStatus() {
 		return Task{}, ErrConflict
 	}
-	if err := s.cleanTask(ctx, scope, t, actor, operation); err != nil {
+	if err := s.cleanTask(ctx, scope, t, actor, operation, false); err != nil {
 		_ = s.markFailed(ctx, scope, t, err)
 		return Task{}, err
 	}
 	return s.taskResult(ctx, scope, id)
 }
 
-func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, operation string) error {
+// ConfirmNow removes extension projections before the retention deadline when the
+// operator explicitly requests immediate cleanup. The native deletion evidence
+// and family-reference guard are still verified by cleanTask.
+func (s *Service) ConfirmNow(ctx context.Context, scope Scope, id, actor, operation string, expected int64) (Task, error) {
+	if !s.validScope(scope) || !weknora.ValidID(id) || strings.TrimSpace(operation) == "" {
+		return Task{}, ErrScope
+	}
+	t, err := s.task(ctx, scope, id)
+	if err != nil {
+		return Task{}, err
+	}
+	if t.Revision != expected || !t.confirmableStatus() {
+		return Task{}, ErrConflict
+	}
+	if err := s.cleanTask(ctx, scope, t, actor, operation, true); err != nil {
+		_ = s.markFailed(ctx, scope, t, err)
+		return Task{}, err
+	}
+	return s.taskResult(ctx, scope, id)
+}
+
+func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, operation string, allowEarly bool) error {
 	now := s.now().UTC()
-	if deadline, ok := s.retentionDeadline(task); !ok || now.Before(deadline) {
+	deadline, hasDeadline := s.retentionDeadline(task)
+	if !hasDeadline || (!allowEarly && now.Before(deadline)) {
 		return errRetentionActive
 	}
 	id := task.DocumentID
@@ -677,22 +701,53 @@ func (s *Service) cleanTask(ctx context.Context, scope Scope, task Task, actor, 
 		if family > 0 {
 			return errFamilyReference
 		}
-		stmts := []string{
-			"DELETE FROM ext_review_alerts WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
-			"DELETE FROM ext_review_subjects WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
-			"DELETE FROM ext_document_version WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
-			"DELETE FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
-			"DELETE FROM ext_lifecycle_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
-			"DELETE FROM ext_lifecycle_events WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
-			"DELETE FROM ext_document_annotations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
-			"DELETE FROM ext_document_availability WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?",
+		tenant := strconv.FormatUint(scope.TenantID, 10)
+		execDep := func(name, stmt string, args ...any) error {
+			if _, err := tx.ExecContext(ctx, stmt, args...); err != nil {
+				return fmt.Errorf("cleanup %s: %w", name, err)
+			}
+			return nil
 		}
-		for _, stmt := range stmts {
-			if _, err := tx.ExecContext(ctx, stmt, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, id); err != nil {
+		// SQLite enforces these foreign keys immediately. Remove every row that
+		// still references a projection before deleting the projection itself.
+		for _, dep := range []struct {
+			name, stmt string
+			args       []any
+		}{
+			{"supplement cross-parents (child)", "DELETE FROM ext_supplement_cross_parents WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"supplement cross-parents (parent)", "DELETE FROM ext_supplement_cross_parents WHERE tenant_id=? AND parent_knowledge_base_id=? AND parent_document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"supplement parents (child)", "DELETE FROM ext_supplement_parents WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"supplement parents (parent)", "DELETE FROM ext_supplement_parents WHERE tenant_id=? AND knowledge_base_id=? AND parent_document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"supplement declarations", "DELETE FROM ext_supplement_declarations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"business family heads", "DELETE FROM ext_business_document_family_heads WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"business family legacy mappings (head)", "DELETE FROM ext_business_family_legacy_mappings WHERE tenant_id=? AND knowledge_base_id=? AND head_document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"business family legacy mappings (family)", "DELETE FROM ext_business_family_legacy_mappings WHERE tenant_id=? AND knowledge_base_id=? AND legacy_family_id IN (SELECT family_id FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?)", []any{tenant, scope.KnowledgeBaseID, tenant, scope.KnowledgeBaseID, id}},
+			{"business family member history", "DELETE FROM ext_business_family_member_history WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"family replacements", "DELETE FROM ext_family_replacements WHERE tenant_id=? AND knowledge_base_id=? AND (old_document_id=? OR new_document_id=? OR applied_event_id IN (SELECT event_id FROM ext_lifecycle_events WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?))", []any{tenant, scope.KnowledgeBaseID, id, id, tenant, scope.KnowledgeBaseID, id}},
+			{"repeal notices", "DELETE FROM ext_repeal_notices WHERE tenant_id=? AND knowledge_base_id=? AND applied_event_id IN (SELECT event_id FROM ext_lifecycle_events WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?)", []any{tenant, scope.KnowledgeBaseID, tenant, scope.KnowledgeBaseID, id}},
+			{"revision proposals", "DELETE FROM ext_revision_proposals WHERE tenant_id=? AND knowledge_base_id=? AND family_id IN (SELECT family_id FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?)", []any{tenant, scope.KnowledgeBaseID, tenant, scope.KnowledgeBaseID, id}},
+			{"lineage audit", "DELETE FROM ext_lineage_audit WHERE tenant_id=? AND knowledge_base_id=? AND version_node_id IN (SELECT version_node_id FROM ext_document_version WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?)", []any{tenant, scope.KnowledgeBaseID, tenant, scope.KnowledgeBaseID, id}},
+			{"source snapshot evidence", "DELETE FROM ext_source_snapshot_evidence WHERE tenant_id=? AND knowledge_base_id=? AND version_node_id IN (SELECT version_node_id FROM ext_document_version WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?)", []any{tenant, scope.KnowledgeBaseID, tenant, scope.KnowledgeBaseID, id}},
+			{"lifecycle decisions", "DELETE FROM ext_lifecycle_decisions WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"provenance sources", "DELETE FROM ext_provenance_sources WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"review alerts", "DELETE FROM ext_review_alerts WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"review subjects", "DELETE FROM ext_review_subjects WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"document versions", "DELETE FROM ext_document_version WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"lifecycle current", "DELETE FROM ext_lifecycle_current WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"version families", "DELETE FROM ext_document_version_family WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"lifecycle events", "DELETE FROM ext_lifecycle_events WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"document annotations", "DELETE FROM ext_document_annotations WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+			{"document availability", "DELETE FROM ext_document_availability WHERE tenant_id=? AND knowledge_base_id=? AND document_id=?", []any{tenant, scope.KnowledgeBaseID, id}},
+		} {
+			if err := execDep(dep.name, dep.stmt, dep.args...); err != nil {
 				return err
 			}
 		}
-		return s.auditTx(ctx, tx, scope, id, "cleaned", actor, map[string]any{"cleaned_at": now, "operation_id": operation})
+		auditAction := "cleaned"
+		if allowEarly {
+			auditAction = "cleaned_early"
+		}
+		return s.auditTx(ctx, tx, scope, id, auditAction, actor, map[string]any{"cleaned_at": now, "operation_id": operation, "early": allowEarly})
 	})
 }
 

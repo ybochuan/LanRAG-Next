@@ -102,6 +102,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	var alertNotifier *reviewNotifier
 	var cleanupNotifier *cleanupNotifier
 	var feedbackNotifier *feedbackNotifier
+	var attachmentNotifier *attachmentNotifier
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var reconcile *ingest.Reconciler
@@ -244,6 +245,11 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 			workbenchImporter = attachment.NewImporter(attachmentSource, cfg.KnowledgeBaseIDs).WithSemantics(db)
 		}
 		workbenchAttachments = attachmentworkbench.New(db, attachmentSource, workbenchImporter).WithRelations(businessService)
+		attachmentScopes := make([]attachmentworkbench.Scope, 0, len(scopes))
+		for _, scope := range scopes {
+			attachmentScopes = append(attachmentScopes, attachmentworkbench.Scope{Tenant: scope.TenantID, KB: scope.KnowledgeBaseID})
+		}
+		attachmentNotifier = newAttachmentNotifier(cfg.UpstreamURL, cfg.ManagementKey, workbenchAttachments, attachmentScopes)
 		services.MCP = &extmcp.Server{DB: db, Client: attachmentSource, Policy: policy, Key: cfg.ManagementKey, Tenant: cfg.TenantID, KBs: cfg.KnowledgeBaseIDs, NativeDBPath: cfg.NativeDBPath}
 		services.AfterRetrieve = &bridge.AttachmentHandler{Key: cfg.ManagementKey, Policy: policy}
 		correctionService = corrections.New(db, time.Now)
@@ -366,6 +372,9 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	}
 	if alertNotifier != nil {
 		launch(func(ctx context.Context) error { alertNotifier.Run(ctx, report); return nil })
+	}
+	if attachmentNotifier != nil {
+		launch(func(ctx context.Context) error { attachmentNotifier.Run(ctx, report); return nil })
 	}
 	if feedbackNotifier != nil {
 		launch(func(ctx context.Context) error { feedbackNotifier.Run(ctx, report); return nil })

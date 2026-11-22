@@ -1,11 +1,11 @@
 <template>
     <div class="bot_msg" :class="{ 'is-embedded': embeddedMode }">
         <div style="display: flex;flex-direction: column; gap:8px">
-            <t-alert v-if="session.correction_check === 'unavailable'" theme="warning"
+            <t-alert v-if="session.correction_check === 'unavailable'" theme="warning" class="correction-notice"
                 :message="$t('chat.correctionCheckUnavailable')" />
-            <t-alert v-else-if="session.correction_check === 'unsupported_scope'" theme="warning"
+            <t-alert v-else-if="session.correction_check === 'unsupported_scope'" theme="warning" class="correction-notice"
                 :message="$t('chat.correctionCheckUnsupportedScope')" />
-            <t-alert v-else-if="session.correction_check === 'project_required'" theme="warning"
+            <t-alert v-else-if="session.correction_check === 'project_required'" theme="warning" class="correction-notice"
                 :message="$t('chat.correctionCheckProjectRequired')" />
             <!-- 显示@的知识库和文件（非 Agent 模式下显示） -->
             <div v-if="!session.isAgentMode && mentionedItems && mentionedItems.length > 0" class="mentioned_items">
@@ -601,6 +601,12 @@ onBeforeUnmount(() => {
     display: flex;
     flex-direction: column;
     gap: 0;
+}
+
+.correction-notice {
+    padding: 6px 10px;
+    font-size: var(--td-font-size-body-small);
+    line-height: 1.5;
 }
 
 // 内容包装器 - 与 Agent 模式的 answer 样式一致

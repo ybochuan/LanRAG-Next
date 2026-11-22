@@ -21,13 +21,14 @@ test('reference document links open in a new tab', () => {
   )
 })
 
-test('wiki drawer navigation and citation fallbacks open in a new tab', () => {
+test('desktop citations stay in the router while web citations fall back to a new tab', () => {
   assert.match(
     agentStream,
     /:href="wikiGraphHref"[\s\S]*?target="_blank"[\s\S]*?rel="noopener noreferrer"/,
   )
+  assert.match(agentStream, /void router\.push\(path\)/)
+  assert.match(agentStream, /await router\.push\(route\)/)
   assert.match(agentStream, /window\.open\(href, '_blank', 'noopener,noreferrer'\)/)
-  assert.doesNotMatch(agentStream, /router\.push\(/)
 })
 
 test('agent citations recover drawer references from retrieval tool events', () => {

@@ -14,9 +14,9 @@
     <t-alert v-if="message" :theme="messageTheme" role="status">{{ message }}</t-alert>
     <t-loading :loading="busy && !view">
       <t-empty v-if="view && !view.items.length" description="暂无附件" />
-      <t-card v-for="item in view?.items || []" :key="item.relation_id || item.id" size="small" class="attachment-row">
-        <div class="attachment-header">
-          <t-link v-if="!['pending','removed','shared'].includes(item.state)" theme="primary" :href="router.resolve(knowledgeRoute(item.id)).href" @click.exact.prevent="router.push(knowledgeRoute(item.id))">{{ item.title || item.file_name }}</t-link>
+      <div v-for="item in view?.items || []" :key="item.relation_id || item.id" class="attachment-item" role="listitem">
+        <div class="attachment-item-header">
+          <t-button v-if="!['pending','removed','shared'].includes(item.state)" variant="text" size="small" class="attachment-title-link" @click="router.push(knowledgeRoute(item.id))">{{ item.title || item.file_name }}</t-button>
           <span v-else>{{ item.title || item.file_name }}</span>
           <t-space size="small">
             <t-tag v-if="item.relation_type === 'template_for'" variant="light" size="small">共享模板</t-tag>
@@ -44,51 +44,73 @@
           <t-button v-if="canWrite && item.state === 'current' && (item.managed || item.relation_id)" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'detach' }">解除关联</t-button>
           <t-button v-if="canWrite && ['current','detached','historical'].includes(item.state)" theme="danger" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'delete' }">从知识库删除</t-button>
         </t-space>
-      </t-card>
+      </div>
     </t-loading>
 
-    <t-dialog v-model:visible="showPreview" header="提取附件" :confirm-btn="{ content: selected.some(id => importResults[id]?.error) ? '重试选中附件' : '导入选中附件', disabled: !selected.length, loading: busy }" @confirm="importSelected">
-      <t-alert v-if="previewIssues.length" theme="warning" role="status" message="部分附件未提取，原有关联保留。">
-        <ul>
-          <li v-for="(issue, index) in previewIssues" :key="index">{{ issue.file_name }} · {{ extractionLabels[issue.reason] || issue.reason }}</li>
-        </ul>
-      </t-alert>
-      <t-empty v-if="!preview.length && !previewIssues.length" description="当前主件没有可提取的附件" />
-      <t-checkbox-group v-if="preview.length" v-model="selected">
-        <div v-for="item in preview" :key="item.fingerprint" class="attachment-option">
-          <t-checkbox :value="item.fingerprint" :disabled="busy || item.state === 'removed' || !!importResults[item.fingerprint]?.document_id">
-            {{ item.display_name || item.file_name }}
-          </t-checkbox>
-          <span class="attachment-meta" role="status">{{ item.file_name }} · {{ importLabel(item) }}</span>
-        </div>
-      </t-checkbox-group>
+    <t-dialog v-model:visible="showPreview" header="提取附件" width="560px" attach="body" :confirm-btn="{ content: selected.some(id => importResults[id]?.error) ? '重试选中附件' : '导入选中附件', disabled: !selected.length, loading: busy }" @confirm="importSelected">
+      <t-form label-align="top">
+        <t-form-item label="选择附件">
+          <t-alert v-if="previewIssues.length" theme="warning" role="status" message="部分附件未提取，原有关联保留。">
+            <ul>
+              <li v-for="(issue, index) in previewIssues" :key="index">{{ issue.file_name }} · {{ extractionLabels[issue.reason] || issue.reason }}</li>
+            </ul>
+          </t-alert>
+          <t-empty v-if="!preview.length && !previewIssues.length" description="当前主件没有可提取的附件" />
+          <t-checkbox-group v-if="preview.length" v-model="selected">
+            <div v-for="item in preview" :key="item.fingerprint" class="attachment-option">
+              <t-checkbox :value="item.fingerprint" :disabled="busy || item.state === 'removed' || !!importResults[item.fingerprint]?.document_id">
+                {{ item.display_name || item.file_name }}
+              </t-checkbox>
+              <span class="attachment-meta" role="status">{{ item.file_name }} · {{ importLabel(item) }}</span>
+            </div>
+          </t-checkbox-group>
+        </t-form-item>
+      </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showUpload" header="上传专属附件"
+    <t-dialog v-model:visible="showUpload" header="上传专属附件" width="480px" attach="body"
       :confirm-btn="{ content: '上传', disabled: !uploadFile, loading: busy }" @confirm="upload">
-      <t-upload :auto-upload="false" :multiple="false" accept=".docx,.xlsx,.pptx,.pdf" @change="selectUpload" />
-      <p class="attachment-meta">每份文件须小于 20 MiB，上传后归入知识库的「附件」目录。</p>
+      <t-form label-align="top">
+        <t-form-item label="选择文件">
+          <t-upload :auto-upload="false" :multiple="false" accept=".docx,.xlsx,.pptx,.pdf" @change="selectUpload" />
+        </t-form-item>
+        <p class="attachment-meta">每份文件须小于 20 MiB，上传后归入知识库的「附件」目录。</p>
+      </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showPicker" header="关联已有文件"
+    <t-dialog v-model:visible="showPicker" header="关联已有文件" width="560px" attach="body"
       :confirm-btn="{ content: '关联', disabled: !picked, loading: busy }" @confirm="linkPicked">
-      <t-input v-model="pickerQuery" clearable placeholder="按标题或原文件名搜索" @enter="searchFiles" />
-      <t-button variant="outline" size="small" :loading="searching" @click="searchFiles">搜索</t-button>
-      <t-select v-model="picked" :options="pickerOptions" filterable clearable placeholder="选择同库模板或正式文档" />
-      <t-select v-model="relationType" :options="relationTypes" />
-      <t-checkbox v-if="relationType === 'template_for'" v-model="movePicked">同时移入「附件」目录</t-checkbox>
+      <t-form label-align="top">
+        <t-form-item label="搜索文件">
+          <t-space>
+            <t-input v-model="pickerQuery" clearable placeholder="按标题或原文件名搜索" @enter="searchFiles" />
+            <t-button variant="outline" :loading="searching" @click="searchFiles">搜索</t-button>
+          </t-space>
+        </t-form-item>
+        <t-form-item label="选择文件">
+          <t-select v-model="picked" :options="pickerOptions" filterable clearable placeholder="选择同库模板或正式文档" />
+        </t-form-item>
+        <t-form-item label="关联方式">
+          <t-select v-model="relationType" :options="relationTypes" />
+        </t-form-item>
+        <t-checkbox v-if="relationType === 'template_for'" v-model="movePicked">同时移入「附件」目录</t-checkbox>
+      </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showArchive" header="归档已有附件"
+    <t-dialog v-model:visible="showArchive" header="归档已有附件" width="480px" attach="body"
       :confirm-btn="{ content: '移入附件目录', disabled: !archiveIDs.length, loading: busy }" @confirm="archive">
-      <t-checkbox-group v-model="archiveIDs">
-        <div v-for="item in archiveCandidates" :key="item.id" class="attachment-option">
-          <t-checkbox :value="item.id">{{ item.title || item.file_name }}</t-checkbox>
-        </div>
-      </t-checkbox-group>
+      <t-form label-align="top">
+        <t-form-item label="选择附件">
+          <t-checkbox-group v-model="archiveIDs">
+            <div v-for="item in archiveCandidates" :key="item.id" class="attachment-option">
+              <t-checkbox :value="item.id">{{ item.title || item.file_name }}</t-checkbox>
+            </div>
+          </t-checkbox-group>
+        </t-form-item>
+      </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showEdit" header="确认附件映射"
+    <t-dialog v-model:visible="showEdit" header="确认附件映射" attach="body"
       :confirm-btn="{ content: '保存', disabled: referenceID === undefined, loading: busy }" @confirm="save">
       <t-form label-align="top">
 		<t-alert v-if="editing?.relation_type === 'template_for'" theme="info" message="正文引用仅用于当前主件。修改文件显示名称后，其他引用也会使用新名称。" />
@@ -101,7 +123,7 @@
       </t-form>
     </t-dialog>
 
-    <t-dialog :visible="!!pendingAction" :header="pendingAction?.action === 'delete' ? '从知识库删除文件' : '解除附件关联'"
+    <t-dialog :visible="!!pendingAction" :header="pendingAction?.action === 'delete' ? '从知识库删除文件' : '解除附件关联'" attach="body"
       :confirm-btn="{ content: pendingAction?.action === 'delete' ? '删除文件' : '解除关联', theme: 'danger', loading: busy }"
       @close="pendingAction = null" @cancel="pendingAction = null" @confirm="executeAction">
       <p>{{ pendingAction?.item.title }}</p>
@@ -121,7 +143,7 @@ import { downloadRelatedAttachment } from '@/api/relatedAttachments'
 import { attachmentWorkbench, updateAttachment, uploadWorkbenchAttachment, type AttachmentItem, type AttachmentPreview, type AttachmentImportOutcome, type AttachmentExtractionIssue, type AttachmentWorkbench } from '@/api/attachmentWorkbench'
 import { httpStatus } from '../business/model'
 
-const props = defineProps<{ kb: string; documentId: string; canWrite: boolean }>()
+const props = defineProps<{ kb: string; documentId: string; canWrite: boolean; parentState?: string }>()
 const emit = defineEmits<{ (event: 'locked', value: boolean): void; (event: 'changed'): void }>()
 const router = useRouter()
 const view = ref<AttachmentWorkbench>()
@@ -226,6 +248,10 @@ function scheduleRefresh() {
 }
 
 function fail(err: unknown) {
+  if (props.parentState === 'superseded') {
+    error.value = '主件已被替代，附件不可用。'
+    return
+  }
   const status = httpStatus(err)
   error.value = status === 409 ? '文件、名称或关联已变化，请刷新后重试。删除共享模板前请解除有效引用。'
     : status === 400 ? '请核对选中的附件、文件格式和大小后重试。' : '附件操作未完成，请重试。'
@@ -433,7 +459,10 @@ function download(item: AttachmentItem) {
 .attachment-workbench { display: grid; gap: 12px; min-width: 0; }
 .attachment-header { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
 .attachment-header h3 { margin: 0; font-size: var(--td-font-size-title-medium); }
-.attachment-row { margin-block: 8px; overflow-wrap: anywhere; }
+.attachment-item { min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--td-component-stroke); overflow-wrap: anywhere; }
+.attachment-item:last-child { border-bottom: 0; }
+.attachment-item-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.attachment-title-link { padding: 0; height: auto; min-height: 0; font-size: var(--td-font-size-body-medium); font-weight: 500; }
 .attachment-option { display: grid; gap: 4px; margin-block: 8px; }
 .attachment-meta, .attachment-excerpt { font-size: var(--td-font-size-body-small); color: var(--td-text-color-secondary); }
 .attachment-excerpt { margin-block: 8px; padding-inline-start: 8px; border-inline-start: 2px solid var(--td-component-stroke); }

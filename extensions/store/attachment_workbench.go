@@ -263,6 +263,35 @@ func (db *DB) PendingAttachmentTitles(ctx context.Context, tenant uint64) ([]Att
 	return result, err
 }
 
+// AttachmentTitleStatuses returns the latest title projection state for each
+// requested attachment in one knowledge base. Missing rows mean no update was
+// ever requested for that attachment.
+func (db *DB) AttachmentTitleStatuses(ctx context.Context, tenant uint64, kb string, ids []string) (map[string]string, error) {
+	result := map[string]string{}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	keys, _ := json.Marshal(ids)
+	err := db.View(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT document_id,status FROM ext_attachment_title_updates
+			WHERE tenant_id=? AND knowledge_base_id=? AND document_id IN (SELECT value FROM json_each(?))
+			ORDER BY rowid`, fmt.Sprint(tenant), kb, string(keys))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var doc, status string
+			if err := rows.Scan(&doc, &status); err != nil {
+				return err
+			}
+			result[doc] = status
+		}
+		return rows.Err()
+	})
+	return result, err
+}
+
 func (db *DB) AttachmentTitleStatus(ctx context.Context, tenant uint64, kb, doc string) (string, error) {
 	var result string
 	err := db.View(ctx, func(tx *sql.Tx) error {

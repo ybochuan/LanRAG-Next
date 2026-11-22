@@ -21,6 +21,7 @@ import { initTheme } from "@/composables/useTheme";
 import { initFont } from "@/composables/useFont";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { installAutofillGuard } from "@/utils/disable-autofill";
+import { installDesktopInternalLinkGuard } from "@/utils/desktopInternalLinks";
 import { useAuthStore } from "@/stores/auth";
 
 // 必须在 Vue 组件挂载之前执行，避免 tdesign-icons 运行时请求 tdesign.gtimg.com
@@ -54,6 +55,7 @@ async function bootstrap() {
 
   app.use(router);
   app.use(i18n);
+  installDesktopInternalLinkGuard(router);
 
   // 等首屏路由（含导航守卫、Lite 自动登录）完成后再挂载，避免先闪默认页再跳转
   await router.isReady();

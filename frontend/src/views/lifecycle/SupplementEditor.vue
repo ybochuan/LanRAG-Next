@@ -1,35 +1,58 @@
 <template>
  <section class="supplements" aria-labelledby="supplement-title" data-testid="supplement-editor">
-  <h3 id="supplement-title">{{ $t('workbench.supplement.title') }}</h3>
-  <p>{{ $t('workbench.supplement.desc') }}</p>
+  <header class="supplement-heading">
+   <h3 id="supplement-title">{{ $t('workbench.supplement.title') }}</h3>
+   <p>{{ $t('workbench.supplement.desc') }}</p>
+  </header>
   <div v-if="loading" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.supplement.checking') }}</span></div>
-  <t-alert v-if="error" theme="error" class="notice">{{ error }}</t-alert>
+  <t-alert v-if="error" theme="error">{{ error }}</t-alert>
   <template v-if="value">
    <p class="subtle">{{ $t('workbench.supplement.version', { n: value.revision }) }} · {{ value.assessment.configured ? $t('workbench.supplement.declared') : $t('workbench.supplement.undeclared') }}</p>
-   <t-alert v-if="dependencyReason(value.assessment.reason)" theme="info" class="notice" role="status">{{ dependencyReason(value.assessment.reason) }}</t-alert>
-   <ul v-if="value.assessment.parents.length" class="evidence">
-    <li v-for="parent in value.assessment.parents" :key="`${parent.knowledge_base_id}:${parent.document_id}:${parent.version_id}`"><strong>{{ title(parent.knowledge_base_id, parent.document_id) }}</strong><span>{{ stateLabels[parent.state] || '缺少状态' }}<template v-if="parent.effective_until"> · 失效 {{ date(parent.effective_until) }}</template><template v-if="parent.review_due"> · 复核 {{ date(parent.review_due) }}</template></span></li>
-   </ul>
+   <t-alert v-if="dependencyReason(value.assessment.reason)" theme="info" role="status">{{ dependencyReason(value.assessment.reason) }}</t-alert>
+   <div v-if="value.assessment.parents.length" class="evidence">
+    <div v-for="parent in value.assessment.parents" :key="`${parent.knowledge_base_id}:${parent.document_id}:${parent.version_id}`" class="evidence-row">
+     <strong>{{ title(parent.knowledge_base_id, parent.document_id) }}</strong>
+     <span>{{ stateLabels[parent.state] || '缺少状态' }}<template v-if="parent.effective_until"> · 失效 {{ date(parent.effective_until) }}</template><template v-if="parent.review_due"> · 复核 {{ date(parent.review_due) }}</template></span>
+    </div>
+   </div>
    <p v-if="value.assessment.review_due" class="subtle">{{ $t('workbench.supplement.reviewDue', { date: date(value.assessment.review_due) }) }}</p>
-   <t-alert v-if="mixedParents" theme="info" class="notice" role="status">{{ $t('workbench.supplement.mixed') }}</t-alert>
-   <div v-if="canWrite" class="picker">
-    <label class="search-label">{{ $t('workbench.supplement.parentKb') }}<t-select v-model="parentKB" :options="parentKBOptions" :disabled="locked" class="kb-select" @change="changeParentKB" /></label>
-    <label class="search-label">{{ $t('workbench.supplement.search') }}<t-input v-model="query" :placeholder="$t('workbench.supplement.searchPlaceholder')" :disabled="locked" clearable /></label>
-    <t-alert v-if="candidateError" theme="error" class="notice">{{ candidateError }}</t-alert>
-    <p v-if="candidateBusy" role="status">{{ $t('workbench.supplement.loadingDocs') }}</p>
-    <ul v-else class="choices">
-     <li v-for="candidate in filtered" :key="candidate.document_id"><label><t-checkbox :checked="selected.includes(selectionKey(parentKB,candidate.document_id))" :disabled="locked || selected.length>=8&&!selected.includes(selectionKey(parentKB,candidate.document_id))" @change="toggleCandidate(selectionKey(parentKB,candidate.document_id))"><span>{{ candidate.title || candidate.document_id }}<small>{{ candidate.document_id }}</small></span></t-checkbox></label></li>
-    </ul>
-    <p v-if="!candidateBusy&&!filtered.length" class="subtle">{{ $t('workbench.supplement.noDocs') }}</p>
+   <t-alert v-if="mixedParents" theme="info" role="status">{{ $t('workbench.supplement.mixed') }}</t-alert>
+   <t-form v-if="canWrite" class="supplement-form" label-align="top">
+    <div class="supplement-picker">
+     <t-form-item :label="$t('workbench.supplement.parentKb')">
+      <t-select v-model="parentKB" :options="parentKBOptions" :disabled="locked" class="kb-select" @change="changeParentKB" />
+     </t-form-item>
+     <t-form-item :label="$t('workbench.supplement.search')">
+      <t-input v-model="query" :placeholder="$t('workbench.supplement.searchPlaceholder')" :disabled="locked" clearable />
+     </t-form-item>
+    </div>
+    <t-alert v-if="candidateError" theme="error">{{ candidateError }}</t-alert>
+    <p v-if="candidateBusy" role="status" class="subtle">{{ $t('workbench.supplement.loadingDocs') }}</p>
+    <div v-else-if="filtered.length" class="choices" role="group" :aria-label="$t('workbench.supplement.search')">
+     <t-checkbox-group v-model="selected" class="choice-group">
+      <label v-for="candidate in filtered" :key="candidate.document_id" class="choice-row">
+       <t-checkbox :value="selectionKey(parentKB, candidate.document_id)" :disabled="locked || (selected.length >= 8 && !selected.includes(selectionKey(parentKB, candidate.document_id)))">
+        <span class="choice-title">{{ candidate.title || candidate.document_id }}</span>
+        <small>{{ candidate.document_id }}</small>
+       </t-checkbox>
+      </label>
+     </t-checkbox-group>
+    </div>
+    <p v-if="!candidateBusy && !filtered.length" class="subtle">{{ $t('workbench.supplement.noDocs') }}</p>
     <p v-if="!candidateBusy" class="subtle">{{ $t('workbench.supplement.totalDocs', { n: filtered.length }) }}</p>
     <p class="subtle">{{ $t('workbench.supplement.selected', { n: selected.length }) }}</p>
-    <ul class="selected"><li v-for="item in selectedRefs" :key="`${item.kb}:${item.id}`"><span>{{ title(item.kb,item.id) }}</span><t-button variant="text" size="small" :disabled="locked" :aria-label="$t('workbench.supplement.removeParent', { title: title(item.kb,item.id) })" @click="removeSelected(item.kb,item.id)">{{ $t('workbench.supplement.remove') }}</t-button></li></ul>
-    <div class="actions"><t-button theme="primary" :loading="saving" :disabled="locked || conflict" @click="save">{{ saving ? $t('workbench.supplement.saving') : $t('workbench.supplement.save') }}</t-button><t-button variant="outline" :disabled="locked" @click="reload">{{ $t('workbench.supplement.reload') }}</t-button></div>
-   </div>
+    <div v-if="selectedRefs.length" class="selected-tags">
+     <t-tag v-for="item in selectedRefs" :key="`${item.kb}:${item.id}`" variant="light" closable :disabled="locked" @close="removeSelected(item.kb, item.id)">{{ title(item.kb, item.id) }}</t-tag>
+    </div>
+    <div class="actions">
+     <t-button theme="primary" :loading="saving" :disabled="locked || conflict" @click="save">{{ saving ? $t('workbench.supplement.saving') : $t('workbench.supplement.save') }}</t-button>
+     <t-button variant="outline" :disabled="locked" @click="reload">{{ $t('workbench.supplement.reload') }}</t-button>
+    </div>
+   </t-form>
    <p v-else class="subtle">{{ $t('workbench.rules.readonly') }}</p>
   </template>
-  <t-button v-if="!value&&!loading" variant="outline" :disabled="locked" @click="reload">{{ $t('workbench.supplement.reload') }}</t-button>
-  <t-alert v-if="success" theme="success" class="notice" role="status">{{ success }}</t-alert>
+  <t-button v-if="!value && !loading" variant="outline" :disabled="locked" @click="reload">{{ $t('workbench.supplement.reload') }}</t-button>
+  <t-alert v-if="success" theme="success" role="status">{{ success }}</t-alert>
  </section>
 </template>
 
@@ -71,8 +94,6 @@ function setSelected(view:api.SupplementView){
  selected.value=view.parents.map((id,index)=>selectionKey(kbs[index]||props.kb,id))
 }
 function removeSelected(kb:string,id:string){selected.value=selected.value.filter(value=>value!==selectionKey(kb,id))}
-// TDesign checkbox is boolean; the selection stays an id array (max 8).
-function toggleCandidate(key:string){const at=selected.value.indexOf(key);if(at>=0)selected.value.splice(at,1);else if(selected.value.length<8)selected.value.push(key)}
 async function loadCandidates(){
  const token=candidateFence.begin(),kb=parentKB.value
  candidateBusy.value=true;candidateError.value=''
@@ -121,20 +142,23 @@ onBeforeUnmount(()=>{fence.invalidate();candidateFence.invalidate();emit('busy',
 </script>
 
 <style scoped>
-.supplements{border-top:1px solid var(--td-component-stroke);margin-top:28px;padding-top:12px;font-size:var(--td-font-size-body-medium)}
-h3{font-size:var(--td-font-size-title-small);margin:20px 0 8px}p{color:var(--td-text-color-secondary);line-height:1.7}.subtle,small{font-size:var(--td-font-size-body-small);color:var(--td-text-color-placeholder)}
-ul{padding:0;list-style:none}.evidence li{padding:9px 0;border-bottom:1px solid var(--td-component-stroke)}.evidence span,small{display:block;margin-top:4px;overflow-wrap:anywhere}
-.search-label{display:flex;flex-direction:column;gap:8px;margin:18px 0}.search-label input{font:inherit;padding:8px;border:1px solid var(--td-component-stroke);border-radius:var(--td-radius-medium);background:var(--td-bg-color-container);color:inherit}
-.choices{max-height:240px;overflow:auto;border:1px solid var(--td-component-stroke);border-radius:var(--td-radius-medium)}
-/* Rows own the padding; the TDesign checkbox must keep its own inline layout,
-   so no `label` rule may target it directly. */
-.choices li{padding:8px 12px;border-bottom:1px solid var(--td-component-stroke)}
-.choices li:last-child{border-bottom:0}
-.choices .t-checkbox{display:flex;align-items:flex-start;gap:8px;width:100%}
-.choices .t-checkbox__label{overflow-wrap:anywhere;line-height:1.5}
-.choices small{display:block;margin-top:2px}
-button{font:inherit;cursor:pointer;background:var(--td-bg-color-container);color:inherit;border:1px solid var(--td-component-stroke);border-radius:var(--td-radius-medium);padding:7px 10px}button:not(.t-button):disabled{opacity:.5;cursor:default}
-/* TDesign owns focus on its own components. */
-button:not(.t-button):focus-visible{outline:2px solid var(--td-brand-color);outline-offset:2px}
-.pages,.actions,.selected li{display:flex;gap:12px;align-items:center;margin:16px 0}.pages span{flex:1;text-align:center}.selected li{justify-content:space-between;overflow-wrap:anywhere}.primary{background:var(--td-brand-color);color:var(--td-text-color-anti);border-color:var(--td-brand-color)}.notice{padding:10px;border-radius:var(--td-radius-medium);background:var(--td-warning-color-1);color:var(--td-warning-color)}.notice.error{background:var(--td-error-color-1);color:var(--td-error-color)}.notice.success{background:var(--td-success-color-1);color:var(--td-brand-color)}
+.supplements { border-top: 1px solid var(--td-component-stroke); margin-top: 24px; padding-top: 12px; font-size: var(--td-font-size-body-medium); }
+.supplement-heading h3 { margin: 0 0 4px; font-size: var(--td-font-size-title-medium); }
+.supplement-heading p { margin: 0 0 12px; color: var(--td-text-color-secondary); line-height: 1.7; }
+.subtle, small { font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); }
+.evidence { border-top: 1px solid var(--td-component-stroke); }
+.evidence-row { padding: 8px 0; border-bottom: 1px solid var(--td-component-stroke); overflow-wrap: anywhere; }
+.evidence-row span { display: block; margin-top: 2px; font-size: var(--td-font-size-body-small); color: var(--td-text-color-secondary); }
+.supplement-picker { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr); gap: 12px; }
+.supplement-form :deep(.t-form__item) { margin-bottom: 12px; }
+.choices { max-height: 220px; overflow: auto; border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); background: var(--td-bg-color-container); }
+.choice-group { display: block; }
+.choice-row { display: block; padding: 6px 12px; border-bottom: 1px solid var(--td-component-stroke); }
+.choice-row:last-child { border-bottom: 0; }
+.choice-row:hover { background: var(--td-bg-color-secondarycontainer); }
+.choice-title { overflow-wrap: anywhere; }
+.choice-row small { display: block; margin-top: 1px; }
+.selected-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+@media (max-width: 560px) { .supplement-picker { grid-template-columns: minmax(0, 1fr); } }
 </style>
