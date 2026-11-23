@@ -10,14 +10,14 @@
         :options="options"
         :filterable="!searchable"
         :loading="loading"
-        :placeholder="loading ? $t('workbench.picker.loading') : (includeInactive?'全部文档':$t('workbench.picker.selectDocument'))"
+        :placeholder="loading ? $t('workbench.picker.loading') : (includeInactive?$t('workbench.businessUi.documentPicker.allDocuments'):$t('workbench.picker.selectDocument'))"
         @change="chooseValue"
       />
     </label>
-    <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
-    <p v-else-if="!loading && !items.length" class="subtle">{{ includeInactive?'没有符合条件的文档。':$t('workbench.picker.noDocuments') }}</p>
+    <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="load">{{ $t('workbench.common.retry') }}</t-button></t-alert>
+    <p v-else-if="!loading && !items.length" class="subtle">{{ includeInactive?$t('workbench.businessUi.documentPicker.noMatching'):$t('workbench.picker.noDocuments') }}</p>
     <div v-if="serverMode && loading && keyword.trim()" class="wb-loading" role="status"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.picker.searching') }}</span></div>
-    <p v-else-if="!loading" class="subtle"><template v-if="includeInactive">{{ serverMode ? '按标题搜索全部文档' : '可选文档 '+items.length+' 份' }}</template><template v-else><template v-if="serverMode">{{ $t('workbench.picker.serverHint', { total, shown: items.length }) }}</template><template v-else>{{ $t('workbench.picker.totalAll', { n: items.length }) }}</template></template></p>
+    <p v-else-if="!loading" class="subtle"><template v-if="includeInactive">{{ serverMode ? $t('workbench.businessUi.documentPicker.searchAllByTitle') : $t('workbench.businessUi.documentPicker.availableCount',{n:items.length}) }}</template><template v-else><template v-if="serverMode">{{ $t('workbench.picker.serverHint', { total, shown: items.length }) }}</template><template v-else>{{ $t('workbench.picker.totalAll', { n: items.length }) }}</template></template></p>
   </div>
 </template>
 
@@ -97,7 +97,7 @@ async function load() {
   } catch {
     if (fence.current(token)) {
       items.value = []
-      error.value = '无法载入生效文档。'
+      error.value = t('workbench.businessUi.documentPicker.loadFailed')
     }
   } finally {
     if (fence.current(token)) loading.value = false
@@ -122,7 +122,7 @@ async function searchServer() {
     total.value = data.total
     truncated.value = data.total > data.documents.length
   } catch {
-    if (fence.current(token)) error.value = props.includeInactive ? '无法搜索文档。' : '无法搜索生效文档。'
+    if (fence.current(token)) error.value = t(props.includeInactive ? 'workbench.businessUi.documentPicker.searchFailed' : 'workbench.businessUi.documentPicker.searchActiveFailed')
   } finally {
     if (fence.current(token)) loading.value = false
   }
@@ -146,7 +146,7 @@ const options = computed(() => {
   if (props.modelValue && !rows.some(row => row.value === props.modelValue)) {
     rows.unshift({ label: displayTitle(props.selectedTitle || selectedName.value, props.modelValue), value: props.modelValue })
   }
-  return [{ label: props.includeInactive ? '全部文档' : t('workbench.picker.selectDocument'), value: '' }, ...rows]
+  return [{ label: props.includeInactive ? t('workbench.businessUi.documentPicker.allDocuments') : t('workbench.picker.selectDocument'), value: '' }, ...rows]
 })
 
 function chooseValue(id: string) {

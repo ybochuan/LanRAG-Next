@@ -8,11 +8,11 @@
   <t-alert v-if="error" theme="error">{{ error }}</t-alert>
   <template v-if="value">
    <p class="subtle">{{ $t('workbench.supplement.version', { n: value.revision }) }} · {{ value.assessment.configured ? $t('workbench.supplement.declared') : $t('workbench.supplement.undeclared') }}</p>
-   <t-alert v-if="dependencyReason(value.assessment.reason)" theme="info" role="status">{{ dependencyReason(value.assessment.reason) }}</t-alert>
+   <t-alert v-if="dependencyReason(value.assessment.reason,t)" theme="info" role="status">{{ dependencyReason(value.assessment.reason,t) }}</t-alert>
    <div v-if="value.assessment.parents.length" class="evidence">
     <div v-for="parent in value.assessment.parents" :key="`${parent.knowledge_base_id}:${parent.document_id}:${parent.version_id}`" class="evidence-row">
      <strong>{{ title(parent.knowledge_base_id, parent.document_id) }}</strong>
-     <span>{{ stateLabels[parent.state] || '缺少状态' }}<template v-if="parent.effective_until"> · 失效 {{ date(parent.effective_until) }}</template><template v-if="parent.review_due"> · 复核 {{ date(parent.review_due) }}</template></span>
+     <span>{{ stateLabel(parent.state,t) || $t('workbench.supplementExtra.missingStatus') }}<template v-if="parent.effective_until"> · {{ $t('workbench.supplementExtra.expiresAt', { date: date(parent.effective_until) }) }}</template><template v-if="parent.review_due"> · {{ $t('workbench.supplementExtra.reviewAt', { date: date(parent.review_due) }) }}</template></span>
     </div>
    </div>
    <p v-if="value.assessment.review_due" class="subtle">{{ $t('workbench.supplement.reviewDue', { date: date(value.assessment.review_due) }) }}</p>
@@ -58,11 +58,13 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as api from '@/api/lifecycle'
 import { documentTitle } from '@/api/business'
 import { httpStatus } from '../business/model'
-import { dependencyReason, errorMessage, requestFence, stateLabels, supplementCommand } from './model'
+import { dependencyReason, errorMessage, requestFence, stateLabel, supplementCommand } from './model'
 const props=defineProps<{kb:string;documentId:string;canWrite:boolean;parentBusy:boolean;knowledgeBases:{id:string;name:string}[]}>()
+const { t, locale }=useI18n()
 // TDesign select needs a data option list instead of inline <option> children.
 const parentKBOptions=computed(()=>props.knowledgeBases.map(item=>({label:item.name,value:item.id})))
 const emit=defineEmits<{saved:[];busy:[value:boolean]}>()
@@ -76,7 +78,7 @@ async function searchCandidates(){
  if(!kw){void loadCandidates();return}
  candidateBusy.value=true;candidateError.value=''
  try{const data=await api.overview(kb,1,'active',kw,50);if(!candidateFence.current(token))return;candidates.value=data.documents;total.value=data.total;for(const row of data.documents)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)}
- catch(e){if(candidateFence.current(token))candidateError.value=errorMessage(e)}
+ catch(e){if(candidateFence.current(token))candidateError.value=errorMessage(e,t)}
  finally{if(candidateFence.current(token))candidateBusy.value=false}
 }
 watch(query,()=>{if(!serverMode.value)return;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{void searchCandidates()},350)})
@@ -88,7 +90,7 @@ const selectedRefs=computed(()=>selected.value.map(raw=>{const at=raw.indexOf('\
 const mixedParents=computed(()=>new Set(selectedRefs.value.map(item=>item.kb)).size>1)
 const filtered=computed(()=>candidates.value.filter(v=>(parentKB.value!==props.kb||v.document_id!==props.documentId)&&(v.title||v.document_id).toLowerCase().includes(query.value.toLowerCase())))
 const title=(kb:string,id:string)=>titles.get(`${kb}:${id}`)||id
-const date=(raw:string)=>new Date(raw).toLocaleString()
+const date=(raw:string)=>new Date(raw).toLocaleString(locale.value)
 function setSelected(view:api.SupplementView){
  const kbs=view.parent_knowledge_base_ids||[]
  selected.value=view.parents.map((id,index)=>selectionKey(kbs[index]||props.kb,id))
@@ -117,7 +119,7 @@ async function loadCandidates(){
    candidates.value=rows;total.value=first.total
   }
   for(const row of candidates.value)if(row.title)titles.set(`${kb}:${row.document_id}`,row.title)
-}catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
+}catch(e){if(candidateFence.current(token)){candidates.value=[];candidateError.value=errorMessage(e,t)}}finally{if(candidateFence.current(token))candidateBusy.value=false}
 }
 async function loadSelectedTitles(view:api.SupplementView){
  const kbs=view.parent_knowledge_base_ids||[]
@@ -130,12 +132,12 @@ async function loadSelectedTitles(view:api.SupplementView){
 function changeParentKB(){query.value='';candidates.value=[];void loadCandidates()}
 async function reload(){
  const token=fence.begin();loading.value=true;error.value='';success.value='';conflict.value=false;value.value=undefined
- try{const result=await api.supplements(props.kb,props.documentId);if(fence.current(token)){value.value=result.supplements;setSelected(result.supplements);void loadSelectedTitles(result.supplements);const kbs=[...new Set((result.supplements.parent_knowledge_base_ids||[]).filter(Boolean))];if(!kbs.includes(parentKB.value))parentKB.value=kbs[0]||props.kb}}catch(e){if(fence.current(token))error.value=errorMessage(e)}finally{if(fence.current(token))loading.value=false}
+ try{const result=await api.supplements(props.kb,props.documentId);if(fence.current(token)){value.value=result.supplements;setSelected(result.supplements);void loadSelectedTitles(result.supplements);const kbs=[...new Set((result.supplements.parent_knowledge_base_ids||[]).filter(Boolean))];if(!kbs.includes(parentKB.value))parentKB.value=kbs[0]||props.kb}}catch(e){if(fence.current(token))error.value=errorMessage(e,t)}finally{if(fence.current(token))loading.value=false}
 }
 async function save(){
  if(!value.value||!props.canWrite||locked.value||conflict.value)return
  const token=fence.begin();saving.value=true;emit('busy',true);error.value='';success.value=''
- try{const refs=selectedRefs.value;const body=supplementCommand(value.value.revision,refs.map(item=>item.id),props.documentId,crypto.randomUUID(),refs.map(item=>item.kb));const result=await api.saveSupplements(props.kb,props.documentId,body);if(!fence.current(token))return;value.value=result.supplements;setSelected(result.supplements);success.value=result.evaluation_status==='pending'?'关系已保存，状态待后台重新核验。':'依赖已保存，状态已重新核验。';emit('saved')}catch(e){if(fence.current(token)){error.value=errorMessage(e);conflict.value=httpStatus(e)===409}}finally{if(fence.current(token)){saving.value=false;emit('busy',false)}}
+ try{const refs=selectedRefs.value;const body=supplementCommand(value.value.revision,refs.map(item=>item.id),props.documentId,crypto.randomUUID(),refs.map(item=>item.kb));const result=await api.saveSupplements(props.kb,props.documentId,body);if(!fence.current(token))return;value.value=result.supplements;setSelected(result.supplements);success.value=result.evaluation_status==='pending'?t('workbench.supplementExtra.relationSaved'):t('workbench.supplementExtra.dependencySaved');emit('saved')}catch(e){if(fence.current(token)){error.value=errorMessage(e,t);conflict.value=httpStatus(e)===409}}finally{if(fence.current(token)){saving.value=false;emit('busy',false)}}
 }
 watch(()=>[props.kb,props.documentId],()=>{fence.invalidate();candidateFence.invalidate();saving.value=false;emit('busy',false);titles.clear();parentKB.value=props.kb;page.value=1;query.value='';selected.value=[];candidates.value=[];void reload();void loadCandidates()},{immediate:true})
 onBeforeUnmount(()=>{fence.invalidate();candidateFence.invalidate();emit('busy',false)})

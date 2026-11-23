@@ -3,43 +3,43 @@
     <header v-if="!scope && !inboxOnly" class="page-heading">
       <div><h2>{{ heading }}</h2><p v-if="!scope && !document && !inboxOnly">{{ subtitle }}</p></div>
       <div class="heading-actions">
-        <t-button variant="outline" :loading="loading" :disabled="writeLocked" @click="refresh">刷新列表</t-button>
-        <t-button v-if="canCreate" :theme="createOpen?'default':'primary'" :variant="createOpen?'outline':'base'" :aria-expanded="createOpen" :aria-controls="createPanelID" :disabled="writeLocked" @click="toggleCreate">{{ createOpen?'收起表单':createLabel }}</t-button>
+        <t-button variant="outline" :loading="loading" :disabled="writeLocked" @click="refresh">{{ $t('workbench.businessView.refreshList') }}</t-button>
+        <t-button v-if="canCreate" :theme="createOpen?'default':'primary'" :variant="createOpen?'outline':'base'" :aria-expanded="createOpen" :aria-controls="createPanelID" :disabled="writeLocked" @click="toggleCreate">{{ createOpen?$t('workbench.businessView.collapseForm'):createLabel }}</t-button>
       </div>
     </header>
     <t-alert v-if="error" theme="error">{{ error }}</t-alert>
     <t-alert v-if="authorityError" theme="warning">{{ authorityError }}</t-alert>
     <t-alert v-if="success" theme="success">{{ success }}</t-alert>
-    <t-alert v-if="pending&&!running&&!confirmationOpen" theme="warning" :title="actionLabels[pending.intent.action] + ' · 结果待核对'" aria-label="待核对操作">
-      <p>已保留本次请求。重试会使用相同操作编号和内容。<template v-if="pending.intent.body.business.id">记录 {{ shortID(pending.intent.body.business.id) }}</template></p>
+    <t-alert v-if="pending&&!running&&!confirmationOpen" theme="warning" :title="actionLabel(pending.intent.action, t) + ' · ' + $t('workbench.businessView.pendingTitle')" :aria-label="$t('workbench.businessView.pendingAria')">
+      <p>{{ $t('workbench.businessView.pendingBody') }}<template v-if="pending.intent.body.business.id">{{ $t('workbench.businessView.recordShort', { id: shortID(pending.intent.body.business.id) }) }}</template></p>
       <div class="alert-actions">
-        <t-button theme="primary" :disabled="!canReview||loading" @click="perform">重试原请求</t-button>
-        <t-button variant="outline" @click="refresh">刷新核对</t-button>
-        <t-button variant="text" @click="pending=undefined">我已核对，结束重试</t-button>
+        <t-button theme="primary" :disabled="!canReview||loading" @click="perform">{{ $t('workbench.businessView.retryOriginal') }}</t-button>
+        <t-button variant="outline" @click="refresh">{{ $t('workbench.businessView.refreshCheck') }}</t-button>
+        <t-button variant="text" @click="pending=undefined">{{ $t('workbench.businessView.reviewFinish') }}</t-button>
       </div>
     </t-alert>
-    <template v-if="!inboxOnly"><p v-if="loadingKB" role="status" class="empty">正在载入知识库…</p><p v-else-if="!scope && !knowledgeBases.length" class="empty">还没有可访问的知识库。</p></template>
+    <template v-if="!inboxOnly"><p v-if="loadingKB" role="status" class="empty">{{ $t('workbench.businessView.loadingKb') }}</p><p v-else-if="!scope && !knowledgeBases.length" class="empty">{{ $t('workbench.businessView.noKb') }}</p></template>
     <template v-if="kb || inbox || showInboxTab">
       <section v-if="kind==='relation'" class="relation-query" :aria-labelledby="relationQueryID">
-        <h2 :id="relationQueryID" ref="queryHeading" tabindex="-1" class="sr-only">{{ document ? '阅读说明' : '关联查询' }}</h2>
-        <div v-if="querying" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在核对关联…</span></div>
+        <h2 :id="relationQueryID" ref="queryHeading" tabindex="-1" class="sr-only">{{ document ? $t('workbench.businessView.readingNote') : $t('workbench.businessView.relationQuery') }}</h2>
+        <div v-if="querying" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.businessView.checkingRelations') }}</span></div>
         <t-alert v-if="queryError" theme="error">{{ queryError }}</t-alert>
         <div v-if="queryResult" class="relation-query-results">
-          <p role="status">{{ document ? visibleQueryRows.length + ' 份说明或提示' : docName(queryDocument, queryScope||kb) + ' · ' + visibleQueryRows.length + ' 条当前有效关联' }}</p>
+          <p role="status">{{ document ? $t('workbench.businessView.notesCount', { n: visibleQueryRows.length }) : docName(queryDocument, queryScope||kb) + ' · ' + $t('workbench.businessView.relationCount', { n: visibleQueryRows.length }) }}</p>
           <div v-if="visibleQueryRows.length" class="relation-results">
             <div v-for="(row, index) in visibleQueryRows" :key="resultKey(row,index)" class="relation-result">
               <div class="relation-result-row">
                 <span>
                   <strong>{{ docName(row.document_id, row.knowledge_base_id) }}</strong>
-                  <small>{{ resultSentence(row) }}<template v-if="row.edge_type==='related_to'"> · 评分 {{ row.confidence.toFixed(2) }}</template><template v-if="row.knowledge_base_id!==kb"> · {{ knowledgeBases.find(item=>item.id===row.knowledge_base_id)?.name || '其他知识库' }}</template></small>
+                  <small>{{ resultSentence(row) }}<template v-if="row.edge_type==='related_to'"> · {{ $t('workbench.businessView.scoreLabel', { score: row.confidence.toFixed(2) }) }}</template><template v-if="row.knowledge_base_id!==kb"> · {{ knowledgeBases.find(item=>item.id===row.knowledge_base_id)?.name || $t('workbench.businessView.otherKb') }}</template></small>
                 </span>
                 <div class="relation-result-actions">
-                  <t-tag theme="success" variant="light" size="small">当前有效</t-tag>
+                  <t-tag theme="success" variant="light" size="small">{{ $t('workbench.businessView.currentlyEffective') }}</t-tag>
                   <t-button v-if="row.direction==='incoming' && readingRelation(row.edge_type)" variant="outline" size="small"
                     :aria-expanded="expandedRelation===resultKey(row,index)" :aria-controls="relationQueryID+'-preview-'+index"
-                    @click="expandedRelation=expandedRelation===resultKey(row,index)?'':resultKey(row,index)">{{ expandedRelation===resultKey(row,index) ? '收起' : row.edge_type==='reading_note' ? '展开提示' : '展开说明' }}</t-button>
-                  <t-button v-if="scope && !document" variant="text" size="small" @click="emit('open',row.document_id,docName(row.document_id,row.knowledge_base_id),row.knowledge_base_id)">打开文档</t-button>
-                  <t-button v-if="!document" variant="text" size="small" :aria-label="'查询 '+docName(row.document_id,row.knowledge_base_id)+' 的关联'" @click="inspectRelated(row.document_id,row.knowledge_base_id)">继续查询</t-button>
+                    @click="expandedRelation=expandedRelation===resultKey(row,index)?'':resultKey(row,index)">{{ expandedRelation===resultKey(row,index) ? $t('workbench.businessView.collapse') : row.edge_type==='reading_note' ? $t('workbench.businessView.expandNote') : $t('workbench.businessView.expandDescription') }}</t-button>
+                  <t-button v-if="scope && !document" variant="text" size="small" @click="emit('open',row.document_id,docName(row.document_id,row.knowledge_base_id),row.knowledge_base_id)">{{ $t('workbench.businessView.openDocument') }}</t-button>
+                  <t-button v-if="!document" variant="text" size="small" :aria-label="$t('workbench.businessView.queryAria', { name: docName(row.document_id,row.knowledge_base_id) })" @click="inspectRelated(row.document_id,row.knowledge_base_id)">{{ $t('workbench.businessView.continueQuery') }}</t-button>
                 </div>
               </div>
               <div v-if="row.direction==='incoming' && readingRelation(row.edge_type)" :id="relationQueryID+'-preview-'+index" v-show="expandedRelation===resultKey(row,index)">
@@ -47,27 +47,27 @@
               </div>
             </div>
           </div>
-          <t-empty v-else class="empty" :description="document ? '当前没有可展开的补充说明或内容提示。' : '当前没有满足条件的有效关联。'" />
+          <t-empty v-else class="empty" :description="document ? $t('workbench.businessView.noExpandable') : $t('workbench.businessView.noEffective')" />
         </div>
       </section>
-      <t-dialog v-if="kind==='relation' && !document" v-model:visible="queryOpen" header="关联查询" width="520px" :footer="false" :close-on-overlay-click="true" attach="body">
+      <t-dialog v-if="kind==='relation' && !document" v-model:visible="queryOpen" :header="$t('workbench.businessView.relationQuery')" width="520px" :footer="false" :close-on-overlay-click="true" attach="body">
         <div class="relation-query-dialog">
-          <DocumentPicker :key="kb" :model-value="queryDocument" :kb="kb" label="查询文档" :selected-title="docName(queryDocument, queryScope||kb)" searchable @update:model-value="selectQueryDocument" />
+          <DocumentPicker :key="kb" :model-value="queryDocument" :kb="kb" :label="$t('workbench.businessView.queryDocument')" :selected-title="docName(queryDocument, queryScope||kb)" searchable @update:model-value="selectQueryDocument" />
           <div class="relation-query-dialog-actions">
-            <t-button variant="outline" :disabled="writeLocked || navigatingToGraph" @click="openAssociationGraph">查看关联图</t-button>
-            <t-button theme="primary" :loading="querying" :disabled="!queryDocument" @click="submitQueryDialog">查询关联</t-button>
+            <t-button variant="outline" :disabled="writeLocked || navigatingToGraph" @click="openAssociationGraph">{{ $t('workbench.businessView.viewGraph') }}</t-button>
+            <t-button theme="primary" :loading="querying" :disabled="!queryDocument" @click="submitQueryDialog">{{ $t('workbench.businessView.queryRelations') }}</t-button>
           </div>
         </div>
       </t-dialog>
       <SettingDrawer :visible="canCreate && createOpen" :title="createLabel" icon="add" width="720px" :min-width="560" :max-width="960" storage-key="setting-drawer:width:business-create" hide-footer @update:visible="onCreateVisible">
        <div :id="createPanelID" ref="createPanel" class="create-workspace" tabindex="-1">
        <template v-if="canCreate && createMounted">
-        <label v-if="document && kind==='relation'" class="relation-end">当前文档在关系中的位置
+        <label v-if="document && kind==='relation'" class="relation-end">{{ $t('workbench.businessView.currentDocPosition') }}
           <t-select v-model="relationEnd" :options="relationEndOptions" :disabled="writeLocked" />
         </label>
-        <p v-if="correctionSourceLoading" role="status" class="subtle">正在核对勘误和源文档…</p>
+        <p v-if="correctionSourceLoading" role="status" class="subtle">{{ $t('workbench.businessView.checkingCorrection') }}</p>
         <t-alert v-if="correctionSourceError" role="alert" theme="error">{{ correctionSourceError }}
-          <t-button variant="text" size="small" @click="loadCorrectionSource">重新核对</t-button>
+          <t-button variant="text" size="small" @click="loadCorrectionSource">{{ $t('workbench.businessView.recheck') }}</t-button>
         </t-alert>
         <CreateForm v-if="!correctionEntry || correctionSource?.type==='manual'" :key="kb+kind+formVersion+relationEnd" :kb="kb" :kind="kind" :disabled="writeLocked" :knowledge-bases="knowledgeBases"
           :initial-guidance="initialGuidance" :initial-correction="correctionSource" :fixed-document="document && (kind==='relation'||kind==='revision') ? {...document,end:kind==='revision'?'source':relationEnd} : undefined"
@@ -77,43 +77,43 @@
        </div>
       </SettingDrawer>
       <div class="workspace-list-header">
-        <div v-if="showFeedbackTabs" ref="recordListHeading" tabindex="-1" class="sub-tabs feedback-list-tabs" role="tablist" aria-label="反馈视图" @keydown="moveTabFocus">
-          <t-button v-if="kb" :id="feedbackTabsId+'-feedback'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="feedbackTab==='feedback'" :tabindex="feedbackTab==='feedback'?0:-1" :class="{selected:feedbackTab==='feedback'}" :disabled="writeLocked" @click="feedbackTab='feedback'">反馈记录</t-button>
-          <t-button v-if="kb" :id="feedbackTabsId+'-guidance'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="feedbackTab==='guidance'" :tabindex="feedbackTab==='guidance'?0:-1" :class="{selected:feedbackTab==='guidance'}" :disabled="writeLocked" @click="feedbackTab='guidance'">指导清单</t-button>
-          <t-button v-if="showInboxTab" :id="feedbackTabsId+'-inbox'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="inbox" :tabindex="inbox?0:-1" :class="{selected:inbox}" :disabled="writeLocked" @click="feedbackTab='inbox'">未归属反馈</t-button>
+        <div v-if="showFeedbackTabs" ref="recordListHeading" tabindex="-1" class="sub-tabs feedback-list-tabs" role="tablist" :aria-label="$t('workbench.businessView.feedbackViewAria')" @keydown="moveTabFocus">
+          <t-button v-if="kb" :id="feedbackTabsId+'-feedback'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="feedbackTab==='feedback'" :tabindex="feedbackTab==='feedback'?0:-1" :class="{selected:feedbackTab==='feedback'}" :disabled="writeLocked" @click="feedbackTab='feedback'">{{ $t('workbench.businessView.feedbackRecords') }}</t-button>
+          <t-button v-if="kb" :id="feedbackTabsId+'-guidance'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="feedbackTab==='guidance'" :tabindex="feedbackTab==='guidance'?0:-1" :class="{selected:feedbackTab==='guidance'}" :disabled="writeLocked" @click="feedbackTab='guidance'">{{ $t('workbench.businessView.guidanceList') }}</t-button>
+          <t-button v-if="showInboxTab" :id="feedbackTabsId+'-inbox'" role="tab" variant="text" :aria-controls="feedbackTabsId+'-panel'" :aria-selected="inbox" :tabindex="inbox?0:-1" :class="{selected:inbox}" :disabled="writeLocked" @click="feedbackTab='inbox'">{{ $t('workbench.businessView.unassignedFeedback') }}</t-button>
         </div>
-        <h2 v-else ref="recordListHeading" tabindex="-1" class="workspace-toolbar-title">{{ inbox?'未归属反馈':kind==='relation'?'关联记录':kind==='feedback'?'反馈记录':kind==='guidance'?'指导清单':'修订提案' }}</h2>
-        <span class="workspace-toolbar-count">本页 {{ records.length }} 项</span>
+        <h2 v-else ref="recordListHeading" tabindex="-1" class="workspace-toolbar-title">{{ inbox?$t('workbench.businessView.unassignedFeedback'):kind==='relation'?$t('workbench.businessView.relationRecords'):kind==='feedback'?$t('workbench.businessView.feedbackRecords'):kind==='guidance'?$t('workbench.businessView.guidanceList'):$t('workbench.businessView.revisionProposals') }}</h2>
+        <span class="workspace-toolbar-count">{{ $t('workbench.businessView.itemsOnPage', { n: records.length }) }}</span>
         <div class="workspace-toolbar-actions">
-          <t-select v-if="kind==='feedback'" v-model="feedbackStatus" class="toolbar-select feedback-status-filter" :options="feedbackStatusOptions" :disabled="writeLocked" aria-label="审核状态" />
+          <t-select v-if="kind==='feedback'" v-model="feedbackStatus" class="toolbar-select feedback-status-filter" :options="feedbackStatusOptions" :disabled="writeLocked" :aria-label="$t('workbench.businessView.auditStatus')" />
           <div v-if="kind==='relation'" class="relation-filters">
-            <t-select v-model="relationFilters.edgeType" class="toolbar-select relation-type-filter" :options="relationTypeOptions" :disabled="writeLocked" aria-label="关系类型" @update:model-value="applyRelationFilters" />
-            <t-select v-model="relationFilters.status" class="toolbar-select relation-status-filter" :options="relationStatusOptions" :disabled="writeLocked" aria-label="登记状态" @update:model-value="applyRelationFilters" />
+            <t-select v-model="relationFilters.edgeType" class="toolbar-select relation-type-filter" :options="relationTypeOptions" :disabled="writeLocked" :aria-label="$t('workbench.businessView.relationType')" @update:model-value="applyRelationFilters" />
+            <t-select v-model="relationFilters.status" class="toolbar-select relation-status-filter" :options="relationStatusOptions" :disabled="writeLocked" :aria-label="$t('workbench.businessView.registrationStatus')" @update:model-value="applyRelationFilters" />
             <DocumentPicker v-if="!document" v-model="relationFilters.documentId" class="relation-document-filter" :kb="kb" label="" include-inactive :disabled="writeLocked" :selected-title="docName(relationFilters.documentId)" @update:model-value="applyRelationFilters" />
           </div>
-          <t-button v-if="kind==='relation' && !document" variant="outline" :disabled="writeLocked" @click="queryOpen=true">关联查询</t-button>
+          <t-button v-if="kind==='relation' && !document" variant="outline" :disabled="writeLocked" @click="queryOpen=true">{{ $t('workbench.businessView.relationQuery') }}</t-button>
           <div v-if="page>1 || records.length>=20" class="workspace-pager">
-            <t-button variant="text" size="small" :disabled="loading||writeLocked||page<=1" @click="movePage(-1)">上一页</t-button>
-            <span>第 {{ page }} 页</span>
-            <t-button variant="text" size="small" :disabled="loading||writeLocked||records.length<20" @click="movePage(1)">下一页</t-button>
+            <t-button variant="text" size="small" :disabled="loading||writeLocked||page<=1" @click="movePage(-1)">{{ $t('workbench.businessView.prevPage') }}</t-button>
+            <span>{{ $t('workbench.businessView.pageN', { page }) }}</span>
+            <t-button variant="text" size="small" :disabled="loading||writeLocked||records.length<20" @click="movePage(1)">{{ $t('workbench.businessView.nextPage') }}</t-button>
           </div>
-          <t-button v-if="scope || inboxOnly" variant="outline" :loading="loading" :disabled="writeLocked" @click="refresh">刷新列表</t-button>
-          <t-button v-if="(scope || inboxOnly) && canCreate" :theme="createOpen?'default':'primary'" :variant="createOpen?'outline':'base'" :aria-expanded="createOpen" :aria-controls="createPanelID" :disabled="writeLocked" @click="toggleCreate">{{ createOpen?'收起表单':createLabel }}</t-button>
+          <t-button v-if="scope || inboxOnly" variant="outline" :loading="loading" :disabled="writeLocked" @click="refresh">{{ $t('workbench.businessView.refreshList') }}</t-button>
+          <t-button v-if="(scope || inboxOnly) && canCreate" :theme="createOpen?'default':'primary'" :variant="createOpen?'outline':'base'" :aria-expanded="createOpen" :aria-controls="createPanelID" :disabled="writeLocked" @click="toggleCreate">{{ createOpen?$t('workbench.businessView.collapseForm'):createLabel }}</t-button>
         </div>
       </div>
       <div v-if="kb || inbox" class="workspace-grid">
         <section v-show="!openedFeedbackId" ref="recordList" class="records-panel workspace-list-panel" :class="{'is-feedback':kind==='feedback'}"
           :id="section==='feedback-governance' && !inboxOnly ? feedbackTabsId+'-panel' : undefined"
           :role="section==='feedback-governance' && !inboxOnly ? 'tabpanel' : undefined"
-          :aria-labelledby="section==='feedback-governance' && !inboxOnly ? feedbackTabsId+'-'+feedbackTab : undefined" aria-label="治理记录">
-          <div v-if="loading" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取记录…</span></div>
+          :aria-labelledby="section==='feedback-governance' && !inboxOnly ? feedbackTabsId+'-'+feedbackTab : undefined" :aria-label="$t('workbench.businessView.governanceRecords')">
+          <div v-if="loading" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.businessView.loadingRecords') }}</span></div>
           <div v-if="records.length" class="workspace-list-scroll">
-            <div class="workspace-list-table" role="table" :aria-label="inbox?'未归属反馈':kind==='relation'?'关联记录':kind==='feedback'?'反馈记录':kind==='guidance'?'指导清单':'修订提案'">
+            <div class="workspace-list-table" role="table" :aria-label="inbox?$t('workbench.businessView.unassignedFeedback'):kind==='relation'?$t('workbench.businessView.relationRecords'):kind==='feedback'?$t('workbench.businessView.feedbackRecords'):kind==='guidance'?$t('workbench.businessView.guidanceList'):$t('workbench.businessView.revisionProposals')">
               <div class="workspace-list-head" role="row">
-                <span role="columnheader">记录</span>
-                <span role="columnheader" class="workspace-head-status">状态</span>
-                <span v-if="kind!=='feedback'" role="columnheader" class="workspace-head-version">版本</span>
-                <span role="columnheader" class="workspace-head-time">{{ kind==='feedback' ? '提交时间' : '冷静期至' }}</span>
+                <span role="columnheader">{{ $t('workbench.businessView.colRecord') }}</span>
+                <span role="columnheader" class="workspace-head-status">{{ $t('workbench.businessView.colStatus') }}</span>
+                <span v-if="kind!=='feedback'" role="columnheader" class="workspace-head-version">{{ $t('workbench.businessView.colVersion') }}</span>
+                <span role="columnheader" class="workspace-head-time">{{ kind==='feedback' ? $t('workbench.businessView.colSubmittedAt') : $t('workbench.businessView.colCoolingUntil') }}</span>
               </div>
               <div class="workspace-list-body" role="rowgroup">
                 <div v-for="row in records" :key="row.id" class="workspace-list-row" :data-record-id="row.id" :class="{ 'is-selected':detail?.id===row.id }" role="row" :aria-selected="section==='feedback-governance' ? undefined : detail?.id===row.id" @click="!writeLocked && openRecord(row,$event)">
@@ -125,152 +125,152 @@
                     <span v-else-if="kind!=='feedback'" class="workspace-row-summary">{{ row.text||row.proposed_patch }}</span>
                     <small v-if="row.review_reason && kind!=='feedback'" class="review-reason">{{ reviewReason(row.review_reason) }}</small>
                     <span class="workspace-compact-meta">
-                      <span v-if="kind!=='feedback'">版本 {{ row.revision }}</span>
-                      <span v-if="row.ready_at">冷静期至 {{ date(row.ready_at) }}</span>
-                      <span v-if="kind==='feedback' && row.submitted_at">提交于 {{ date(row.submitted_at) }}</span>
+                      <span v-if="kind!=='feedback'">{{ $t('workbench.businessView.versionShort', { n: row.revision }) }}</span>
+                      <span v-if="row.ready_at">{{ $t('workbench.businessView.coolingUntil', { date: dateText(row.ready_at) }) }}</span>
+                      <span v-if="kind==='feedback' && row.submitted_at">{{ $t('workbench.businessView.submittedAt', { date: dateText(row.submitted_at) }) }}</span>
                       <span class="workspace-compact-status">{{ stateLabel(row) }}</span>
                     </span>
                   </div>
                   <div class="workspace-cell workspace-cell-status" role="cell"><t-tag variant="light" size="small" :theme="statusTagTheme(row.status)">{{ stateLabel(row) }}</t-tag></div>
-                  <div v-if="kind!=='feedback'" class="workspace-cell workspace-cell-version" role="cell">第 {{ row.revision }} 版</div>
-                  <div v-if="kind!=='feedback'" class="workspace-cell workspace-cell-time" role="cell">{{ row.ready_at ? date(row.ready_at) : '—' }}</div>
-                  <div v-else class="workspace-cell workspace-cell-time" role="cell">{{ row.submitted_at ? date(row.submitted_at) : '—' }}</div>
+                  <div v-if="kind!=='feedback'" class="workspace-cell workspace-cell-version" role="cell">{{ $t('workbench.businessView.versionN', { n: row.revision }) }}</div>
+                  <div v-if="kind!=='feedback'" class="workspace-cell workspace-cell-time" role="cell">{{ row.ready_at ? dateText(row.ready_at) : '—' }}</div>
+                  <div v-else class="workspace-cell workspace-cell-time" role="cell">{{ row.submitted_at ? dateText(row.submitted_at) : '—' }}</div>
                 </div>
               </div>
             </div>
           </div>
-          <div v-else-if="!loading" class="workspace-list-empty-state"><t-empty :description="kind==='feedback'&&feedbackStatus ? '此状态下没有反馈。可切到「全部状态」查看其他记录。' : '当前还没有记录。'" /></div>
+          <div v-else-if="!loading" class="workspace-list-empty-state"><t-empty :description="kind==='feedback'&&feedbackStatus ? $t('workbench.businessView.feedbackEmptyFiltered') : $t('workbench.businessView.recordsEmpty')" /></div>
         </section>
-        <SettingDrawer :visible="!!(openedFeedbackId || detailLoading || detail)" :title="detail ? recordTitle(detail) : kind==='guidance' ? '指导详情' : '记录详情'" icon="file" width="760px" :min-width="560" :max-width="1080" storage-key="setting-drawer:width:business-record" hide-footer @update:visible="onRecordVisible">
+        <SettingDrawer :visible="!!(openedFeedbackId || detailLoading || detail)" :title="detail ? recordTitle(detail) : kind==='guidance' ? $t('workbench.businessView.guidanceDetail') : $t('workbench.businessView.recordDetail')" icon="file" width="760px" :min-width="560" :max-width="1080" storage-key="setting-drawer:width:business-record" hide-footer @update:visible="onRecordVisible">
           <template #header-actions>
-            <t-button variant="outline" size="small" :disabled="writeLocked" @click="closeRecord">{{ openedFeedbackId ? '返回列表' : '关闭详情' }}</t-button>
+            <t-button variant="outline" size="small" :disabled="writeLocked" @click="closeRecord">{{ openedFeedbackId ? $t('workbench.businessView.backList') : $t('workbench.businessView.closeDetail') }}</t-button>
           </template>
           <div class="record-detail-body">
-          <p v-if="detailLoading" role="status">正在核对记录内容…</p>
+          <p v-if="detailLoading" role="status">{{ $t('workbench.businessView.loadingRecord') }}</p>
           <template v-else-if="detail">
-          <t-tag variant="light" :theme="statusTagTheme(detail.status)">{{ stateLabel(detail) }}</t-tag><dl><dt>记录编号</dt><dd><code>{{ detail.id }}</code></dd><dt>当前版本</dt><dd>{{ detail.revision }}</dd><template v-if="kind==='feedback' && detail.submitted_at"><dt>提交时间</dt><dd>{{ date(detail.submitted_at) }}</dd></template><template v-if="detail.topic && !inbox && !feedbackRestricted(detail)"><dt>主题</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>风险</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>冷静期至</dt><dd>{{ date(detail.ready_at) }}</dd></template><template v-if="(detail.document_id||detail.source_document_id) && !inbox && !feedbackRestricted(detail)"><dt>源文档</dt><dd>{{ docName(detail.document_id||detail.source_document_id, detail.knowledge_base_id || kb) }}</dd></template><template v-if="detail.target_document_id && !inbox && !feedbackRestricted(detail)"><dt>{{ kind==='revision'?'发布的新文档':'关联文档' }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || kb) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>评分</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template><template v-if="detail.edge_type==='attachment_of'&&(detail.effective_from||detail.effective_until)"><dt>主件生效日期</dt><dd>{{ date(detail.effective_from) }}<template v-if="detail.effective_until"> 至 {{ date(detail.effective_until) }}</template></dd></template></dl>
+          <t-tag variant="light" :theme="statusTagTheme(detail.status)">{{ stateLabel(detail) }}</t-tag><dl><dt>{{ $t('workbench.businessView.recordId') }}</dt><dd><code>{{ detail.id }}</code></dd><dt>{{ $t('workbench.businessView.currentVersion') }}</dt><dd>{{ detail.revision }}</dd><template v-if="kind==='feedback' && detail.submitted_at"><dt>{{ $t('workbench.businessView.submittedAtLabel') }}</dt><dd>{{ dateText(detail.submitted_at) }}</dd></template><template v-if="detail.topic && !inbox && !feedbackRestricted(detail)"><dt>{{ $t('workbench.businessView.topic') }}</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>{{ $t('workbench.businessView.riskLabel') }}</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>{{ $t('workbench.businessView.colCoolingUntil') }}</dt><dd>{{ dateText(detail.ready_at) }}</dd></template><template v-if="(detail.document_id||detail.source_document_id) && !inbox && !feedbackRestricted(detail)"><dt>{{ $t('workbench.businessView.sourceDocument') }}</dt><dd>{{ docName(detail.document_id||detail.source_document_id, detail.knowledge_base_id || kb) }}</dd></template><template v-if="detail.target_document_id && !inbox && !feedbackRestricted(detail)"><dt>{{ kind==='revision'?$t('workbench.businessView.targetNewDocument'):$t('workbench.businessView.targetRelatedDocument') }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || kb) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>{{ $t('workbench.businessView.scoreField') }}</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template><template v-if="detail.edge_type==='attachment_of'&&(detail.effective_from||detail.effective_until)"><dt>{{ $t('workbench.businessView.attachmentEffectiveDate') }}</dt><dd>{{ dateText(detail.effective_from) }}<template v-if="detail.effective_until"> {{ $t('workbench.businessView.effectiveUntil',{date:dateText(detail.effective_until)}) }}</template></dd></template></dl>
           <t-alert v-if="detail.review_reason" theme="warning">{{ reviewReason(detail.review_reason) }}</t-alert>
           <t-alert v-if="detail.publish_error" theme="info" role="status">{{ publicationError(detail.publish_error) }}</t-alert>
           <FeedbackDetail v-if="modernFeedback" :key="detail.id+':'+detail.revision" :record="detail" :kb="inbox?'':kb" :can-write="canReview" :locked="writeLocked" :document-name="docName" @approve="beginWrite('feedback_approve',$event,detail)" />
           <template v-if="kind==='feedback' && !modernFeedback && detail.source==='qa'">
             <section v-if="detail.feedback_context" class="feedback-excerpt">
-              <h3>提交的问答摘录</h3>
-              <p v-if="detail.feedback_context.question"><strong>问题</strong> {{ detail.feedback_context.question }}</p>
+              <h3>{{ $t('workbench.businessView.qaExcerpt') }}</h3>
+              <p v-if="detail.feedback_context.question"><strong>{{ $t('workbench.businessView.questionLabel') }}</strong> {{ detail.feedback_context.question }}</p>
               <pre v-if="detail.feedback_context.answer_excerpt" class="content-preview">{{ detail.feedback_context.answer_excerpt }}</pre>
             </section>
             <div v-if="detail.citation_document_ids?.length">
-              <h3>已核验的引用文档</h3>
+              <h3>{{ $t('workbench.businessView.verifiedCitations') }}</h3>
               <t-button v-for="id in detail.citation_document_ids" :key="id" variant="text" theme="primary" size="small" @click="$emit('open',id,docName(id,detail.knowledge_base_id||kb),detail.knowledge_base_id||kb)">{{ docName(id,detail.knowledge_base_id||kb) }}</t-button>
             </div>
           </template>
-          <h3 v-if="!modernFeedback && (detail.text||detail.proposed_patch)">{{ kind==='revision'?'完整修订正文':kind==='feedback'?'用户意见':'内容' }}</h3><pre v-if="!modernFeedback && (detail.text||detail.proposed_patch)" class="content-preview">{{ detail.text||detail.proposed_patch }}</pre>
+          <h3 v-if="!modernFeedback && (detail.text||detail.proposed_patch)">{{ kind==='revision'?$t('workbench.businessView.revisionBody'):kind==='feedback'?$t('workbench.businessView.feedbackOpinion'):$t('workbench.businessView.contentLabel') }}</h3><pre v-if="!modernFeedback && (detail.text||detail.proposed_patch)" class="content-preview">{{ detail.text||detail.proposed_patch }}</pre>
           <template v-if="kind==='feedback' && !modernFeedback && detail.feedback_context">
-            <p>评价 · {{ feedbackRatings[feedbackRating(detail)] }}</p>
+            <p>{{ $t('workbench.businessView.ratingLine',{rating:feedbackRatingLabel(feedbackRating(detail),t)}) }}</p>
             <template v-if="detail.feedback_context.suggested_revision">
-              <h3>用户建议修订</h3><pre class="content-preview">{{ detail.feedback_context.suggested_revision }}</pre>
+              <h3>{{ $t('workbench.businessView.suggestedRevision') }}</h3><pre class="content-preview">{{ detail.feedback_context.suggested_revision }}</pre>
             </template>
             <label v-if="canWrite && detail.status==='pending_review'" class="feedback-guidance">
-              审核后使用的指导
-              <t-textarea v-model="reviewedGuidance" :autosize="{minRows:4}" :disabled="running||!!pending" placeholder="根据引用核对后，写下后续回答应采用的指导" />
-              <small>指导激活后用于本库有相同引用依据的后续回答。</small>
-              <small v-if="!reviewedGuidance.trim()">填写指导定稿后即可批准反馈。</small>
-              <small v-else-if="!validGuidance">指导定稿超出长度限制，请缩短后再批准。</small>
+              {{ $t('workbench.businessView.reviewedGuidance') }}
+              <t-textarea v-model="reviewedGuidance" :autosize="{minRows:4}" :disabled="running||!!pending" :placeholder="$t('workbench.businessView.guidancePlaceholder')" />
+              <small>{{ $t('workbench.businessView.guidanceActivationNote') }}</small>
+              <small v-if="!reviewedGuidance.trim()">{{ $t('workbench.businessView.guidanceRequired') }}</small>
+              <small v-else-if="!validGuidance">{{ $t('workbench.businessView.guidanceTooLong') }}</small>
             </label>
-            <template v-else-if="detail.reviewed_guidance"><h3>审核定稿</h3><pre class="content-preview">{{ detail.reviewed_guidance }}</pre></template>
+            <template v-else-if="detail.reviewed_guidance"><h3>{{ $t('workbench.businessView.reviewFinal') }}</h3><pre class="content-preview">{{ detail.reviewed_guidance }}</pre></template>
           </template>
           <section v-if="detail.record_kind==='split_batch'" aria-labelledby="split-parts-title">
-            <h3 id="split-parts-title">拆分名单 · {{ detail.split_parts?.length || 0 }} 份</h3>
-            <dl v-if="detail.source_version_id"><dt>锁定源版本</dt><dd><code>{{ detail.source_version_id }}</code></dd></dl>
-            <p class="subtle">整批审批后锁定名单。首份新制度正式发布时，旧制度退出普通检索。后续分件可逐份发布。</p>
+            <h3 id="split-parts-title">{{ $t('workbench.businessView.splitPartsTitle',{n:detail.split_parts?.length || 0}) }}</h3>
+            <dl v-if="detail.source_version_id"><dt>{{ $t('workbench.businessView.lockedSourceVersion') }}</dt><dd><code>{{ detail.source_version_id }}</code></dd></dl>
+            <p class="subtle">{{ $t('workbench.businessView.splitBatchNote') }}</p>
             <article v-for="part in detail.split_parts" :key="part.id" class="split-detail-part">
               <div class="section-heading">
                 <h4>{{ part.title }}</h4><t-tag variant="light" size="small" :theme="['approved','published','active'].includes(part.status) ? 'success' : part.status==='publish_failed' ? 'danger' : 'default'">{{ stateLabel(part) }}</t-tag>
               </div>
-              <p v-if="part.target_document_id" class="subtle">目标文档 · {{ docName(part.target_document_id, part.target_knowledge_base_id || detail.knowledge_base_id || kb) }}</p>
+              <p v-if="part.target_document_id" class="subtle">{{ $t('workbench.businessView.targetDocumentLine',{name:docName(part.target_document_id, part.target_knowledge_base_id || detail.knowledge_base_id || kb)}) }}</p>
               <pre class="content-preview">{{ part.proposed_patch }}</pre>
               <t-alert v-if="part.publish_error" theme="info" role="status">{{ publicationError(part.publish_error) }}</t-alert>
               <t-button v-if="detail.status==='approved'&&actionsFor(kind,part,canWrite,now).includes('revision_publish')"
                 theme="primary" :disabled="running||!!pending"
                 @click="beginWrite('revision_publish',{}, {...part,record_kind:'split_part',split_id:detail.id,split_title:part.title})">
-                {{ part.status==='approved'?'发布此分件':'核对并继续发布' }}
+                {{ part.status==='approved'?$t('workbench.businessView.publishThisPart'):$t('workbench.businessView.verifyContinuePublish') }}
               </t-button>
             </article>
           </section>
           <template v-if="detail.edge_type==='repeals'">
             <dl>
-              <dt>废止通知标识</dt><dd><code>{{ detail.document_id }}</code></dd>
-              <dt>通知锁定版本</dt><dd><code>{{ detail.source_version_id }}</code></dd>
-              <dt>被废止制度</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || detail.knowledge_base_id || kb) }}</dd>
-              <dt>制度文档标识</dt><dd><code>{{ detail.target_document_id }}</code></dd>
-              <dt>制度锁定版本</dt><dd><code>{{ detail.target_version_id }}</code></dd>
-              <dt>废止生效时间</dt><dd>{{ date(detail.effective_at) }}</dd>
-              <template v-if="detail.applied_at"><dt>实际执行时间</dt><dd>{{ date(detail.applied_at) }}</dd></template>
+              <dt>{{ $t('workbench.businessView.repealNoticeId') }}</dt><dd><code>{{ detail.document_id }}</code></dd>
+              <dt>{{ $t('workbench.businessView.noticeLockedVersion') }}</dt><dd><code>{{ detail.source_version_id }}</code></dd>
+              <dt>{{ $t('workbench.businessView.repealedPolicy') }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || detail.knowledge_base_id || kb) }}</dd>
+              <dt>{{ $t('workbench.businessView.policyDocumentId') }}</dt><dd><code>{{ detail.target_document_id }}</code></dd>
+              <dt>{{ $t('workbench.businessView.policyLockedVersion') }}</dt><dd><code>{{ detail.target_version_id }}</code></dd>
+              <dt>{{ $t('workbench.businessView.repealEffectiveAt') }}</dt><dd>{{ dateText(detail.effective_at) }}</dd>
+              <template v-if="detail.applied_at"><dt>{{ $t('workbench.businessView.appliedAt') }}</dt><dd>{{ dateText(detail.applied_at) }}</dd></template>
             </dl>
-            <t-alert v-if="detail.status==='needs_review'" theme="info">文档版本或状态已变化。核对两份文档后重新提交。</t-alert>
+            <t-alert v-if="detail.status==='needs_review'" theme="info">{{ $t('workbench.businessView.repealReviewNote') }}</t-alert>
           </template>
           <template v-else-if="clauseRelation(detail.edge_type)">
-            <t-alert v-if="!detail.pins_current" theme="info">锁定版本已变化或失效。此条款关系仅作历史记录。</t-alert>
-            <ClauseEvidence v-if="detail.source_clause&&detail.document_id&&detail.source_version_id" :kb="kb" :document-id="detail.document_id" :version="detail.source_version_id" :anchor="detail.source_clause" :current="detail.pins_current===true" label="源条款" />
-            <ClauseEvidence v-if="detail.target_clause&&detail.target_document_id&&detail.target_version_id" :kb="kb" :document-id="detail.target_document_id" :version="detail.target_version_id" :anchor="detail.target_clause" :current="detail.pins_current===true" label="目标条款" />
-            <h4>适用范围与条件</h4>
+            <t-alert v-if="!detail.pins_current" theme="info">{{ $t('workbench.businessView.clausePinsChanged') }}</t-alert>
+            <ClauseEvidence v-if="detail.source_clause&&detail.document_id&&detail.source_version_id" :kb="kb" :document-id="detail.document_id" :version="detail.source_version_id" :anchor="detail.source_clause" :current="detail.pins_current===true" :label="$t('workbench.businessView.sourceClause')" />
+            <ClauseEvidence v-if="detail.target_clause&&detail.target_document_id&&detail.target_version_id" :kb="kb" :document-id="detail.target_document_id" :version="detail.target_version_id" :anchor="detail.target_clause" :current="detail.pins_current===true" :label="$t('workbench.businessView.targetClause')" />
+            <h4>{{ $t('workbench.businessView.scopeTitle') }}</h4>
             <pre class="content-preview">{{ detail.applies_when }}</pre>
             <template v-if="detail.resolution">
               <dl>
-                <dt>裁决</dt><dd>{{ clauseDecisions[detail.resolution] || detail.resolution }}</dd>
-                <dt>裁决人</dt><dd>{{ detail.resolved_by }}</dd>
-                <dt>裁决时间</dt><dd>{{ date(detail.resolved_at) }}</dd>
+                <dt>{{ $t('workbench.businessView.resolution') }}</dt><dd>{{ clauseDecisionLabel(detail.resolution, t) }}</dd>
+                <dt>{{ $t('workbench.businessView.resolvedBy') }}</dt><dd>{{ detail.resolved_by }}</dd>
+                <dt>{{ $t('workbench.businessView.resolvedAt') }}</dt><dd>{{ dateText(detail.resolved_at) }}</dd>
               </dl>
               <pre class="content-preview">{{ detail.decision_note }}</pre>
             </template>
             <template v-if="canWrite&&detail.pins_current&&detail.status==='awaiting_resolution'">
-              <label>处理方式<t-select v-model="clauseDecision" :options="clauseDecisionOptions" :disabled="running||!!pending" /></label>
-              <label>裁决依据<t-textarea v-model="clauseDecisionNote" :autosize="{minRows:3}" :maxlength="4000" :disabled="running||!!pending" /></label>
+              <label>{{ $t('workbench.businessView.handlingMethod') }}<t-select v-model="clauseDecision" :options="clauseDecisionOptions" :disabled="running||!!pending" /></label>
+              <label>{{ $t('workbench.businessView.decisionBasis') }}<t-textarea v-model="clauseDecisionNote" :autosize="{minRows:3}" :maxlength="4000" :disabled="running||!!pending" /></label>
             </template>
           </template>
-          <p v-else-if="detail.edge_type==='attachment_of'" class="subtle">由文件提取自动登记。箭头从附件指向所属主件，下载时仍需核对双方状态和版本。</p>
+          <p v-else-if="detail.edge_type==='attachment_of'" class="subtle">{{ $t('workbench.businessView.attachmentAutoNote') }}</p>
           <template v-else-if="detail.edge_type==='supplements'">
-            <p class="subtle">箭头从补充通知指向主件。打开补充通知即可核对或修改它的依赖声明。</p>
+            <p class="subtle">{{ $t('workbench.businessView.supplementArrowNote') }}</p>
             <t-button v-if="document?.id===detail.target_document_id && detail.document_id" variant="text"
-              @click="$emit('open',detail.document_id,docName(detail.document_id, detail.knowledge_base_id || kb), detail.knowledge_base_id || kb)">打开补充通知</t-button>
+              @click="$emit('open',detail.document_id,docName(detail.document_id, detail.knowledge_base_id || kb), detail.knowledge_base_id || kb)">{{ $t('workbench.businessView.openSupplement') }}</t-button>
           </template>
-          <p v-else-if="kind==='relation'" class="subtle">{{ readingRelation(detail.edge_type) ? '两端当前生效且登记版本仍匹配时，读者可以展开文件。换版、停用或撤销后，关联会退出有效查询。' : '登记状态记录治理操作；当前有效查询还会核对两端文档的状态和版本。' }}</p>
+          <p v-else-if="kind==='relation'" class="subtle">{{ readingRelation(detail.edge_type) ? $t('workbench.businessView.readingNoteActive') : $t('workbench.businessView.readingNoteInactive') }}</p>
           <div v-if="kind==='relation'&&!document&&detail.edge_type!=='repeals'&&!clauseRelation(detail.edge_type)" class="actions">
-            <t-button v-if="detail.document_id" variant="text" size="small" @click="inspectRelated(detail.document_id, detail.knowledge_base_id || kb)">查询源文档关联</t-button>
-            <t-button v-if="detail.target_document_id" variant="text" size="small" @click="inspectRelated(detail.target_document_id, detail.target_knowledge_base_id || kb)">查询目标文档关联</t-button>
+            <t-button v-if="detail.document_id" variant="text" size="small" @click="inspectRelated(detail.document_id, detail.knowledge_base_id || kb)">{{ $t('workbench.businessView.querySourceRelations') }}</t-button>
+            <t-button v-if="detail.target_document_id" variant="text" size="small" @click="inspectRelated(detail.target_document_id, detail.target_knowledge_base_id || kb)">{{ $t('workbench.businessView.queryTargetRelations') }}</t-button>
           </div>
-          <section v-if="kind==='feedback'&&sampleReviewPending(detail)" class="sample-review" aria-label="抽检复核">
-            <h3>抽样复核 · 待处理</h3>
-            <p class="subtle">此反馈已通过 20% 确定性抽样选中。通过则保持已生效；失败则隔离该反馈及其指导。</p>
-            <label>复核结论 <t-select v-model="sampleDecision" :options="sampleDecisionOptions" :disabled="running||!!pending" /></label>
-            <label>复核说明 <t-input v-model="sampleNote" :maxlength="2000" :disabled="running||!!pending" placeholder="可选，说明核对依据" /></label>
+          <section v-if="kind==='feedback'&&sampleReviewPending(detail)" class="sample-review" :aria-label="$t('workbench.businessView.sampleReviewTitle')">
+            <h3>{{ $t('workbench.businessView.sampleReviewTitle') }}</h3>
+            <p class="subtle">{{ $t('workbench.businessView.sampleReviewNote') }}</p>
+            <label>{{ $t('workbench.businessView.reviewDecision') }} <t-select v-model="sampleDecision" :options="sampleDecisionOptions" :disabled="running||!!pending" /></label>
+            <label>{{ $t('workbench.businessView.reviewNote') }} <t-input v-model="sampleNote" :maxlength="2000" :disabled="running||!!pending" :placeholder="$t('workbench.businessView.reviewNotePlaceholder')" /></label>
             <div class="actions">
-              <t-button theme="primary" :disabled="running||!!pending||!canWrite" @click="beginWrite('feedback_sample_review',actionPayload('feedback_sample_review'),detail)">提交复核</t-button>
+              <t-button theme="primary" :disabled="running||!!pending||!canWrite" @click="beginWrite('feedback_sample_review',actionPayload('feedback_sample_review'),detail)">{{ $t('workbench.businessView.submitReview') }}</t-button>
             </div>
-            <p v-if="!canWrite" class="subtle">当前账号仅有查看权限。</p>
+            <p v-if="!canWrite" class="subtle">{{ $t('workbench.businessView.viewOnly') }}</p>
           </section>
-          <p v-else-if="kind==='feedback'&&detail.sample_decision" class="subtle">抽样复核 · {{ sampleLabels[detail.sample_decision] || detail.sample_decision }}</p>
-          <t-alert v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" theme="info">尚在冷静期，达到上面的时间后可激活指导。</t-alert>
+          <p v-else-if="kind==='feedback'&&detail.sample_decision" class="subtle">{{ $t('workbench.businessView.sampleReviewLine',{label:sampleLabels[detail.sample_decision] || detail.sample_decision}) }}</p>
+          <t-alert v-if="kind==='feedback'&&detail.status==='approved'&&!canActivate(detail,now)" theme="info">{{ $t('workbench.businessView.coolingNote') }}</t-alert>
           <div class="actions"><t-button v-for="action in recordActions" :key="action"
             :theme="PRIMARY_ACTIONS.includes(action)?'primary':'default'"
             :disabled="running||!!pending||(action==='clause_resolve'&&(!clauseDecision||!clauseDecisionNote.trim()))||(action==='feedback_approve'&&!!detail.feedback_context&&!validGuidance)"
-            @click="beginWrite(action,actionPayload(action),detail)">{{ actionLabels[action] }}</t-button><t-button v-if="kind==='guidance'&&detail.status==='active'&&canWrite" theme="primary" :disabled="running||!!pending" @click="router.push({path:'/platform/revisions',query:{kb,guidance:detail.id}})">用于修订提案</t-button><t-button variant="outline" :disabled="loading||running" @click="openRecord(detail)">重新载入详情</t-button></div>
-          <p v-if="!canReview" class="subtle">当前账号仅有查看权限。</p>
+            @click="beginWrite(action,actionPayload(action),detail)">{{ actionLabel(action, t) }}</t-button><t-button v-if="kind==='guidance'&&detail.status==='active'&&canWrite" theme="primary" :disabled="running||!!pending" @click="router.push({path:'/platform/revisions',query:{kb,guidance:detail.id}})">{{ $t('workbench.businessView.useForRevision') }}</t-button><t-button variant="outline" :disabled="loading||running" @click="openRecord(detail)">{{ $t('workbench.businessView.reloadDetail') }}</t-button></div>
+          <p v-if="!canReview" class="subtle">{{ $t('workbench.businessView.viewOnly') }}</p>
           </template>
           </div>
         </SettingDrawer>
       </div>
     </template>
-    <t-dialog v-model:visible="confirmationOpen" :header="approvalPin ? '批准分块批注' : pending ? actionLabels[pending.intent.action] : ''" width="560px" :footer="false" :close-on-overlay-click="false" @closed="cancelConfirmation" attach="body">
+    <t-dialog v-model:visible="confirmationOpen" :header="approvalPin ? $t('workbench.businessView.approvalPinTitle') : pending ? actionLabel(pending.intent.action, t) : ''" width="560px" :footer="false" :close-on-overlay-click="false" @closed="cancelConfirmation" attach="body">
       <div class="confirm-body">
         <p>{{ confirmationText }}</p>
-        <p v-if="detail" class="subtle">{{ recordTitle(detail) }} · 版本 {{ detail.revision }}</p>
+        <p v-if="detail" class="subtle">{{ recordTitle(detail) }} · {{ $t('workbench.businessView.versionLabel',{n:detail.revision}) }}</p>
         <template v-if="approvalPin && pending">
-          <dl><dt>批注锚点</dt><dd>{{ docName(approvalPin.document_id) }} · 分块 #{{ approvalPin.chunk_index }}</dd></dl>
-          <h3>适用场景</h3><p class="confirmation-text">{{ pending.intent.body.business.payload.applies_when }}</p>
-          <h3>审核批注</h3><p class="confirmation-text">{{ pending.intent.body.business.payload.text }}</p>
+          <dl><dt>{{ $t('workbench.businessView.chunkAnchor') }}</dt><dd>{{ docName(approvalPin.document_id) }} · {{ $t('workbench.businessView.chunkIndex',{n:approvalPin.chunk_index}) }}</dd></dl>
+          <h3>{{ $t('workbench.businessView.applicableScenario') }}</h3><p class="confirmation-text">{{ pending.intent.body.business.payload.applies_when }}</p>
+          <h3>{{ $t('workbench.businessView.reviewAnnotation') }}</h3><p class="confirmation-text">{{ pending.intent.body.business.payload.text }}</p>
         </template>
-        <label v-if="highRisk" class="check-label"><t-checkbox v-model="secondConfirmation">我已再次核对高风险指导的内容与影响。</t-checkbox></label>
-        <div class="dialog-actions"><t-button variant="outline" @click="cancelConfirmation">取消</t-button><t-button theme="primary" :disabled="highRisk&&!secondConfirmation" @click="confirmWrite">确认执行</t-button></div>
+        <label v-if="highRisk" class="check-label"><t-checkbox v-model="secondConfirmation">{{ $t('workbench.businessView.confirmHighRisk') }}</t-checkbox></label>
+        <div class="dialog-actions"><t-button variant="outline" @click="cancelConfirmation">{{ $t('workbench.businessView.cancel') }}</t-button><t-button theme="primary" :disabled="highRisk&&!secondConfirmation" @click="confirmWrite">{{ $t('workbench.businessView.confirmExecute') }}</t-button></div>
       </div>
     </t-dialog>
   </section>
@@ -291,13 +291,13 @@ import DocumentPicker from './DocumentPicker.vue'
 import ReadingRelationPreview from './ReadingRelationPreview.vue'
 import { moveTabFocus, requestFence } from '../lifecycle/model'
 import { useI18n } from 'vue-i18n'
-import { actionLabels, actionsFor, associationQueryKeys, buildIntent, businessError, canActivate, clauseDecisions, clauseRelation, date, edgeLabels, feedbackRating, feedbackRatings, feedbackRestricted, feedbackTriageActions, httpStatus, isAnswerFeedback, isInboxAction, readingRelation, relationReviewLabels, relationSentence, sampleReviewPending, shortID, statusLabels, type WriteIntent } from './model'
+import { actionLabel, actionsFor, associationQueryKeys, buildIntent, businessError, canActivate, clauseDecisionLabel, clauseDecisions, clauseRelation, date, edgeLabel, edgeLabels, feedbackRating, feedbackRatingLabel, feedbackRestricted, feedbackTriageActions, httpStatus, isAnswerFeedback, isInboxAction, readingRelation, relationReviewLabel, relationSentence, sampleReviewPending, shortID, statusLabel, type WriteIntent } from './model'
 
 const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean;inboxOnly?:boolean}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
-const { t }=useI18n()
+const { t, locale }=useI18n()
 const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string]}>()
 const sections=[{key:'associations',labelKey:'workbench.business.associations'},{key:'feedback-governance',labelKey:'workbench.business.feedback'},{key:'revisions',labelKey:'workbench.business.revisions'}]
-const riskLabels:Record<string,string>={low:'低风险',medium:'中风险',high:'高风险'}
+const riskLabels=computed<Record<string,string>>(()=>({low:t('workbench.businessView.riskLow'),medium:t('workbench.businessView.riskMedium'),high:t('workbench.businessView.riskHigh')}))
 const heading=computed(()=>{const hit=sections.find(v=>v.key===props.section);return hit?t(hit.labelKey):t('workbench.business.fallback')})
 const subtitle=computed(()=>props.section==='associations'?t('workbench.business.subAssociations'):props.section==='revisions'?t('workbench.business.subRevisions'):t('workbench.business.subFeedback'))
 const feedbackTabsId=useId()
@@ -307,24 +307,24 @@ const showInboxTab=computed(()=>props.section==='feedback-governance' && auth.is
 const inbox=computed(()=>showInboxTab.value && feedbackTab.value==='inbox')
 const feedbackStatus=ref('')
 const feedbackStatusOptions=computed(()=>[
-  {label:'全部状态',value:''},
+  {label:t('workbench.businessView.allStatuses'),value:''},
   ...['pending_review','needs_evidence','received','record_only','rejected',...(inbox.value?[]:['approved','active','quarantined','withdrawn'])]
-    .map(value=>({label:value==='approved'?'待生效':statusLabels[value],value})),
+    .map(value=>({label:value==='approved'?statusLabel('scheduled',t):statusLabel(value,t),value})),
 ])
 const statusTagTheme=(status:string)=>({active:'success',approved:'primary',pending_review:'warning',needs_evidence:'warning',scheduled:'primary',rejected:'danger',quarantined:'danger',failed:'danger'} as Record<string,string>)[status]||'default'
-const clauseDecisionOptions=computed(()=>[{label:'请选择处理方式',value:''},...Object.entries(clauseDecisions).map(([value,label])=>({label:String(label),value}))])
-const sampleDecisionOptions=[{label:'通过',value:'passed'},{label:'失败（隔离）',value:'failed'}]
+const clauseDecisionOptions=computed(()=>[{label:t('workbench.businessView.selectDecision'),value:''},...Object.keys(clauseDecisions).map(value=>({label:clauseDecisionLabel(value,t),value}))])
+const sampleDecisionOptions=computed(()=>[{label:t('workbench.businessView.passOption'),value:'passed'},{label:t('workbench.businessView.failQuarantineOption'),value:'failed'}])
 const relationFilters=ref<api.RelationFilters>({edgeType:'',status:'',documentId:''})
-const relationTypeOptions=[{label:'全部关系类型',value:''},...Object.entries(edgeLabels).map(([value,label])=>({value,label}))]
-const relationStatusOptions=[{label:'全部登记状态',value:''},...['candidate','pending_review','active','scheduled','needs_review','revoked','awaiting_resolution','resolved','applied','linked','attachment_cleanup_pending','attachment_cleanup_retry','attachment_removed','attachment_retired','supplement_declared'].map(value=>({value,label:value==='active'?'已登记或已确认':statusLabels[value]}))]
-const reviewReason=(reason:string)=>relationReviewLabels[reason] || '关联当前适用性待核对'
-const relationEndOptions=[{label:'源文档',value:'source'},{label:'关联文档',value:'target'}]
+const relationTypeOptions=computed(()=>[{label:t('workbench.businessView.allRelationTypes'),value:''},...Object.keys(edgeLabels).map(value=>({value,label:edgeLabel(value,t)}))])
+const relationStatusOptions=computed(()=>[{label:t('workbench.businessView.allRegistrationStatuses'),value:''},...['candidate','pending_review','active','scheduled','needs_review','revoked','awaiting_resolution','resolved','applied','linked','attachment_cleanup_pending','attachment_cleanup_retry','attachment_removed','attachment_retired','supplement_declared'].map(value=>({value,label:value==='active'?t('workbench.businessView.registeredOrConfirmed'):statusLabel(value,t)}))])
+const reviewReason=(reason:string)=>relationReviewLabel(reason,t) || t('workbench.businessView.reviewReasonFallback')
+const relationEndOptions=computed(()=>[{label:t('workbench.businessView.sourceOption'),value:'source'},{label:t('workbench.businessView.targetOption'),value:'target'}])
 // Actions that render as the primary TDesign button.
 const PRIMARY_ACTIONS=['revision_publish','split_approve','feedback_activate','feedback_approve','relation_confirm','clause_confirm','clause_resolve']
 const reviewedGuidance=ref('')
 const sampleDecision=ref<'passed'|'failed'>('passed')
 const sampleNote=ref('')
-const sampleLabels:Record<string,string>={pending:'待复核',passed:'已通过',failed:'已隔离'}
+const sampleLabels=computed<Record<string,string>>(()=>({pending:t('workbench.businessView.samplePending'),passed:t('workbench.businessView.samplePassed'),failed:t('workbench.businessView.sampleFailed')}))
 const validGuidance=computed(()=>!!reviewedGuidance.value.trim() && new TextEncoder().encode(reviewedGuidance.value.trim()).length<=720)
 const kind=computed<api.BusinessKind>(()=>props.section==='associations'?'relation':props.section==='revisions'?'revision':feedbackTab.value==='guidance'?'guidance':'feedback')
 const relationEnd=ref<'source'|'target'>('source')
@@ -356,7 +356,7 @@ const recordActions=computed(()=>{
   return actionsFor(kind.value,row,canWrite.value,now.value)
 })
 const canCreate=computed(()=>!!kb.value && canWrite.value && kind.value!=='feedback')
-const createLabel=computed(()=>kind.value==='relation'?'新增关联':kind.value==='guidance'?'添加种子指导':'创建修订提案')
+const createLabel=computed(()=>kind.value==='relation'?t('workbench.businessView.createRelation'):kind.value==='guidance'?t('workbench.businessView.createGuidance'):t('workbench.businessView.createRevision'))
 const writeLocked=computed(()=>running.value || !!pending.value || binaryLocked.value)
 function onCreateVisible(value:boolean){
   if(!value) showCreate(false)
@@ -407,8 +407,8 @@ async function restoreAssociation(){
   if(!props.document && route.query.view==='associations' && route.query.kb===scope){
     const edgeType=routeText('relationType'),status=routeText('relationStatus'),requestedPage=Number(routeText('relationPage'))
     relationFilters.value={
-      edgeType:relationTypeOptions.some(option=>option.value===edgeType)?edgeType:'',
-      status:relationStatusOptions.some(option=>option.value===status)?status:'',
+      edgeType:relationTypeOptions.value.some(option=>option.value===edgeType)?edgeType:'',
+      status:relationStatusOptions.value.some(option=>option.value===status)?status:'',
       documentId:routeText('relationEndpoint'),
     }
     page.value=Number.isInteger(requestedPage)&&requestedPage>0&&requestedPage<=10000?requestedPage:1
@@ -432,34 +432,35 @@ const resultKey=(row:api.RelatedDocument,index:number)=>JSON.stringify([row.rela
 const listFence=requestFence(),detailFence=requestFence(),kbFence=requestFence(),queryFence=requestFence(),catalogFence=requestFence()
 let generation=0
 const timer=setInterval(()=>{now.value=Date.now()},30_000)
-const docName=(id?:string, scope=kb.value)=>id?((scope===kb.value?titles.value.get(id):crossTitles.value.get(docKey(scope,id)))||`文档 ${shortID(id)}`):'—'
+const docName=(id?:string, scope=kb.value)=>id?((scope===kb.value?titles.value.get(id):crossTitles.value.get(docKey(scope,id)))||t('workbench.businessView.documentFallback',{id:shortID(id)})):'—'
+const dateText=(value?:string|null)=>date(value, locale.value)
 function stateLabel(row:api.BusinessRecord){
   if(kind.value==='relation'){
-    if(row.pins_current===false && ['active','awaiting_resolution','resolved'].includes(row.status))return '条款适用性待复核'
-    if(row.status==='active')return row.edge_type==='related_to' ? '已确认' : '已登记'
+    if(row.pins_current===false && ['active','awaiting_resolution','resolved'].includes(row.status))return t('workbench.businessView.clauseReview')
+    if(row.status==='active')return row.edge_type==='related_to' ? t('workbench.businessView.confirmed') : t('workbench.businessView.registered')
   }
-  return statusLabels[row.status]||row.status
+  return statusLabel(row.status,t)
 }
 function resultSentence(row:api.RelatedDocument){
   const current=props.document?.title||docName(queryDocument.value,queryScope.value||kb.value)
   const peer=docName(row.document_id,row.knowledge_base_id)
-  return row.direction==='incoming' ? relationSentence(row.edge_type,peer,current) : relationSentence(row.edge_type,current,peer)
+  return row.direction==='incoming' ? relationSentence(row.edge_type,peer,current,t) : relationSentence(row.edge_type,current,peer,t)
 }
 function recordSentence(row:api.BusinessRecord){
-  return relationSentence(row.edge_type,docName(row.document_id,row.knowledge_base_id||kb.value),docName(row.target_document_id,row.target_knowledge_base_id||kb.value))
+  return relationSentence(row.edge_type,docName(row.document_id,row.knowledge_base_id||kb.value),docName(row.target_document_id,row.target_knowledge_base_id||kb.value),t)
 }
 function recordTitle(row:api.BusinessRecord){
-  if(kind.value==='relation')return edgeLabels[row.edge_type||'']||'文档关联'
+  if(kind.value==='relation')return edgeLabel(row.edge_type||'',t)
   if(kind.value==='feedback'){
-    const rating=feedbackRatings[feedbackRating(row)]
-    return isAnswerFeedback(row)||feedbackRestricted(row)||inbox.value ? rating||'问答反馈' : row.topic||rating||'反馈'
+    const rating=feedbackRatingLabel(feedbackRating(row),t)
+    return isAnswerFeedback(row)||feedbackRestricted(row)||inbox.value ? rating||t('workbench.businessView.qaFeedback') : row.topic||rating||t('workbench.businessView.feedbackFallback')
   }
-  if(kind.value!=='revision')return row.topic||'未命名主题'
-  if(row.record_kind==='split_batch')return `拆分 · ${docName(row.source_document_id, row.knowledge_base_id || kb.value)}`
-  if(row.record_kind==='split_part')return row.split_title||'拆分分件'
-  return `修订 · ${docName(row.source_document_id, row.knowledge_base_id || kb.value)}`
+  if(kind.value!=='revision')return row.topic||t('workbench.businessView.untitledTopic')
+  if(row.record_kind==='split_batch')return t('workbench.businessView.splitTitle',{name:docName(row.source_document_id, row.knowledge_base_id || kb.value)})
+  if(row.record_kind==='split_part')return row.split_title||t('workbench.businessView.splitPart')
+  return t('workbench.businessView.revisionTitle',{name:docName(row.source_document_id, row.knowledge_base_id || kb.value)})
 }
-const publicationError=(code:string)=>code==='binary_source_upload_required'?'源文档是上传文件：请上传修订后的正式源文件。本条目保留为修订建议。':code==='binary_source_version_changed'?'目标修订文件版本已变化，请重新绑定后再发布。':code==='remote_identity_mismatch'?'已找到的远端文档与本次发布不匹配，请先核对发布记录。':'上次发布尚未确认完成，可核对并继续发布；不会直接重复创建文档。'
+const publicationError=(code:string)=>code==='binary_source_upload_required'?t('workbench.businessView.publicationBinaryUpload'):code==='binary_source_version_changed'?t('workbench.businessView.publicationBinaryVersion'):code==='remote_identity_mismatch'?t('workbench.businessView.publicationRemoteMismatch'):t('workbench.businessView.publicationPending')
 
 function readRecords(scope:string, recordKind:api.BusinessKind, number:number, id=''){
   if(inbox.value)return api.listUnscopedFeedback(number,id,id?'':feedbackStatus.value)
@@ -516,10 +517,10 @@ async function loadAuthority(){
   if (props.canWrite !== undefined) { canWrite.value = props.canWrite; authorityError.value = ''; return }
   const token=kbFence.begin(),scope=kb.value;canWrite.value=false;authorityError.value=''
   try{const value=await authority(scope);if(!kbFence.current(token))return;canWrite.value=value.can_write}
-  catch(e){if(kbFence.current(token))authorityError.value=`权限信息暂不可用：${businessError(e)}。记录列表仍可查看。`}
+  catch(e){if(kbFence.current(token))authorityError.value=t('workbench.businessView.authorityUnavailable',{message:businessError(e,t)})}
 }
 function readError(error:unknown, tenantQueue:boolean){
-  return tenantQueue && httpStatus(error)===403 ? '当前账号没有未归属反馈的处理权限。' : businessError(error)
+  return tenantQueue && httpStatus(error)===403 ? t('workbench.businessView.unassignedPermission') : businessError(error,t)
 }
 function refresh(){
   if(!kb.value&&!inbox.value){void loadKBs();return}
@@ -577,7 +578,7 @@ async function openRecord(row:Pick<api.BusinessRecord,'id'>,event?:MouseEvent){
   try{
     const found=(await readRecords(scope,recordKind,1,row.id)).find(candidate=>candidate.id===row.id)
     if(!detailFence.current(token))return
-    if(!found){error.value='该记录已不可访问，请刷新列表。';return}
+    if(!found){error.value=t('workbench.businessView.recordGone');return}
     detail.value=found
     detailLoading.value=false
     await nextTick()
@@ -587,19 +588,19 @@ async function openRecord(row:Pick<api.BusinessRecord,'id'>,event?:MouseEvent){
 }
 async function beginWrite(action:api.BusinessAction,payload:api.BusinessPayload,row?:api.BusinessRecord){
   if(!canReview.value||writeLocked.value||detailLoading.value||(inbox.value&&!isInboxAction(action)))return
-  try{pending.value={kb:kb.value,inbox:inbox.value,intent:buildIntent(action,row,payload,crypto.randomUUID()),detailID:row?.split_id}}
+  try{pending.value={kb:kb.value,inbox:inbox.value,intent:buildIntent(action,row,payload,crypto.randomUUID(),t),detailID:row?.split_id}}
   catch(e){error.value=(e as Error).message;return}
   highRisk.value=action==='feedback_activate'&&row?.risk==='high';secondConfirmation.value=false
-  confirmationText.value=action==='revision_publish'?'发布将创建新的有效版本，并让原文档退出检索。请确认已审阅完整修订正文。':action==='feedback_approve'?'批准后仍需等待对应风险的冷静期。':action==='feedback_activate'?'激活后，审核定稿将用于符合条件的后续问答。':action==='guidance_seed'?'种子指导将直接加入指导清单；请确认内容已经人工核对。':'请确认已审阅记录，并执行这项状态变更。'
-  if(action==='feedback_record_only')confirmationText.value='仅保存此反馈供核对。此操作不会发布指导。'
-  if(action==='feedback_needs_evidence')confirmationText.value='将此反馈标记为待补证。核对来源后可再处理。'
-  if(action==='feedback_reject'&&modernFeedback.value)confirmationText.value='驳回此反馈。此操作不会发布指导。'
-  if(action==='split_approve')confirmationText.value='请确认已审阅全部分件正文。批准后锁定名单和内容，并允许逐份发布。'
-  if(action==='repeal_approve')confirmationText.value=`请核对废止通知与旧制度。批准后将于 ${date(row?.effective_at)} 执行，旧制度归档并退出普通检索。若已到该时点，将立即执行。`
-  if(action==='repeal_cancel')confirmationText.value='撤回此计划后，系统将停止执行这条废止计划。'
-  if(action==='clause_resolve')confirmationText.value='请确认已核对两处条款、适用范围及裁决依据。'
+  confirmationText.value=action==='revision_publish'?t('workbench.businessView.confirmRevisionPublish'):action==='feedback_approve'?t('workbench.businessView.confirmFeedbackApprove'):action==='feedback_activate'?t('workbench.businessView.confirmFeedbackActivate'):action==='guidance_seed'?t('workbench.businessView.confirmGuidanceSeed'):t('workbench.businessView.confirmDefault')
+  if(action==='feedback_record_only')confirmationText.value=t('workbench.businessView.confirmRecordOnly')
+  if(action==='feedback_needs_evidence')confirmationText.value=t('workbench.businessView.confirmNeedsEvidence')
+  if(action==='feedback_reject'&&modernFeedback.value)confirmationText.value=t('workbench.businessView.confirmReject')
+  if(action==='split_approve')confirmationText.value=t('workbench.businessView.confirmSplitApprove')
+  if(action==='repeal_approve')confirmationText.value=t('workbench.businessView.confirmRepealApprove',{date:dateText(row?.effective_at)})
+  if(action==='repeal_cancel')confirmationText.value=t('workbench.businessView.confirmRepealCancel')
+  if(action==='clause_resolve')confirmationText.value=t('workbench.businessView.confirmClauseResolve')
   if(action==='revision_publish'&&row?.record_kind==='split_part'){
-    confirmationText.value=`本次处理「${row.split_title||'此分件'}」。首份新制度正式发布时，旧制度退出普通检索。`
+    confirmationText.value=t('workbench.businessView.confirmSplitPart',{title:row.split_title||t('workbench.businessView.splitPart')})
   }
   if(action.endsWith('_create')||action==='relation_declare'){await perform();return}
   confirmationOpen.value=true
@@ -620,7 +621,7 @@ async function perform(){
     const result=await (command.inbox && isInboxAction(action) ? api.reviewUnscopedFeedback(action,body) : api.write(command.kb,action,body))
     if(version!==generation)return
     emit('changed')
-    pending.value=undefined;success.value=`${actionLabels[command.intent.action]}已完成，当前状态：${stateLabel(result)}。`;if(command.intent.action.endsWith('_create')||command.intent.action==='guidance_seed'||command.intent.action==='relation_declare'){
+    pending.value=undefined;success.value=t('workbench.businessView.actionDone',{action:actionLabel(command.intent.action,t),status:stateLabel(result)});if(command.intent.action.endsWith('_create')||command.intent.action==='guidance_seed'||command.intent.action==='relation_declare'){
       showCreate(false);formVersion.value++
     }
     if(kind.value==='relation'&&queryDocument.value)void queryRelated()
@@ -632,7 +633,7 @@ async function perform(){
 }
 function actionError(error: unknown, action: api.BusinessAction, inbox: boolean): string {
   return httpStatus(error) === 409 && action === 'feedback_activate'
-    ? '指导激活还需满足冷静期与主题复核条件，请重新载入后再试。'
+    ? t('workbench.businessView.actionCooldown')
     : readError(error, inbox)
 }
 function clearRelatedResult(){
@@ -699,7 +700,7 @@ async function loadKBs(){
     if(props.scope)return
     const requested=typeof route.query.kb==='string'?route.query.kb:'';kb.value=knowledgeBases.value.find(v=>v.id===requested)?.id||knowledgeBases.value[0]?.id||''
   }
-  catch{if(catalogFence.current(token))error.value='无法载入可访问的知识库，请检查登录状态后重试。'}finally{if(catalogFence.current(token))loadingKB.value=false}
+  catch{if(catalogFence.current(token))error.value=t('workbench.businessView.loadKbError')}finally{if(catalogFence.current(token))loadingKB.value=false}
 }
 function loadScope(){
   if(!kb.value&&!inbox.value)return
@@ -747,7 +748,7 @@ async function loadCorrectionSource(){
   correctionSourceLoading.value=false
   if(!correctionEntry.value||!scope||!canWrite.value)return
   if(!correction||route.query.kb!==scope){
-    correctionSourceError.value='无法核对所选勘误的知识库和版本。'
+    correctionSourceError.value=t('workbench.businessView.correctionKbError')
     return
   }
   correctionSourceLoading.value=true
@@ -760,9 +761,9 @@ async function loadCorrectionSource(){
     if(!response.success||row?.id!==correction.document_id||row.knowledge_base_id!==scope)throw new Error('correction_source_unavailable')
     if(row.type==='manual' && row.metadata?.status==='publish')correctionSource.value={...correction,title,type:'manual'}
     else if(row.type==='file')correctionSource.value={...correction,title,type:'file'}
-    else correctionSourceError.value='此源文档类型不支持正式修订。'
+    else correctionSourceError.value=t('workbench.businessView.correctionUnsupported')
   }catch{
-    if(correctionSourceFence.current(token))correctionSourceError.value='无法核对所选勘误的效力和源文档。'
+    if(correctionSourceFence.current(token))correctionSourceError.value=t('workbench.businessView.correctionSourceError')
   }finally{
     if(correctionSourceFence.current(token))correctionSourceLoading.value=false
   }
@@ -771,7 +772,7 @@ watch([kb,initialGuidance,correctionEntry,initialCorrection],()=>{
   if(kb.value && kind.value==='revision' && (initialGuidance.value||correctionEntry.value))showCreate(true)
 })
 watch([kb,canWrite,correctionEntry,initialCorrection,()=>route.query.kb,()=>auth.effectiveTenantId],loadCorrectionSource,{flush:'sync'})
-function allowNavigation(){if(writeLocked.value){error.value='本次操作仍待核对，请先重试原请求，或核对后选择“结束重试”。';return false}return true}
+function allowNavigation(){if(writeLocked.value){error.value=t('workbench.businessView.pendingNavigation');return false}return true}
 function beforeUnload(event:BeforeUnloadEvent){if(writeLocked.value){event.preventDefault();event.returnValue=''}}
 onBeforeRouteLeave(allowNavigation)
 onBeforeRouteUpdate(allowNavigation)

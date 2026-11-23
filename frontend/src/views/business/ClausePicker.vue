@@ -7,9 +7,9 @@
       <t-select :value="modelValue?.chunk_id || ''" :disabled="disabled || !documentId || loading || hashing" :options="options" :placeholder="documentId ? $t('workbench.picker.selectClause') : $t('workbench.picker.selectDocFirst')" @change="choose" />
     </label>
     <pre v-if="selectedText" class="content-preview">{{ selectedText }}</pre>
-    <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="load">重试</t-button></t-alert>
+    <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="load">{{ $t('workbench.common.retry') }}</t-button></t-alert>
     <p v-else-if="documentId && !loading && !rows.length" class="subtle">{{ $t('workbench.picker.noChunks') }}</p>
-    <p v-else-if="documentId && !loading" class="subtle">共 {{ rows.length }} 个分块<template v-if="keyword.trim()">，匹配 {{ filteredRows.length }} 个</template>。</p>
+    <p v-else-if="documentId && !loading" class="subtle">{{ keyword.trim() ? $t('workbench.businessUi.clause.matchingChunks',{n:rows.length,m:filteredRows.length}) : $t('workbench.businessUi.clause.totalChunks',{n:rows.length}) }}</p>
   </div>
 </template>
 
@@ -56,7 +56,7 @@ async function load() {
     }
     rows.value = collected
   } catch {
-    if (listFence.current(token)) error.value = '无法载入文档分块。'
+    if (listFence.current(token)) error.value = t('workbench.businessUi.clause.loadFailed')
   } finally {
     if (listFence.current(token)) loading.value = false
   }
@@ -70,11 +70,11 @@ const filteredRows = computed(() => {
 
 const options = computed(() => {
   const items: { label: string; value: string }[] = filteredRows.value.map(row => ({
-    label: `分块 ${row.chunk_index + 1} · ${row.content.replace(/\s+/g, ' ').slice(0, 64)}`,
+    label: t('workbench.businessUi.clause.chunkOption',{index:row.chunk_index+1,text:row.content.replace(/\s+/g, ' ').slice(0, 64)}),
     value: row.id,
   }))
   if (props.modelValue && !items.some(item => item.value === props.modelValue?.chunk_id)) {
-    items.unshift({ label: `已选分块 ${selectedIndex.value}`, value: props.modelValue.chunk_id })
+    items.unshift({ label: t('workbench.businessUi.clause.selectedChunk',{index:selectedIndex.value}), value: props.modelValue.chunk_id })
   }
   return [{ label: props.documentId ? t('workbench.picker.selectClause') : t('workbench.picker.selectDocFirst'), value: '' }, ...items]
 })
@@ -95,7 +95,7 @@ async function choose(id: string) {
     selectedText.value = chunk.content
     selectedIndex.value = chunk.chunk_index + 1
   } catch {
-    if (selectionFence.current(token)) error.value = '无法核对条款指纹。请通过本机入口或 HTTPS 访问。'
+    if (selectionFence.current(token)) error.value = t('workbench.businessUi.clause.fingerprintFailed')
   } finally {
     if (selectionFence.current(token)) hashing.value = false
   }

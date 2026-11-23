@@ -4,6 +4,7 @@ import test from 'node:test'
 import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import { translate } from '../../test-utils/i18n'
 import type { CorrectionDocument, CorrectionState } from '../../api/business'
 import { requestFence } from '../lifecycle/model'
 import * as model from './model'
@@ -30,11 +31,13 @@ function mountSetup({
   const props = vue.reactive({ scope: 'kb-a', knowledgeBases: [{ id: 'kb-a', name: 'A' }, { id: 'kb-b', name: 'B' }] })
   const modules: Record<string, unknown> = {
     vue: { ...vue, onBeforeUnmount: vue.onScopeDispose },
+    'vue-i18n': { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } }) },
     'vue-router': { useRoute: () => route, useRouter: () => ({}) },
     dompurify: {},
     '@/api/business': { correctionDocuments, correctionDocument, correctionMarkdown },
     '@/api/lifecycle': { authority: async (kb: string) => ({ can_write: canWrite(kb) }) },
     '@/utils/documentPreviewMarkdown': {},
+    '@/utils/desktopDownload': { saveBusinessDownload: async () => ({ mode: 'browser' }) },
     '../lifecycle/model': { requestFence },
     './model': model,
   }

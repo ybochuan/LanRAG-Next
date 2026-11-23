@@ -140,7 +140,7 @@ export const baseUrl = (): string => localStorage.getItem(BASE_KEY) || DEFAULT_B
 export async function pickModelFile(): Promise<string> {
   const native = window as Window & { go?: { main?: { App?: { PickModelFile?: () => Promise<string> } } } }
   const pick = native.go?.main?.App?.PickModelFile
-  if (!pick) throw new Error('请在 LanRAG Lite 桌面窗口中选择 GGUF 文件。')
+  if (!pick) throw new SupervisorError('GGUF file selection is available only in the LanRAG Lite desktop window.', 0, 'file_pick_unavailable')
   return pick()
 }
 export const setBaseUrl = (value: string): void => {
@@ -172,8 +172,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     // A network-level failure here almost always means the supervisor is not
     // running, or its allowlist does not include this page's origin.
     throw new SupervisorError(
-      desktop ? '无法连接本机模型管理器。'
-        : `无法连接模型管理器（${baseUrl()}）。请确认它已启动，且允许来源包含 ${window.location.origin}。`,
+      desktop ? 'Cannot reach the local model supervisor.'
+        : `Cannot reach the model supervisor (${baseUrl()}). Make sure it is running and allows origin ${window.location.origin}.`,
       0,
       'unreachable',
       { cause: String(cause) }
@@ -191,7 +191,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   if (!response.ok) {
     if (desktop && response.status === 503) {
-      throw new SupervisorError('本机模型管理器暂未就绪。请重试或查看 model-supervisor.log。', 503, 'unreachable')
+      throw new SupervisorError('The local model supervisor is not ready. Retry or check model-supervisor.log.', 503, 'not_ready')
     }
     const record = (payload ?? {}) as Record<string, unknown>
     throw new SupervisorError(
@@ -202,7 +202,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     )
   }
   if (desktop && payload === null) {
-    throw new SupervisorError('请在 LanRAG Lite 桌面窗口中打开模型进程管理。', 0, 'desktop_required')
+    throw new SupervisorError('Open Model processes in the LanRAG Lite desktop window.', 0, 'desktop_required')
   }
   return payload as T
 }

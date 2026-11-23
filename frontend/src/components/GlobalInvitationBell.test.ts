@@ -14,7 +14,7 @@ function deferred<T>() {
   const promise = new Promise<T>(r => { resolve = r })
   return { promise, resolve }
 }
-function setup(t: TestContext, api: Record<string, unknown>) {
+function setup(t: TestContext, api: Record<string, unknown>, desktop: Record<string, unknown> = {}) {
   const f = fixture(t)
   const auth = vue.reactive({ user: { id: 'owner' }, effectiveTenantId: 1, pendingInvitationCount: 1 })
   const routes: string[] = []
@@ -26,6 +26,17 @@ function setup(t: TestContext, api: Record<string, unknown>) {
     'tdesign-vue-next': { MessagePlugin: { error: (message: string) => { errors.push(message) } } },
     '@/stores/auth': { useAuthStore: () => auth }, '@/api/automation': api,
     '@/utils/notificationPreview': { notificationPreview },
+    '@/api/modelSupervisor': { isPackagedDesktop: () => false },
+    '@/utils/desktopDownload': {
+      formatDownloadSize: (bytes: number) => `${bytes} B`,
+      isManagedDownloadAvailable: () => false,
+      openBusinessDownload: async () => {},
+      revealBusinessDownload: async () => {},
+      syncPendingBusinessDownloads: async () => [],
+      markBusinessDownloadsSeen: async () => {},
+      onBusinessDownloadSaved: () => () => {},
+      ...desktop,
+    },
   })
   return { ...component, auth, routes, errors }
 }
@@ -224,4 +235,63 @@ test('workspace switches reset banners, and older results revealed by clearing h
   response = page([{ ...notice('older'), created_at: '2026-10-19T00:00:00Z' }])
   await vm.refresh()
   assert.equal(vm.banners.length, 0)
+})
+
+test('local download unread count joins the badge and opening the panel clears it', async t => {
+  const marked: string[][] = []
+  let records = [{
+    id: 'dl-1', fileName: 'a.docx', size: 1024, sourceTitle: 'Doc', sourceType: 'knowledge_document',
+    sourceId: 'doc', link: '/platform/knowledge-bases/kb', createdAt: '2026-10-20T00:00:00Z',
+    syncState: 'synced', unread: true,
+  }]
+  const { vm } = setup(t, { listNotifications: async () => page([], { pending: [] }) }, {
+    isManagedDownloadAvailable: () => true,
+    syncPendingBusinessDownloads: async () => records,
+    markBusinessDownloadsSeen: async (ids: string[]) => {
+      marked.push(Array.from(ids))
+      records = records.map(record => ({ ...record, unread: false }))
+    },
+  })
+  await vm.refresh()
+  await vm.refreshDesktopDownloads()
+  assert.equal(vm.badgeCount, 2, 'one invitation plus one unread local download')
+  vm.panelVisible = true
+  await flush()
+  assert.deepEqual(marked, [['dl-1']])
+  assert.equal(vm.desktopDownloads[0].unread, false)
+  assert.equal(vm.badgeCount, 1)
+})
+
+test('a newly saved local download is upserted and raises the badge until seen', async t => {
+  const { vm } = setup(t, { listNotifications: async () => page([], { pending: [] }) }, {
+    isManagedDownloadAvailable: () => true,
+    syncPendingBusinessDownloads: async () => [],
+  })
+  await vm.refresh()
+  assert.equal(vm.badgeCount, 1)
+  vm.upsertDesktopDownload({
+    id: 'dl-fresh', fileName: 'fresh.docx', size: 2048, sourceTitle: 'Fresh', sourceType: 'knowledge_document',
+    sourceId: 'fresh', link: '/platform/knowledge-bases/kb', createdAt: '2026-10-20T00:00:00Z',
+    syncState: 'synced', unread: true,
+  })
+  await flush()
+  assert.equal(vm.desktopDownloads.length, 1)
+  assert.equal(vm.badgeCount, 2)
+  vm.upsertDesktopDownload({ ...vm.desktopDownloads[0], syncState: 'synced', unread: false })
+  assert.equal(vm.desktopDownloads.length, 1)
+  assert.equal(vm.badgeCount, 1)
+})
+
+test('legacy local downloads without an unread marker do not raise the badge', async t => {
+  const { vm } = setup(t, { listNotifications: async () => page([], { pending: [] }) }, {
+    isManagedDownloadAvailable: () => true,
+    syncPendingBusinessDownloads: async () => [{
+      id: 'dl-old', fileName: 'old.docx', size: 1024, sourceTitle: 'Old', sourceType: 'knowledge_document',
+      sourceId: 'old', link: '/platform/knowledge-bases/kb', createdAt: '2026-10-19T00:00:00Z', syncState: 'synced',
+    }],
+  })
+  await vm.refresh()
+  await vm.refreshDesktopDownloads()
+  assert.equal(vm.desktopDownloads.length, 1)
+  assert.equal(vm.badgeCount, 1, 'the historical record is treated as read')
 })

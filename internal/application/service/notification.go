@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -68,6 +69,53 @@ func (s *NotificationService) NotifyOnce(ctx context.Context, n *types.Notificat
 	if existing == 0 {
 		s.Notify(ctx, n)
 	}
+}
+
+// NotifyDownloadOnce records one completed business download. The desktop
+// client supplies the download id, so the notification ID makes retries
+// idempotent even after the user has read or cleared the history. It returns
+// the stored row and whether this call created it.
+func (s *NotificationService) NotifyDownloadOnce(
+	ctx context.Context, n *types.Notification,
+) (*types.Notification, bool, error) {
+	if s == nil || n == nil || n.TenantID == 0 || strings.TrimSpace(n.UserID) == "" || strings.TrimSpace(n.ID) == "" {
+		return nil, false, apperrors.NewBadRequestError("invalid download notification")
+	}
+	n.UserID = strings.TrimSpace(n.UserID)
+	n.Kind = types.NotificationDownloadCompleted
+	n.SourceType = "download"
+	n.SourceID = n.ID
+	if r := []rune(n.Title); len(r) > 250 {
+		n.Title = string(r[:250]) + "…"
+	}
+	if r := []rune(n.Body); len(r) > 2000 {
+		n.Body = string(r[:2000]) + "…"
+	}
+	now := s.now()
+	if n.CreatedAt.IsZero() {
+		n.CreatedAt = now
+	}
+	if n.ReadAt == nil {
+		n.ReadAt = &now
+	}
+	db := s.db.WithContext(context.WithoutCancel(ctx))
+	var existing types.Notification
+	err := db.Where("id = ? AND tenant_id = ? AND user_id = ?", n.ID, n.TenantID, n.UserID).First(&existing).Error
+	if err == nil {
+		return &existing, false, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+	if err := db.Create(n).Error; err != nil {
+		// A concurrent retry can lose the create race; return the winner.
+		var raced types.Notification
+		if findErr := db.Where("id = ? AND tenant_id = ? AND user_id = ?", n.ID, n.TenantID, n.UserID).First(&raced).Error; findErr == nil {
+			return &raced, false, nil
+		}
+		return nil, false, err
+	}
+	return n, true, nil
 }
 
 // PendingNotification is actionable state, independent of notification read state.

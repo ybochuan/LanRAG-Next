@@ -29,6 +29,7 @@ import DocumentPreview from '@/components/document-preview.vue';
 import DocumentFileIcon from '@/views/knowledge/components/DocumentFileIcon.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 import { resolveKnowledgeDownloadFileName } from '@/views/knowledge/knowledgeDownloadFileName';
+import { saveBusinessDownload } from '@/utils/desktopDownload';
 import { isKnownPreviewableExt, resolveFilePreviewExt } from '@/utils/filePreview';
 
 const { t } = useI18n();
@@ -581,7 +582,6 @@ const docMarkdownRoot = ref<HTMLElement | null>(null)
 
 const getMarkdownRenderRoot = (): ParentNode | null =>
   docMarkdownRoot.value ?? (mdContentWrap.value as ParentNode | null) ?? null
-let url = ref('')
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
 const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
@@ -1585,29 +1585,21 @@ watch(() => props.details?.description, () => {
 });
 watch(summaryRef, () => checkSummaryOverflow());
 
-const downloadFile = () => {
-  downKnowledgeDetails(props.details.id)
-    .then((result) => {
-      if (result) {
-        if (url.value) {
-          URL.revokeObjectURL(url.value);
-        }
-        url.value = URL.createObjectURL(result);
-        const link = document.createElement("a");
-        link.style.display = "none";
-        link.setAttribute("href", url.value);
-        link.setAttribute("download", downloadResponseName(result, resolveKnowledgeDownloadFileName(props.details)));
-        document.body.appendChild(link);
-        link.click();
-        nextTick(() => {
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url.value);
-        })
-      }
-    })
-    .catch((err) => {
-      MessagePlugin.error(t('file.downloadFailed'));
+const downloadFile = async () => {
+  try {
+    const result = await downKnowledgeDetails(props.details.id);
+    if (!result) return;
+    const fileName = downloadResponseName(result, resolveKnowledgeDownloadFileName(props.details));
+    await saveBusinessDownload(result, {
+      fileName,
+      sourceType: 'knowledge_document',
+      sourceId: props.details.id,
+      sourceTitle: props.details.display_name || props.details.title || fileName,
+      link: `/platform/knowledge-bases/${encodeURIComponent(props.details.knowledge_base_id || props.kbId)}?knowledge_id=${encodeURIComponent(props.details.id)}`,
     });
+  } catch (err) {
+    MessagePlugin.error(t('file.downloadFailed'));
+  }
 };
 const handleChunkPageChange = (pageInfo: { current: number }) => {
   if (props.details?.chunkLoading || pageInfo.current === loadedChunkPage.value) return;

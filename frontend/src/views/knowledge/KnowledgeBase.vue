@@ -75,6 +75,7 @@ import {
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import { downloadResponseName } from '@/api/knowledge-base';
+import { saveBusinessDownload } from '@/utils/desktopDownload';
 import {
   buildUploadFileName,
   canMoveFolderTo,
@@ -2536,17 +2537,13 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
   if (!item?.id) return;
   try {
     const file = await downKnowledgeDetails(item.id);
-    const objectUrl = URL.createObjectURL(file);
-    const link = document.createElement('a');
     const fileName = downloadResponseName(file, resolveKnowledgeDownloadFileName(item));
-    link.style.display = 'none';
-    link.href = objectUrl;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    nextTick(() => {
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
+    await saveBusinessDownload(file, {
+      fileName,
+      sourceType: 'knowledge_document',
+      sourceId: item.id,
+      sourceTitle: item.display_name || item.title || fileName,
+      link: `/platform/knowledge-bases/${encodeURIComponent(item.knowledge_base_id || kbId.value)}?knowledge_id=${encodeURIComponent(item.id)}`,
     });
   } catch {
     MessagePlugin.error(t('file.downloadFailed'));

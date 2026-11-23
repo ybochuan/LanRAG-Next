@@ -4,6 +4,7 @@ import test from 'node:test'
 import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import { translate } from '../../test-utils/i18n'
 import * as model from './model'
 import { httpStatus } from '../business/model'
 
@@ -38,7 +39,7 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
       }),
     },
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
-    'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+    'vue-i18n': { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } }) },
     './model': model,
   }
   const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,attachmentTaskList,attachmentTaskError,attachmentTaskDocuments,taskReasonLabel,collapsedTaskSections,isTaskSectionCollapsed,toggleTaskSection,openPendingAttachment,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup,cleanupPage,cleanupTotal,cleanupFilter,cleanupActionCount,cleanupSelected,cleanupSelectionCount,cleanupSelectable,cleanupPageAllSelected,cleanupPageIndeterminate,toggleCleanupSelection,toggleCleanupPageSelection,clearCleanupSelection,cleanupTask,batchCleanup,allDocuments,loadMoreDocuments,documentPageError,nextDocumentPage,documentGroups,mainDocumentCount,attachmentCount,isDocumentExpanded,toggleDocument,attachmentMatchesQuery,ruleForm,ruleDirty,ruleOutdated,resetRuleForm,submitRules};`)(
@@ -104,7 +105,7 @@ test('review tab loads attachment tasks alongside document reminders', async () 
     assert.equal(view.state.reviewItems.value[0]?.alert_id, 'due-1')
     assert.equal(view.state.attachmentTaskList.value?.total, 1)
     assert.equal(view.state.attachmentTaskDocuments.value[0]?.items[0]?.reasons.includes('mapping_review'), true)
-    assert.equal(view.state.taskReasonLabel('name_review'), 'workbench.reviews.attachment.reasonName')
+    assert.equal(view.state.taskReasonLabel('name_review'), translate('workbench.reviews.attachment.reasonName'))
   } finally { view.stop() }
 })
 
@@ -400,7 +401,7 @@ test('the workbench no longer hosts a message centre; the native bell owns remin
 
 test('the review panel shows the notification delivery state', () => {
   const template = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.template?.content ?? ''
-  assert.ok(template.includes('reviewDeliveryLabel(alert.delivery_state)'), 'the panel must name the delivery state')
+  assert.ok(template.includes('reviewDeliveryLabel(alert.delivery_state, t)'), 'the panel must name the delivery state')
   assert.ok(template.includes('<t-tag'), 'the delivery badge must be a TDesign tag')
   assert.ok(template.includes(":theme=\"alert.delivery_state==='delivered'?'success':'default'\""), 'the delivery tag must be toned by delivery state')
   assert.ok(template.includes('alert.delivered_at'), 'the panel must show when the local callback accepted the reminder')
@@ -423,8 +424,8 @@ test('the feedback governance page exposes pending sample review', () => {
   assert.ok(source.includes("sample_decision:sampleDecision.value"), 'the review decision must be sent in the payload')
   assert.ok(template.includes('sampleReviewPending(detail)'), 'only pending samples may show review controls')
   assert.ok(template.includes('<t-select v-model="sampleDecision"'), 'the review decision must be a TDesign select')
-  assert.ok(source.includes("{label:'失败（隔离）',value:'failed'}"), 'a failed review option must exist')
-  assert.ok(template.includes('失败则隔离该反馈及其指导'), 'failed review must explain that it quarantines guidance')
+  assert.ok(source.includes('workbench.businessView.failQuarantineOption'), 'a failed review option must exist')
+  assert.ok(template.includes("$t('workbench.businessView.sampleReviewNote')"), 'failed review must explain that it quarantines guidance')
 })
 
 test('permission-only views use the lightweight authority endpoint', () => {
@@ -444,8 +445,8 @@ test('cross-KB creation from the target side is blocked with a clear hint', () =
   assert.match(script, /if\([^\n]*targetSideCrossBlocked\.value[^\n]*\)return/, 'submit must refuse the blocked entry')
   assert.ok(template.includes('targetSideCrossBlocked ||'), 'the submit button must be disabled')
   assert.ok(script.includes("fixedDocument?.end==='target'&&!readingRelation(form.edge_type)"), 'only same-library reading relations are offered with a fixed target')
-  assert.ok(template.includes('其他关系请从源文档或文档关联页面创建'), 'the hint must name where to create other relations')
-  assert.ok(template.includes('从正文详情可新增同库补充说明和内容提示'), 'the hint must name the available reading relations')
+  assert.ok(template.includes("$t('workbench.formExtra.targetBlocked')"), 'the hint must name where to create other relations')
+  assert.match(translate('workbench.formExtra.targetBlocked'), /从正文详情可新增同库补充说明和内容提示/)
 })
 
 test('review list supports ascending and descending review_due order', () => {
@@ -492,7 +493,7 @@ test('document list keeps attachment labels inline and fills the remaining viewp
   const file = readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')
   const template = parse(file).descriptor.template?.content ?? ''
   assert.ok(template.includes('class="document-title-row"'), 'title and attachment label must share one flex row')
-  assert.ok(template.includes('>附件</t-tag>'), 'the list must show the plain attachment label')
+  assert.ok(template.includes("$t('workbench.lifecycle.attachmentTag')"), 'the list must show the localized attachment label')
   assert.ok(template.includes('mappingTagHint(group.parent.mapping_status)'), 'the attachment label must carry its full explanation')
   assert.ok(!template.includes('class="annex-original"'), 'the parent row must not repeat the original file name')
   assert.ok(template.includes("$t('workbench.list.originalFile'"), 'expanded attachment rows show the original file name')
@@ -622,7 +623,7 @@ test('superseded parent keeps attachment content and only corrects the error tex
   assert.ok(attachment.includes('parentState?: string'), 'the workbench must accept the parent state')
   const failBody = attachment.match(/function fail\(err: unknown\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   assert.ok(failBody.includes("props.parentState === 'superseded'"), 'error text must be corrected in fail(), not by hiding the workbench')
-  assert.ok(failBody.includes('主件已被替代，附件不可用。'), 'a superseded parent must explain that attachments are unavailable')
+  assert.ok(failBody.includes('workbench.attachmentWorkbench.messages.parentSuperseded'), 'a superseded parent must explain that attachments are unavailable')
   const loadBody = attachment.match(/async function load\(\) \{([\s\S]*?)\n\}/)?.[1] ?? ''
   assert.ok(loadBody.includes('attachmentWorkbench(props.kb, props.documentId)'), 'attachment content must still load for a superseded parent')
   assert.ok(!loadBody.includes("props.parentState === 'superseded'"), 'load must not skip requests or clear content based on parent state')
@@ -634,7 +635,7 @@ test('drawer-embedded workspaces expand forms inline and teleport remaining dial
   const familyTpl = parse(family).descriptor.template?.content ?? ''
   assert.ok(familyTpl.includes('class="family-action-panel"'), 'family actions must expand inline inside the workspace')
   assert.ok(familyTpl.includes('familyActionOpen && activeFamilyAction'), 'the inline panel must keep the existing open state')
-  assert.ok(familyTpl.includes('>收起操作</t-button>'), 'the inline panel must be dismissible')
+  assert.ok(familyTpl.includes('workbench.familyUi.collapseAction'), 'the inline panel must be dismissible')
   assert.ok(!/header="(加入成员|登记下一次更替|新增关联)"/.test(familyTpl), 'family actions must not open modal dialogs inside the drawer')
   for (const [label, file] of [
     ['family', family],

@@ -1,57 +1,57 @@
 <template>
   <section aria-labelledby="suggestion-heading">
     <div class="section-heading">
-      <h2 id="suggestion-heading">关联建议</h2>
-      <t-button v-if="canWrite" variant="outline" :loading="queued" :disabled="disabled" @click="$emit('scan')">扫描本库</t-button>
+      <h2 id="suggestion-heading">{{ $t('workbench.familySuggestion.title') }}</h2>
+      <t-button v-if="canWrite" variant="outline" :loading="queued" :disabled="disabled" @click="$emit('scan')">{{ $t('workbench.familySuggestion.scan') }}</t-button>
     </div>
-    <p class="subtle">建议根据同库文档的标题、提及和分块证据产生。配置本地模型的库还可使用标题语义。请核对方向与依据后再确认。</p>
-    <div v-if="queued" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>后台正在扫描，现有文档操作可继续使用。</span></div>
-    <div v-else-if="inbox.scan_status==='failed'" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>上次扫描未完成，可再次扫描。</span></div>
-    <t-empty v-else-if="!inbox.items.length" class="empty" description="本页没有待确认建议。" />
+    <p class="subtle">{{ $t('workbench.familySuggestion.hint') }}</p>
+    <div v-if="queued" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.familySuggestion.scanning') }}</span></div>
+    <div v-else-if="inbox.scan_status==='failed'" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.familySuggestion.scanFailed') }}</span></div>
+    <t-empty v-else-if="!inbox.items.length" class="empty" :description="$t('workbench.familySuggestion.empty')" />
     <t-button v-if="canWrite && selected.length" theme="primary" :disabled="disabled" @click="confirmSelected">
-      批量确认（{{ selected.length }}）
+      {{ $t('workbench.familySuggestion.batchConfirm', { n: selected.length }) }}
     </t-button>
     <div v-if="inbox.items.length" class="suggestion-list">
       <div v-for="item in inbox.items" :key="item.id" class="suggestion-row">
         <label v-if="canWrite && item.edge_type!=='supersedes'" class="selection">
           <t-checkbox :checked="selected.includes(item.id)" :disabled="disabled" @change="toggleSelection(item.id)">
-          选中 {{ title(item.document_id) }} 的建议</t-checkbox>
+          {{ $t('workbench.familySuggestion.select', { title: title(item.document_id) }) }}</t-checkbox>
         </label>
-        <strong>{{ item.kind==='membership' ? '建议归族' : edgeLabel(item.edge_type) }}</strong>
-        <t-tag variant="light" size="small" theme="primary">评分 {{ percent(item.confidence) }}</t-tag>
-        <p v-if="item.kind==='membership'">{{ title(item.document_id) }} · 参考成员 {{ title(item.target_document_id) }}</p>
+        <strong>{{ item.kind==='membership' ? $t('workbench.familySuggestion.suggestedFamily') : edgeLabelFor(item.edge_type || '', t) }}</strong>
+        <t-tag variant="light" size="small" theme="primary">{{ $t('workbench.familySuggestion.score', { value: percent(item.confidence) }) }}</t-tag>
+        <p v-if="item.kind==='membership'">{{ $t('workbench.familySuggestion.memberRef', { title: title(item.document_id), target: title(item.target_document_id) }) }}</p>
         <p v-else>{{ title(item.document_id) }} → {{ title(item.target_document_id) }}</p>
         <ul class="evidence">
           <li v-for="reason in item.evidence.reasons" :key="reason">{{ reasons[reason] || reason }}</li>
         </ul>
         <p class="subtle">
-          标题词片 {{ percent(item.evidence.title_similarity ?? item.evidence.similarity) }}
-          <template v-if="item.evidence.semantic_similarity!==undefined"> · 本地语义 {{ percent(item.evidence.semantic_similarity) }}（{{ item.evidence.semantic_model }}）</template>
-          · 声明线索 {{ percent(item.evidence.declaration) }} · 分块证据 {{ percent(item.evidence.structure) }}
+          {{ $t('workbench.familySuggestion.titleTokens', { value: percent(item.evidence.title_similarity ?? item.evidence.similarity) }) }}
+          <template v-if="item.evidence.semantic_similarity!==undefined"> · {{ $t('workbench.familySuggestion.localSemantic', { value: percent(item.evidence.semantic_similarity), model: item.evidence.semantic_model }) }}</template>
+          · {{ $t('workbench.familySuggestion.declaration', { value: percent(item.evidence.declaration) }) }} · {{ $t('workbench.familySuggestion.structure', { value: percent(item.evidence.structure) }) }}
         </p>
         <template v-if="canWrite">
-          <label v-if="item.edge_type==='supersedes'">拟生效时间
+          <label v-if="item.edge_type==='supersedes'">{{ $t('workbench.familySuggestion.effectiveAt') }}
             <t-date-picker :value="pickerValue(effectiveDates[item.id])" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="disabled" clearable @change="(value:string)=>effectiveDates[item.id]=fromPickerValue(value)" />
           </label>
           <div class="actions">
             <t-button theme="primary" :disabled="disabled || (item.edge_type==='supersedes' && !effectiveDates[item.id])"
-              @click="confirm(item)">{{ item.edge_type==='supersedes' ? '提交替代审核' : '确认建议' }}</t-button>
-            <t-button variant="outline" :disabled="disabled" @click="$emit('ignore',item)">忽略</t-button>
+              @click="confirm(item)">{{ item.edge_type==='supersedes' ? $t('workbench.familySuggestion.submitSupersede') : $t('workbench.familySuggestion.confirm') }}</t-button>
+            <t-button variant="outline" :disabled="disabled" @click="$emit('ignore',item)">{{ $t('workbench.familySuggestion.ignore') }}</t-button>
           </div>
         </template>
       </div>
     </div>
     <t-collapse v-model="policyOpen">
-      <t-collapse-panel value="policy" header="知识库评分设置">
+      <t-collapse-panel value="policy" :header="$t('workbench.familySuggestion.policyHeader')">
         <t-form label-align="top" @submit="savePolicy">
           <div class="policy-grid">
-            <t-form-item label="相似度权重"><t-input-number v-model="settings.similarity_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
-            <t-form-item label="声明线索权重"><t-input-number v-model="settings.declaration_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
-            <t-form-item label="分块证据权重"><t-input-number v-model="settings.structure_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
-            <t-form-item label="候选阈值"><t-input-number v-model="settings.threshold" :min="0.01" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+            <t-form-item :label="$t('workbench.familySuggestion.similarityWeight')"><t-input-number v-model="settings.similarity_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+            <t-form-item :label="$t('workbench.familySuggestion.declarationWeight')"><t-input-number v-model="settings.declaration_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+            <t-form-item :label="$t('workbench.familySuggestion.structureWeight')"><t-input-number v-model="settings.structure_weight" :min="0" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
+            <t-form-item :label="$t('workbench.familySuggestion.threshold')"><t-input-number v-model="settings.threshold" :min="0.01" :max="1" :step="0.01" :disabled="!canWrite || disabled || queued" /></t-form-item>
           </div>
-          <p class="subtle">三项权重之和应为 1。保存后重新扫描以应用新设置。</p>
-          <t-button v-if="canWrite" theme="primary" type="submit" :disabled="disabled || queued || !validWeights">保存本库设置</t-button>
+          <p class="subtle">{{ $t('workbench.familySuggestion.weightNote') }}</p>
+          <t-button v-if="canWrite" theme="primary" type="submit" :disabled="disabled || queued || !validWeights">{{ $t('workbench.familySuggestion.savePolicy') }}</t-button>
         </t-form>
       </t-collapse-panel>
     </t-collapse>
@@ -61,9 +61,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import type { FamilySuggestion, FamilySuggestionInbox, SuggestionPolicy } from '@/api/families'
-import { edgeLabels } from '../business/model'
+import { edgeLabel as edgeLabelFor } from '../business/model'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{inbox:FamilySuggestionInbox; title:(id:string)=>string; canWrite:boolean; disabled:boolean}>()
+const { t } = useI18n()
 const emit = defineEmits<{
   scan:[];
   confirm:[row:FamilySuggestion,effectiveAt?:string];
@@ -71,13 +73,13 @@ const emit = defineEmits<{
   ignore:[row:FamilySuggestion];
   policy:[settings:Omit<SuggestionPolicy,'revision'>,expected:number];
 }>()
-const reasons: Record<string,string> = {
-  title_overlap:'标题词片相近', title_stem:'标题主干一致', year_sequence:'标题中的版本年份不同',
-  explicit_title_mention:'文档标题或描述明确提及另一份文档',
-  shared_chunk_hashes:'存在内容完全相同的分块', chunk_count:'分块数量相近',
-  local_title_embedding:'本地模型比较标题向量',
+const reasonKeys: Record<string,string> = {
+  title_overlap:'reasonTitleOverlap', title_stem:'reasonTitleStem', year_sequence:'reasonYear',
+  explicit_title_mention:'reasonMention', shared_chunk_hashes:'reasonSharedChunk', chunk_count:'reasonChunkCount',
+  local_title_embedding:'reasonEmbedding',
 }
-const edgeLabel = (kind?:string) => kind==='supersedes' ? '建议替代' : edgeLabels[kind || ''] || '建议关联'
+const reasons = computed(() => Object.fromEntries(Object.entries(reasonKeys).map(([key, leaf]) => [key, t('workbench.familySuggestion.' + leaf)])))
+const edgeLabel = (kind?:string) => kind==='supersedes' ? t('workbench.familySuggestion.suggestedReplace') : edgeLabelFor(kind || '', t) || t('workbench.familySuggestion.suggestedRelation')
 const percent = (value:number) => `${Math.round(value*100)}%`
 const effectiveDates = reactive<Record<string,string>>({})
 // TDesign DatePicker speaks "YYYY-MM-DD HH:mm"; the payload conversion expects

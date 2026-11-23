@@ -1,34 +1,34 @@
 <template>
   <div class="correction-workspace">
-    <SettingDrawer :visible="!!target" :title="detail?.file_name || '勘误文档'" icon="file" width="760px" :min-width="560" :max-width="1080" storage-key="setting-drawer:width:correction-detail" hide-footer @update:visible="onDetailVisible">
+    <SettingDrawer :visible="!!target" :title="detail?.file_name || $t('workbench.correction.title')" icon="file" width="760px" :min-width="560" :max-width="1080" storage-key="setting-drawer:width:correction-detail" hide-footer @update:visible="onDetailVisible">
       <template #subtitle>
-        <span v-if="detail" class="metadata">{{ kbName(detail.knowledge_base_id) }} · {{ detail.document_title }} · 版本 {{ detail.version_id }}</span>
-        <span v-else>勘误详情</span>
+        <span v-if="detail" class="metadata">{{ kbName(detail.knowledge_base_id) }} · {{ detail.document_title }} · {{ $t('workbench.correction.version', { version: detail.version_id }) }}</span>
+        <span v-else>{{ $t('workbench.correction.detail') }}</span>
       </template>
       <template #header-actions>
-        <t-button v-if="detail" variant="outline" size="small" @click="emit('open', detail.document_id, detail.document_title, detail.knowledge_base_id)">打开原文详情</t-button>
-        <t-button v-if="detail" variant="outline" size="small" :loading="downloading" @click="download">下载 Markdown</t-button>
+        <t-button v-if="detail" variant="outline" size="small" @click="emit('open', detail.document_id, detail.document_title, detail.knowledge_base_id)">{{ $t('workbench.correction.openOriginal') }}</t-button>
+        <t-button v-if="detail" variant="outline" size="small" :loading="downloading" @click="download">{{ $t('workbench.correction.downloadMarkdown') }}</t-button>
       </template>
       <div class="correction-detail-body">
-        <p v-if="detailBusy" role="status">正在读取勘误文档…</p>
+        <p v-if="detailBusy" role="status">{{ $t('workbench.correction.reading') }}</p>
         <t-alert v-if="detailError" theme="error" role="alert">
-          {{ detailError }} <t-button variant="text" size="small" @click="loadDetail">重新载入</t-button>
+          {{ detailError }} <t-button variant="text" size="small" @click="loadDetail">{{ $t('workbench.correction.reload') }}</t-button>
         </t-alert>
         <template v-if="detail">
-          <t-alert v-if="target?.item && !selectedItem" theme="info" role="status">所引用的勘误修订在当前权限和筛选范围内不可见。</t-alert>
-          <article v-if="selectedItem" :id="correctionItemId(selectedItem.id, selectedItem.revision)" ref="itemHeading" class="selected-item" tabindex="-1" aria-label="定位到的勘误条目">
-            <h3>勘误 {{ selectedItem.id }} · 修订 {{ selectedItem.revision }}</h3>
-            <p class="metadata">分块 {{ selectedItem.chunk_id }}</p>
-            <p v-if="selectedItem.applies_when">适用条件：{{ selectedItem.applies_when }}</p>
-            <p v-if="selectedItem.applies_project">适用项目：{{ selectedItem.applies_project }}</p>
+          <t-alert v-if="target?.item && !selectedItem" theme="info" role="status">{{ $t('workbench.correction.itemHidden') }}</t-alert>
+          <article v-if="selectedItem" :id="correctionItemId(selectedItem.id, selectedItem.revision)" ref="itemHeading" class="selected-item" tabindex="-1" :aria-label="$t('workbench.correction.locatedAria')">
+            <h3>{{ $t('workbench.correction.itemTitle', { id: selectedItem.id, revision: selectedItem.revision }) }}</h3>
+            <p class="metadata">{{ $t('workbench.correction.chunk', { chunk: selectedItem.chunk_id }) }}</p>
+            <p v-if="selectedItem.applies_when">{{ $t('workbench.correction.appliesWhen', { value: selectedItem.applies_when }) }}</p>
+            <p v-if="selectedItem.applies_project">{{ $t('workbench.correction.appliesProject', { value: selectedItem.applies_project }) }}</p>
             <p>{{ selectedItem.correction }}</p>
           </article>
           <div class="correction-markdown markdown-content" v-html="preview" />
-          <section v-if="canWriteDetail && detail.items.some(item => item.state==='active')" aria-label="关联正式修订">
-            <h3>关联正式修订</h3>
+          <section v-if="canWriteDetail && detail.items.some(item => item.state==='active')" :aria-label="$t('workbench.correction.relatedRevisions')">
+            <h3>{{ $t('workbench.correction.relatedRevisions') }}</h3>
             <ul class="revision-links">
               <li v-for="item in detail.items.filter(item => item.state==='active')" :key="correctionItemId(item.id, item.revision)">
-                <t-button variant="text" size="small" @click="router.push(revisionRoute(item))">使用勘误 {{ item.id }} 创建修订提案</t-button>
+                <t-button variant="text" size="small" @click="router.push(revisionRoute(item))">{{ $t('workbench.correction.createRevision', { id: item.id }) }}</t-button>
               </li>
             </ul>
           </section>
@@ -37,44 +37,44 @@
     </SettingDrawer>
     <section class="correction-list-panel workspace-list-panel" :aria-label="$t('workbench.workspace.correctionDocuments')" :aria-busy="listBusy">
       <div class="workspace-toolbar correction-toolbar">
-        <span ref="listHeading" tabindex="-1" class="workspace-toolbar-count">共 {{ rows.length }} 份</span>
+        <span ref="listHeading" tabindex="-1" class="workspace-toolbar-count">{{ $t('workbench.correction.total', { n: rows.length }) }}</span>
         <div class="workspace-toolbar-actions">
-          <t-input v-model="draft.keyword" class="correction-search" clearable :maxlength="160" placeholder="搜索关键词或编号" />
+          <t-input v-model="draft.keyword" class="correction-search" clearable :maxlength="160" :placeholder="$t('workbench.correction.searchPlaceholder')" />
           <t-select v-model="draft.state" class="correction-state" :options="stateOptions" />
-          <t-button variant="outline" :aria-expanded="advancedOpen" @click="advancedOpen=!advancedOpen">更多筛选</t-button>
-          <t-button theme="primary" @click="applyFilters">筛选</t-button>
-          <t-button v-if="nextScopes.length" variant="outline" :loading="listBusy" @click="loadPages(nextScopes)">加载更多</t-button>
+          <t-button variant="outline" :aria-expanded="advancedOpen" @click="advancedOpen=!advancedOpen">{{ $t('workbench.correction.moreFilters') }}</t-button>
+          <t-button theme="primary" @click="applyFilters">{{ $t('workbench.correction.filter') }}</t-button>
+          <t-button v-if="nextScopes.length" variant="outline" :loading="listBusy" @click="loadPages(nextScopes)">{{ $t('workbench.correction.loadMore') }}</t-button>
         </div>
       </div>
       <div v-if="advancedOpen" class="correction-filters-advanced">
-        <label>知识库范围
+        <label>{{ $t('workbench.correction.kbScope') }}
           <t-select v-model="scopeMode" :options="scopeOptions" />
         </label>
-        <label>原文编号
+        <label>{{ $t('workbench.correction.sourceId') }}
           <t-input v-model="draft.documentId" clearable :maxlength="160" />
         </label>
-        <label>审核日期起
+        <label>{{ $t('workbench.correction.approvedFrom') }}
           <t-date-picker v-model="draft.from" value-type="YYYY-MM-DD" format="YYYY-MM-DD" clearable />
         </label>
-        <label>审核日期止
+        <label>{{ $t('workbench.correction.approvedTo') }}
           <t-date-picker v-model="draft.to" value-type="YYYY-MM-DD" format="YYYY-MM-DD" clearable />
         </label>
       </div>
       <t-alert v-if="filterError" theme="warning" role="alert">{{ filterError }}</t-alert>
       <t-alert v-if="failedScopes.length" theme="error" role="alert">
-        无法读取部分勘误文档：{{ failedScopes.map(kbName).join('、') }}。
-        <t-button variant="text" size="small" :disabled="listBusy" @click="loadPages(failedScopes)">重试</t-button>
+        {{ $t('workbench.correction.failedScopes', { scopes: failedScopes.map(kbName).join('、') }) }}
+        <t-button variant="text" size="small" :disabled="listBusy" @click="loadPages(failedScopes)">{{ $t('workbench.correction.retry') }}</t-button>
       </t-alert>
-      <p v-if="historyUnavailable" role="status" class="metadata">当前范围没有可查看历史勘误的知识库。</p>
-      <p v-if="listBusy" role="status">正在读取勘误文档…</p>
+      <p v-if="historyUnavailable" role="status" class="metadata">{{ $t('workbench.correction.historyUnavailable') }}</p>
+      <p v-if="listBusy" role="status">{{ $t('workbench.correction.loading') }}</p>
       <div v-if="rows.length" class="workspace-list-scroll">
-        <div class="workspace-list-table" role="table" aria-label="勘误文档列表">
+        <div class="workspace-list-table" role="table" :aria-label="$t('workbench.correction.listAria')">
           <div class="workspace-list-head" role="row">
-            <span role="columnheader">原文</span>
-            <span role="columnheader" class="workspace-head-kb">知识库</span>
-            <span role="columnheader" class="workspace-head-version">版本</span>
-            <span role="columnheader" class="workspace-head-count">有效条数</span>
-            <span role="columnheader" class="workspace-head-date">最近审核</span>
+            <span role="columnheader">{{ $t('workbench.correction.colSource') }}</span>
+            <span role="columnheader" class="workspace-head-kb">{{ $t('workbench.correction.colKb') }}</span>
+            <span role="columnheader" class="workspace-head-version">{{ $t('workbench.correction.colVersion') }}</span>
+            <span role="columnheader" class="workspace-head-count">{{ $t('workbench.correction.colActive') }}</span>
+            <span role="columnheader" class="workspace-head-date">{{ $t('workbench.correction.colLastApproved') }}</span>
           </div>
           <div class="workspace-list-body" role="rowgroup">
             <div v-for="row in rows" :key="row.rowId" class="workspace-list-row correction-row" role="row">
@@ -84,8 +84,8 @@
                 </div>
                 <span class="workspace-compact-meta">
                   <span>{{ kbName(row.knowledge_base_id) }}</span>
-                  <span>版本 {{ row.version_id }}</span>
-                  <span>{{ row.active_count }} 条有效</span>
+                  <span>{{ $t('workbench.correction.versionShort', { version: row.version_id }) }}</span>
+                  <span>{{ $t('workbench.correction.activeCount', { n: row.active_count }) }}</span>
                   <span>{{ formatDate(row.last_approved_at) }}</span>
                 </span>
               </div>
@@ -98,7 +98,7 @@
         </div>
       </div>
       <div v-else-if="!listBusy && !failedScopes.length && !historyUnavailable" class="workspace-list-empty-state">
-        <t-empty description="没有符合筛选条件的勘误文档。" />
+        <t-empty :description="$t('workbench.correction.empty')" />
       </div>
     </section>
   </div>
@@ -106,6 +106,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import DOMPurify from 'dompurify'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -113,19 +114,21 @@ import { correctionDocument, correctionDocuments, correctionMarkdown, type Corre
 import { authority } from '@/api/lifecycle'
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown'
 import { requestFence } from '../lifecycle/model'
-import { approvalBound, browseCorrectionState, correctionItemId, correctionRoute, correctionRowId, correctionStateLabels, markdownFileName } from './model'
+import { approvalBound, browseCorrectionState, correctionItemId, correctionRoute, correctionRowId, correctionStateKeys, markdownFileName } from './model'
+import { saveBusinessDownload } from '@/utils/desktopDownload'
 
 const props = defineProps<{ scope: string; knowledgeBases: { id: string; name: string }[] }>()
 const emit = defineEmits<{ open: [id: string, title: string, kb: string] }>()
 const route = useRoute(), router = useRouter()
+const { t, locale } = useI18n()
 const routeText = (key: string) => typeof route.query[key] === 'string' ? route.query[key] : ''
 const kbName = (kb: string) => props.knowledgeBases.find(row => row.id === kb)?.name || kb
-const formatDate = (value: string) => value ? new Date(value).toLocaleString() : '—'
+const formatDate = (value: string) => value ? new Date(value).toLocaleString(locale.value) : '—'
 const scopeMode = ref<'current' | 'all'>('current')
 const scopeOptions = computed(() => [
-  { value: 'current', label: kbName(props.scope) }, { value: 'all', label: '全部有权限的知识库' },
+  { value: 'current', label: kbName(props.scope) }, { value: 'all', label: t('workbench.correction.allKbs') },
 ])
-const stateOptions = Object.entries(correctionStateLabels).map(([value, label]) => ({ value, label }))
+const stateOptions = computed(() => (Object.keys(correctionStateKeys) as CorrectionState[]).map(value => ({ value, label: t(correctionStateKeys[value]) })))
 const advancedOpen = ref(false)
 const draft = reactive({ documentId: routeText('sourceDocument'), keyword: '', state: 'active' as CorrectionState, from: '', to: '' })
 const filters = ref<CorrectionFilters>({ state: 'active', document_id: draft.documentId })
@@ -200,7 +203,7 @@ async function loadPages(requested: string[]) {
 
 function applyFilters() {
   if (draft.from && draft.to && draft.from > draft.to) {
-    filterError.value = '审核日期起不能晚于审核日期止。'
+    filterError.value = t('workbench.correction.filterDateError')
     return
   }
   filterError.value = ''
@@ -265,7 +268,7 @@ async function loadDetail() {
     const canWrite = await permission
     if (detailFence.current(token)) canWriteDetail.value = canWrite
   } catch {
-    if (detailFence.current(token)) detailError.value = '无法读取此版本的勘误文档。请核对知识库、版本和查看权限。'
+    if (detailFence.current(token)) detailError.value = t('workbench.correction.detailError')
   } finally {
     if (detailFence.current(token)) detailBusy.value = false
   }
@@ -289,16 +292,18 @@ async function download() {
     if (result.knowledge_base_id !== current.kb || result.document_id !== current.document || result.version_id !== current.version) {
       throw new Error('correction_scope_unavailable')
     }
-    const url = URL.createObjectURL(new Blob([result.markdown], { type: 'text/markdown;charset=utf-8' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = markdownFileName(result.file_name)
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    const fileName = markdownFileName(result.file_name)
+    await saveBusinessDownload(new Blob([result.markdown], { type: 'text/markdown;charset=utf-8' }), {
+      fileName,
+      sourceType: 'knowledge_document',
+      sourceId: current.document,
+      sourceTitle: result.file_name || fileName,
+      link: `/platform/knowledge-bases/${encodeURIComponent(current.kb)}?knowledge_id=${encodeURIComponent(current.document)}`,
+    })
   } catch {
     if (downloadFence.current(token)) {
       detail.value = undefined
-      detailError.value = '无法重新核验勘误文档的下载权限，请重新载入。'
+      detailError.value = t('workbench.correction.downloadError')
     }
   } finally {
     if (downloadFence.current(token)) downloading.value = false

@@ -222,6 +222,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact } from '@/api/chat'
+import { saveBusinessDownload } from '@/utils/desktopDownload'
 import { deleteArtifactLibraryItem, listArtifactLibrary, type ArtifactLibraryItem } from '@/api/artifacts'
 import {
   ARTIFACT_CATEGORIES,
@@ -379,14 +380,14 @@ async function handleDownload(item: ArtifactLibraryItem) {
   downloading[key] = true
   try {
     const blob = await downloadArtifact(item.session_id, item.message_id, item.index)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = item.file_name || 'artifact'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    const fileName = item.file_name || 'artifact'
+    await saveBusinessDownload(blob, {
+      fileName,
+      sourceType: 'artifact',
+      sourceId: item.message_id || item.session_id,
+      sourceTitle: fileName,
+      link: `/platform/chat/${encodeURIComponent(item.session_id)}`,
+    })
   } catch (err) {
     console.error('[ArtifactLibrary] download failed:', err)
     MessagePlugin.error(t('artifactLibrary.downloadFailed'))

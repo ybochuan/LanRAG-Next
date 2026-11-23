@@ -4,6 +4,7 @@ import test from 'node:test'
 import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import { translate } from '../../test-utils/i18n'
 import * as businessModel from '../business/model'
 import * as lifecycleModel from '../lifecycle/model'
 import type { BusinessBody } from '@/api/business'
@@ -20,7 +21,7 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
     vue: {...vue,onMounted(){},onBeforeUnmount(){}},
     'vue-router': {useRoute:()=>({query:{}}),useRouter:()=>({push(){}}),onBeforeRouteLeave(){}},
     '@/stores/auth': {useAuthStore:()=>({effectiveTenantId:7})},
-    'vue-i18n': {useI18n:()=>({t:(key:string)=>key})},
+    'vue-i18n': {useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } })},
     '@/api/families': {workspace,listFamilies:async()=>[]},
     '@/api/knowledge-base': {},
     '@/api/lifecycle': {overview:async()=>{overviewCalls++;return {can_write:true}}},

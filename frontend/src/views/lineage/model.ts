@@ -6,6 +6,42 @@ export const modes: { key: GraphMode; label: string; description: string }[] = [
   { key: 'relations', label: '文档关联', description: '查看制度关系、引用、模板和附件归属，箭头保留登记方向。' },
   { key: 'renditions', label: '转换件溯源', description: '从已登记的解析产物指向最近核验的原件版本。' },
 ]
+export const modeLabelKeys: Record<GraphMode, string> = {
+  'version-ancestry': 'workbench.lineage.modeVersion',
+  provenance: 'workbench.lineage.modeProvenance',
+  relations: 'workbench.lineage.modeRelations',
+  'relations-cross': 'workbench.lineage.modeRelations',
+  renditions: 'workbench.lineage.modeRenditions',
+}
+export const modeDescriptionKeys: Record<GraphMode, string> = {
+  'version-ancestry': 'workbench.lineage.modeVersionDesc',
+  provenance: 'workbench.lineage.modeProvenanceDesc',
+  relations: 'workbench.lineage.modeRelationsDesc',
+  'relations-cross': 'workbench.lineage.modeRelationsDesc',
+  renditions: 'workbench.lineage.modeRenditionsDesc',
+}
+export const stateLabelKeys: Record<string, string> = {
+  active: 'workbench.states.active', stale: 'workbench.states.stale', archived: 'workbench.states.archived',
+  superseded: 'workbench.states.superseded', pending: 'workbench.states.pending', scheduled: 'workbench.states.scheduled', failed: 'workbench.states.failed',
+}
+export const typeLabelKeys: Record<string, string> = {
+  document_version: 'workbench.lineage.typeDocumentVersion',
+  chunk: 'workbench.lineage.typeChunk',
+  parser_artifact: 'workbench.lineage.typeParserArtifact',
+  chunk_revision: 'workbench.lineage.typeChunkRevision',
+}
+export const edgeLabelKeys: Record<string, string> = {
+  supersedes: 'workbench.lineage.edgeSupersedes', merged_into: 'workbench.lineage.edgeMergedInto',
+  split_from: 'workbench.lineage.edgeSplitFrom', derived_from: 'workbench.lineage.edgeDerivedFrom',
+  supplements: 'workbench.lineage.edgeSupplements', amends: 'workbench.lineage.edgeAmends',
+  interprets: 'workbench.lineage.edgeInterprets', related_to: 'workbench.lineage.edgeRelatedTo',
+  attachment_of: 'workbench.lineage.edgeAttachmentOf', cites: 'workbench.lineage.edgeCites',
+  implements: 'workbench.lineage.edgeImplements', template_for: 'workbench.lineage.edgeTemplateFor',
+  repeals: 'workbench.lineage.edgeRepeals', exception_to: 'workbench.lineage.edgeExceptionTo',
+  conflicts_with: 'workbench.lineage.edgeConflictsWith', rendition_of: 'workbench.lineage.edgeRenditionOf',
+  explains_more: 'workbench.lineage.edgeExplainsMore', reading_note: 'workbench.lineage.edgeReadingNote',
+}
+export type Translate = (key: string) => string
 export const edgeLabels: Record<string, string> = {
   supersedes: '替代', merged_into: '合并至', split_from: '拆分自', derived_from: '来源于',
   supplements: '补充', amends: '修订', interprets: '解释', related_to: '相关', attachment_of: '归属主件',
@@ -20,16 +56,17 @@ export const stateLabels: Record<string, string> = {
   active: '生效中', stale: '已过期', archived: '已归档', superseded: '已替代',
   pending: '待处理', scheduled: '待生效', failed: '失败',
 }
-export function nodeTitle(node: LineageNode): string {
-  return node.title || node.document_id || `${typeLabels[node.type] || node.type} · ${node.id.slice(0, 10)}`
+export function nodeTitle(node: LineageNode, t?: Translate): string {
+  const type = (t && typeLabelKeys[node.type] ? t(typeLabelKeys[node.type]) : typeLabels[node.type]) || node.type
+  return node.title || node.document_id || `${type} · ${node.id.slice(0, 10)}`
 }
-export function graphError(error: unknown): string {
+export function graphError(error: unknown, t?: Translate): string {
   const value = error as { $httpStatus?: number; response?: { status?: number } }
   const status = value.$httpStatus ?? value.response?.status
-  if (status === 403) return '当前账号无权查看此知识库。'
-  if (status === 401) return '登录已失效，请重新登录。'
-  if (status === 400) return '此节点暂时无法展开，请返回全库视图后重试。'
-  return '血缘服务暂不可用，请稍后重新载入。'
+  if (status === 403) return t ? t('workbench.lineage.errForbidden') : '当前账号无权查看此知识库。'
+  if (status === 401) return t ? t('workbench.lineage.errUnauthorized') : '登录已失效，请重新登录。'
+  if (status === 400) return t ? t('workbench.lineage.errBadNode') : '此节点暂时无法展开，请返回全库视图后重试。'
+  return t ? t('workbench.lineage.errUnavailable') : '血缘服务暂不可用，请稍后重新载入。'
 }
 
 // Kahn layering preserves every original edge. Stored cycles remain visible.

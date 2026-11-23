@@ -93,6 +93,7 @@ async function setup(t: TestContext, initialRows: Row[] = [row('doc')]) {
     '@/hooks/useMarqueeSelect': { useMarqueeSelect: () => ({}) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': { permissionCanEditKB: () => true, permissionCanManageKB: () => true },
+    '@/utils/desktopDownload': { saveBusinessDownload: async () => ({ mode: 'browser' }) },
     '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': {

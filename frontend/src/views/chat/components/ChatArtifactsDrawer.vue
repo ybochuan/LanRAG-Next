@@ -180,6 +180,7 @@ import { computed, onMounted, onUnmounted, ref, watch, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact, listMessageArtifacts, type ArtifactMeta } from '@/api/chat'
+import { saveBusinessDownload } from '@/utils/desktopDownload'
 import { getFileIcon } from '@/utils/files'
 import { resolveFilePreviewExt } from '@/utils/filePreview'
 import DocumentPreview from '@/components/document-preview.vue'
@@ -407,14 +408,14 @@ async function handleDownload(item: ArtifactMeta) {
     downloading[item.index] = true
     try {
         const blob = await downloadArtifact(props.sessionId, props.messageId, item.index)
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = item.file_name || 'artifact'
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        const fileName = item.file_name || 'artifact'
+        await saveBusinessDownload(blob, {
+            fileName,
+            sourceType: 'artifact',
+            sourceId: props.messageId,
+            sourceTitle: fileName,
+            link: `/platform/chat/${encodeURIComponent(props.sessionId)}`,
+        })
     } catch (err) {
         console.error('[ChatArtifactsDrawer] download failed:', err)
         MessagePlugin.error(t('agent.artifactDrawer.downloadFailed'))

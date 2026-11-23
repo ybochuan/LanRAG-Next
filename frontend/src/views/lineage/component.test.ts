@@ -4,6 +4,7 @@ import test from 'node:test'
 import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import { translate } from '../../test-utils/i18n'
 import { requestFence } from '../lifecycle/model'
 import * as model from './model'
 
@@ -16,6 +17,7 @@ test('late graph response cannot restore the previous knowledge base', async () 
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
     'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({ replace: async () => {} }) },
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
+    'vue-i18n': { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } }) },
     '@/api/knowledge-base': {}, '@/api/lineage': {
       loadLineageGraph: (kb: string) => kb === 'old' ? new Promise(resolve => { release = resolve }) : Promise.resolve({ nodes: [], edges: [], mode: 'version-ancestry', root_id: '', newScope: true }),
     },

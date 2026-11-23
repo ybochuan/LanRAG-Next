@@ -235,6 +235,9 @@ const (
 	NotificationAutomationFailed           = "automation.failed"
 	NotificationAutomationAwaitingApproval = "automation.awaiting_approval"
 	NotificationAutomationPaused           = "automation.paused"
+	// NotificationDownloadCompleted records a business file the caller saved
+	// on their own machine. It is informational history, not actionable work.
+	NotificationDownloadCompleted = "download.completed"
 )
 
 // Notification is an in-app message for one user.

@@ -1,15 +1,20 @@
 <template>
-  <div ref="container" class="lineage-canvas" role="img" aria-label="文档血缘关系图，节点也可从左侧列表选择" />
+  <div ref="container" class="lineage-canvas" role="img" :aria-label="$t('workbench.lineage.canvasAria')" />
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Graph } from '@antv/x6'
 import type { LineageGraph } from '@/api/lineage'
-import { edgeLabels, layoutGraph, nodeTitle, stateLabels, typeLabels } from './model'
+import { useI18n } from 'vue-i18n'
+import { edgeLabelKeys, layoutGraph, nodeTitle, stateLabelKeys, typeLabelKeys } from './model'
 
 const props = defineProps<{ data: LineageGraph; selectedId: string }>()
 const emit = defineEmits<{ select: [id: string] }>()
+const { t, te } = useI18n()
+const typeText = (type: string) => typeLabelKeys[type] ? t(typeLabelKeys[type]) : type
+const stateText = (state: string) => te(`workbench.states.${state}`) ? t(`workbench.states.${state}`) : state
+const edgeText = (type: string) => edgeLabelKeys[type] ? t(edgeLabelKeys[type]) : type
 const container = ref<HTMLElement>()
 let graph: Graph | undefined
 
@@ -26,16 +31,16 @@ function draw() {
     ],
     attrs: {
       body: { rx: 10, ry: 10, fill: node.current && node.state === 'active' ? 'var(--td-success-color-1)' : 'var(--td-bg-color-container)', stroke: node.current && node.state === 'active' ? 'var(--td-success-color)' : 'var(--td-component-stroke)', strokeWidth: 1.5 },
-      title: { text: nodeTitle(node), refX: 16, refY: 23, textAnchor: 'start', fontSize: 13, fontWeight: 600, fill: 'var(--td-text-color-primary)', textWrap: { width: 216, height: 34, ellipsis: true } },
-      kind: { text: `${typeLabels[node.type] || node.type}${node.sequence ? ' · 观测 V' + node.sequence : ''}`, refX: 16, refY: 62, textAnchor: 'start', fontSize: 11, fill: 'var(--td-text-color-secondary)' },
-      status: { text: [stateLabels[node.state], node.current ? '当前观测版本' : ''].filter(Boolean).join(' · '), refX: 16, refY: 84, textAnchor: 'start', fontSize: 11, fill: 'var(--td-text-color-secondary)' },
+      title: { text: nodeTitle(node, t), refX: 16, refY: 23, textAnchor: 'start', fontSize: 13, fontWeight: 600, fill: 'var(--td-text-color-primary)', textWrap: { width: 216, height: 34, ellipsis: true } },
+      kind: { text: `${typeText(node.type)}${node.sequence ? ' · ' + t('workbench.lineage.observedShort') + ' ' + node.sequence : ''}`, refX: 16, refY: 62, textAnchor: 'start', fontSize: 11, fill: 'var(--td-text-color-secondary)' },
+      status: { text: [stateText(node.state), node.current ? t('workbench.lineage.currentObserved') : ''].filter(Boolean).join(' · '), refX: 16, refY: 84, textAnchor: 'start', fontSize: 11, fill: 'var(--td-text-color-secondary)' },
     },
   }))
   const edges = props.data.edges.map(edge => ({
     id: 'edge:' + edge.id, shape: 'edge', source: edge.from, target: edge.to,
     router: { name: 'manhattan', args: { padding: 22 } }, connector: { name: 'rounded' },
     attrs: { line: { stroke: 'var(--td-text-color-placeholder)', strokeWidth: 1.5, strokeDasharray: edge.type === 'related_to' || edge.status === 'awaiting_resolution' || edge.status === 'unavailable' ? '5 4' : '', targetMarker: { name: 'block', width: 7, height: 6 } } },
-    labels: [{ attrs: { label: { text: edge.status === 'awaiting_resolution' ? '条款冲突 · 待裁决' : edge.status === 'resolved' ? '条款冲突 · 已裁决' : (edgeLabels[edge.type] || edge.type) + (edge.status === 'registered' ? ' · 已登记' : edge.status === 'unavailable' ? ' · 待复核' : ''), fill: 'var(--td-text-color-secondary)', fontSize: 11 }, body: { fill: 'var(--td-bg-color-secondarycontainer)', stroke: 'var(--td-component-stroke)', rx: 3, ry: 3 } } }],
+    labels: [{ attrs: { label: { text: edge.status === 'awaiting_resolution' ? t('workbench.lineage.statusConflictPending') : edge.status === 'resolved' ? t('workbench.lineage.statusConflictResolved') : edgeText(edge.type) + (edge.status === 'registered' ? ' · ' + t('workbench.lineage.statusRegistered') : edge.status === 'unavailable' ? ' · ' + t('workbench.lineage.statusReview') : ''), fill: 'var(--td-text-color-secondary)', fontSize: 11 }, body: { fill: 'var(--td-bg-color-secondarycontainer)', stroke: 'var(--td-component-stroke)', rx: 3, ry: 3 } } }],
   }))
   graph.fromJSON({ nodes, edges })
   highlight()

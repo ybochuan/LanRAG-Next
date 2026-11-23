@@ -4,6 +4,7 @@ import test from 'node:test'
 import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import { translate } from '../../test-utils/i18n'
 import * as model from './model'
 import { requestFence } from '../lifecycle/model'
 
@@ -31,7 +32,7 @@ function mountSetup(
     vue: { ...vue, useId: () => 'test-' + nextID++, onMounted() {}, onBeforeUnmount() {} },
     'vue-router': { useRoute: () => ({ query: routeQuery }), useRouter: () => ({ options: { history: { state: {} } } }), onBeforeRouteLeave: (guard: () => boolean) => guards.push(guard), onBeforeRouteUpdate: (guard: () => boolean) => guards.push(guard) },
     '@/stores/auth': { useAuthStore: () => ({ get effectiveTenantId() { return auth.effectiveTenantId }, get isLoggedIn() { return auth.isLoggedIn }, hasRole: () => auth.admin }) },
-    'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+    'vue-i18n': { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } }) },
     '@/api/knowledge-base': { listKnowledgeBases: async () => ({ success: true, data: [] }), ...native },
     '@/api/lifecycle': {
       authority: async () => { overviewCalls++; return { can_write: true } },

@@ -46,6 +46,7 @@ func RegisterAutomationRoutes(r *gin.RouterGroup, h *handler.AutomationHandler, 
 	notifications := r.Group("/notifications", g.Viewer())
 	{
 		notifications.GET("", h.ListNotifications)
+		notifications.POST("/download", h.CreateDownloadNotification)
 		notifications.POST("/read", h.MarkNotificationsRead)
 		notifications.DELETE("/read", h.ClearReadNotifications)
 	}

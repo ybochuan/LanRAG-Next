@@ -4,6 +4,7 @@ import test from 'node:test'
 import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import { translate } from '../../test-utils/i18n'
 import * as recovery from './binaryRevisionRecovery'
 import type { CorrectionRevisionSource } from '@/api/business'
 
@@ -39,6 +40,7 @@ function fixture(failOnce?: Stage) {
   }
   const modules: Record<string, unknown> = {
     vue,
+    'vue-i18n': { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } }) },
     'vue-router': { useRouter: () => ({ push() {} }) },
     '@/stores/auth': { useAuthStore: () => ({ user: { id: 'user' }, effectiveTenantId: 7 }) },
     '@/api/knowledge-base': {

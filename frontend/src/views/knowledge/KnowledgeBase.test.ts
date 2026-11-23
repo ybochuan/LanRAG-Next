@@ -48,6 +48,7 @@ async function setup(t: TestContext, translate = (key: string, _params?: unknown
     '@/hooks/useMarqueeSelect': { useMarqueeSelect: () => ({}) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': { permissionCanEditKB: () => true, permissionCanManageKB: () => true },
+    '@/utils/desktopDownload': { saveBusinessDownload: async () => ({ mode: 'browser' }) },
     '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/utils/polling': polling, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': {

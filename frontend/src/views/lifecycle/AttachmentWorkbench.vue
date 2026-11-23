@@ -1,61 +1,61 @@
 <template>
   <section class="attachment-workbench" aria-labelledby="attachment-workbench-title">
     <header class="attachment-header">
-      <h3 id="attachment-workbench-title">附件</h3>
+      <h3 id="attachment-workbench-title">{{ $t('workbench.attachmentWorkbench.title') }}</h3>
       <t-space v-if="canWrite && view" size="small" break-line>
-        <t-button variant="outline" size="small" :disabled="busy" @click="previewImport">提取附件</t-button>
-        <t-button variant="outline" size="small" :disabled="busy" @click="showUpload = true">上传附件</t-button>
-        <t-button variant="outline" size="small" :disabled="busy" @click="openPicker">关联已有文件</t-button>
-        <t-button v-if="archiveCandidates.length" variant="outline" size="small" :disabled="busy" @click="showArchive = true">归档已有附件</t-button>
-        <t-button variant="text" size="small" :disabled="busy" @click="load">刷新</t-button>
+        <t-button variant="outline" size="small" :disabled="busy" @click="previewImport">{{ $t('workbench.attachmentWorkbench.actions.extract') }}</t-button>
+        <t-button variant="outline" size="small" :disabled="busy" @click="showUpload = true">{{ $t('workbench.attachmentWorkbench.actions.upload') }}</t-button>
+        <t-button variant="outline" size="small" :disabled="busy" @click="openPicker">{{ $t('workbench.attachmentWorkbench.actions.link') }}</t-button>
+        <t-button v-if="archiveCandidates.length" variant="outline" size="small" :disabled="busy" @click="showArchive = true">{{ $t('workbench.attachmentWorkbench.actions.archive') }}</t-button>
+        <t-button variant="text" size="small" :disabled="busy" @click="load">{{ $t('workbench.attachmentWorkbench.actions.refresh') }}</t-button>
       </t-space>
     </header>
     <t-alert v-if="error" theme="error" role="alert">{{ error }}</t-alert>
     <t-alert v-if="message" :theme="messageTheme" role="status">{{ message }}</t-alert>
     <t-loading :loading="busy && !view">
-      <t-empty v-if="view && !view.items.length" description="暂无附件" />
+      <t-empty v-if="view && !view.items.length" :description="$t('workbench.attachmentWorkbench.empty')" />
       <div v-for="item in view?.items || []" :key="item.relation_id || item.id" class="attachment-item" role="listitem">
         <div class="attachment-item-header">
           <t-button v-if="!['pending','removed','shared'].includes(item.state)" variant="text" size="small" class="attachment-title-link" @click="router.push(knowledgeRoute(item.id))">{{ item.title || item.file_name }}</t-button>
           <span v-else>{{ item.title || item.file_name }}</span>
           <t-space size="small">
-            <t-tag v-if="item.relation_type === 'template_for'" variant="light" size="small">共享模板</t-tag>
-            <t-tag v-if="item.relation_type === 'template_for' && item.mapping_status === 'manual'" variant="light" theme="success" size="small">已人工确认</t-tag>
-            <t-tag v-else-if="item.relation_type === 'cites'" variant="light" size="small">引用文件</t-tag>
+            <t-tag v-if="item.relation_type === 'template_for'" variant="light" size="small">{{ $t('workbench.attachmentWorkbench.tags.template') }}</t-tag>
+            <t-tag v-if="item.relation_type === 'template_for' && item.mapping_status === 'manual'" variant="light" theme="success" size="small">{{ $t('workbench.attachmentWorkbench.tags.manual') }}</t-tag>
+            <t-tag v-else-if="item.relation_type === 'cites'" variant="light" size="small">{{ $t('workbench.attachmentWorkbench.tags.cites') }}</t-tag>
             <t-tag v-else :theme="item.mapping_status === 'candidate' ? 'warning' : item.mapping_status === 'manual' ? 'success' : 'default'" variant="light" size="small">
-              {{ reclaimLabel(item) || states[item.state] || mappings[item.mapping_status] || '未匹配' }}
+              {{ reclaimLabel(item) || states[item.state] || mappings[item.mapping_status] || $t('workbench.attachmentWorkbench.tags.unmatched') }}
             </t-tag>
           </t-space>
         </div>
-        <div v-if="item.file_name !== item.title" class="attachment-meta">原文件 {{ item.file_name }}</div>
+        <div v-if="item.file_name !== item.title" class="attachment-meta">{{ $t('workbench.attachmentWorkbench.labels.originalFile', { name: item.file_name }) }}</div>
         <div v-if="item.reference.title || item.reference.location" class="attachment-meta">
-          正文引用 {{ [item.reference.title, item.reference.location].filter(Boolean).join(' · ') }}
+          {{ $t('workbench.attachmentWorkbench.labels.bodyReference', { value: [item.reference.title, item.reference.location].filter(Boolean).join(' · ') }) }}
         </div>
         <p v-if="item.reference.excerpt" class="attachment-excerpt">{{ item.reference.excerpt }}</p>
         <div v-if="item.title_state === 'pending' || item.title_state === 'conflict'" class="attachment-meta">
-          {{ item.title_state === 'pending' ? '名称待同步' : '名称同步冲突，请重新打开后确认' }}
+          {{ $t(item.title_state === 'pending' ? 'workbench.attachmentWorkbench.labels.titlePending' : 'workbench.attachmentWorkbench.labels.titleConflict') }}
         </div>
         <div v-if="item.parse_status && item.parse_status !== 'completed'" class="attachment-meta">{{ parseLabels[item.parse_status] || item.parse_status }}</div>
         <div v-if="item.reclaim_error" class="attachment-meta" role="status">{{ reclaimErrors[item.reclaim_error] || reclaimErrors.storage_unavailable }}</div>
         <t-space size="small" break-line>
-          <t-button v-if="canWrite && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="download(item)">下载</t-button>
-          <t-button v-if="canWrite && (item.managed || item.relation_type === 'template_for') && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="edit(item)">确认或修正</t-button>
-          <t-button v-if="canWrite && item.managed && item.state === 'detached'" variant="text" size="small" :disabled="busy" @click="change(item, 'restore')">恢复关联</t-button>
-          <t-button v-if="canWrite && item.state === 'current' && (item.managed || item.relation_id)" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'detach' }">解除关联</t-button>
-          <t-button v-if="canWrite && ['current','detached','historical'].includes(item.state)" theme="danger" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'delete' }">从知识库删除</t-button>
+          <t-button v-if="canWrite && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="download(item)">{{ $t('workbench.attachmentWorkbench.actions.download') }}</t-button>
+          <t-button v-if="canWrite && (item.managed || item.relation_type === 'template_for') && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="edit(item)">{{ $t('workbench.attachmentWorkbench.actions.edit') }}</t-button>
+          <t-button v-if="canWrite && item.managed && item.state === 'detached'" variant="text" size="small" :disabled="busy" @click="change(item, 'restore')">{{ $t('workbench.attachmentWorkbench.actions.restore') }}</t-button>
+          <t-button v-if="canWrite && item.state === 'current' && (item.managed || item.relation_id)" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'detach' }">{{ $t('workbench.attachmentWorkbench.actions.detach') }}</t-button>
+          <t-button v-if="canWrite && ['current','detached','historical'].includes(item.state)" theme="danger" variant="text" size="small" :disabled="busy" @click="pendingAction = { item, action: 'delete' }">{{ $t('workbench.attachmentWorkbench.actions.delete') }}</t-button>
         </t-space>
       </div>
     </t-loading>
 
-    <t-dialog v-model:visible="showPreview" header="提取附件" width="560px" attach="body" :confirm-btn="{ content: selected.some(id => importResults[id]?.error) ? '重试选中附件' : '导入选中附件', disabled: !selected.length, loading: busy }" @confirm="importSelected">
+    <t-dialog v-model:visible="showPreview" :header="$t('workbench.attachmentWorkbench.dialogs.extractTitle')" width="560px" attach="body" :confirm-btn="{ content: selected.some(id => importResults[id]?.error) ? $t('workbench.attachmentWorkbench.dialogs.retrySelected') : $t('workbench.attachmentWorkbench.dialogs.importSelected'), disabled: !selected.length, loading: busy }" @confirm="importSelected">
       <t-form label-align="top">
-        <t-form-item label="选择附件">
-          <t-alert v-if="previewIssues.length" theme="warning" role="status" message="部分附件未提取，原有关联保留。">
+        <t-form-item :label="$t('workbench.attachmentWorkbench.dialogs.selectAttachment')">
+          <t-alert v-if="previewIssues.length" theme="warning" role="status" :message="$t('workbench.attachmentWorkbench.dialogs.partialExtract')">
             <ul>
               <li v-for="(issue, index) in previewIssues" :key="index">{{ issue.file_name }} · {{ extractionLabels[issue.reason] || issue.reason }}</li>
             </ul>
           </t-alert>
-          <t-empty v-if="!preview.length && !previewIssues.length" description="当前主件没有可提取的附件" />
+          <t-empty v-if="!preview.length && !previewIssues.length" :description="$t('workbench.attachmentWorkbench.dialogs.noPreview')" />
           <t-checkbox-group v-if="preview.length" v-model="selected">
             <div v-for="item in preview" :key="item.fingerprint" class="attachment-option">
               <t-checkbox :value="item.fingerprint" :disabled="busy || item.state === 'removed' || !!importResults[item.fingerprint]?.document_id">
@@ -68,39 +68,39 @@
       </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showUpload" header="上传专属附件" width="480px" attach="body"
-      :confirm-btn="{ content: '上传', disabled: !uploadFile, loading: busy }" @confirm="upload">
+    <t-dialog v-model:visible="showUpload" :header="$t('workbench.attachmentWorkbench.dialogs.uploadTitle')" width="480px" attach="body"
+      :confirm-btn="{ content: $t('workbench.attachmentWorkbench.dialogs.upload'), disabled: !uploadFile, loading: busy }" @confirm="upload">
       <t-form label-align="top">
-        <t-form-item label="选择文件">
+        <t-form-item :label="$t('workbench.attachmentWorkbench.dialogs.selectFile')">
           <t-upload :auto-upload="false" :multiple="false" accept=".docx,.xlsx,.pptx,.pdf" @change="selectUpload" />
         </t-form-item>
-        <p class="attachment-meta">每份文件须小于 20 MiB，上传后归入知识库的「附件」目录。</p>
+        <p class="attachment-meta">{{ $t('workbench.attachmentWorkbench.dialogs.uploadHint') }}</p>
       </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showPicker" header="关联已有文件" width="560px" attach="body"
-      :confirm-btn="{ content: '关联', disabled: !picked, loading: busy }" @confirm="linkPicked">
+    <t-dialog v-model:visible="showPicker" :header="$t('workbench.attachmentWorkbench.dialogs.linkTitle')" width="560px" attach="body"
+      :confirm-btn="{ content: $t('workbench.attachmentWorkbench.dialogs.linkAction'), disabled: !picked, loading: busy }" @confirm="linkPicked">
       <t-form label-align="top">
-        <t-form-item label="搜索文件">
+        <t-form-item :label="$t('workbench.attachmentWorkbench.dialogs.searchFiles')">
           <t-space>
-            <t-input v-model="pickerQuery" clearable placeholder="按标题或原文件名搜索" @enter="searchFiles" />
-            <t-button variant="outline" :loading="searching" @click="searchFiles">搜索</t-button>
+            <t-input v-model="pickerQuery" clearable :placeholder="$t('workbench.attachmentWorkbench.dialogs.searchPlaceholder')" @enter="searchFiles" />
+            <t-button variant="outline" :loading="searching" @click="searchFiles">{{ $t('workbench.attachmentWorkbench.dialogs.search') }}</t-button>
           </t-space>
         </t-form-item>
-        <t-form-item label="选择文件">
-          <t-select v-model="picked" :options="pickerOptions" filterable clearable placeholder="选择同库模板或正式文档" />
+        <t-form-item :label="$t('workbench.attachmentWorkbench.dialogs.selectFileLabel')">
+          <t-select v-model="picked" :options="pickerOptions" filterable clearable :placeholder="$t('workbench.attachmentWorkbench.dialogs.selectTemplate')" />
         </t-form-item>
-        <t-form-item label="关联方式">
+        <t-form-item :label="$t('workbench.attachmentWorkbench.dialogs.linkType')">
           <t-select v-model="relationType" :options="relationTypes" />
         </t-form-item>
-        <t-checkbox v-if="relationType === 'template_for'" v-model="movePicked">同时移入「附件」目录</t-checkbox>
+        <t-checkbox v-if="relationType === 'template_for'" v-model="movePicked">{{ $t('workbench.attachmentWorkbench.dialogs.moveToAttachments') }}</t-checkbox>
       </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showArchive" header="归档已有附件" width="480px" attach="body"
-      :confirm-btn="{ content: '移入附件目录', disabled: !archiveIDs.length, loading: busy }" @confirm="archive">
+    <t-dialog v-model:visible="showArchive" :header="$t('workbench.attachmentWorkbench.dialogs.archiveTitle')" width="480px" attach="body"
+      :confirm-btn="{ content: $t('workbench.attachmentWorkbench.dialogs.moveToFolder'), disabled: !archiveIDs.length, loading: busy }" @confirm="archive">
       <t-form label-align="top">
-        <t-form-item label="选择附件">
+        <t-form-item :label="$t('workbench.attachmentWorkbench.dialogs.selectAttachment')">
           <t-checkbox-group v-model="archiveIDs">
             <div v-for="item in archiveCandidates" :key="item.id" class="attachment-option">
               <t-checkbox :value="item.id">{{ item.title || item.file_name }}</t-checkbox>
@@ -110,25 +110,25 @@
       </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="showEdit" header="确认附件映射" attach="body"
-      :confirm-btn="{ content: '保存', disabled: referenceID === undefined, loading: busy }" @confirm="save">
+    <t-dialog v-model:visible="showEdit" :header="$t('workbench.attachmentWorkbench.dialogs.editTitle')" attach="body"
+      :confirm-btn="{ content: $t('workbench.attachmentWorkbench.dialogs.save'), disabled: referenceID === undefined, loading: busy }" @confirm="save">
       <t-form label-align="top">
-		<t-alert v-if="editing?.relation_type === 'template_for'" theme="info" message="正文引用仅用于当前主件。修改文件显示名称后，其他引用也会使用新名称。" />
-        <t-form-item label="原文件">{{ editing?.file_name }}</t-form-item>
-        <t-form-item label="显示标题"><t-input v-model="editTitle" :maxlength="240" /></t-form-item>
-        <t-form-item label="主件正文引用">
-          <t-select v-model="referenceID" :options="referenceOptions" filterable placeholder="请选择主件引用" />
+		<t-alert v-if="editing?.relation_type === 'template_for'" theme="info" :message="$t('workbench.attachmentWorkbench.dialogs.templateRefNote')" />
+        <t-form-item :label="$t('workbench.attachmentWorkbench.labels.originalFileField')">{{ editing?.file_name }}</t-form-item>
+        <t-form-item :label="$t('workbench.attachmentWorkbench.labels.displayTitle')"><t-input v-model="editTitle" :maxlength="240" /></t-form-item>
+        <t-form-item :label="$t('workbench.attachmentWorkbench.labels.parentReference')">
+          <t-select v-model="referenceID" :options="referenceOptions" filterable :placeholder="$t('workbench.attachmentWorkbench.dialogs.selectReference')" />
         </t-form-item>
         <p v-if="chosenReference?.excerpt" class="attachment-excerpt">{{ chosenReference.excerpt }}</p>
       </t-form>
     </t-dialog>
 
-    <t-dialog :visible="!!pendingAction" :header="pendingAction?.action === 'delete' ? '从知识库删除文件' : '解除附件关联'" attach="body"
-      :confirm-btn="{ content: pendingAction?.action === 'delete' ? '删除文件' : '解除关联', theme: 'danger', loading: busy }"
+    <t-dialog :visible="!!pendingAction" :header="pendingAction?.action === 'delete' ? $t('workbench.attachmentWorkbench.dialogs.deleteTitle') : $t('workbench.attachmentWorkbench.dialogs.detachTitle')" attach="body"
+      :confirm-btn="{ content: pendingAction?.action === 'delete' ? $t('workbench.attachmentWorkbench.dialogs.deleteFile') : $t('workbench.attachmentWorkbench.actions.detach'), theme: 'danger', loading: busy }"
       @close="pendingAction = null" @cancel="pendingAction = null" @confirm="executeAction">
       <p>{{ pendingAction?.item.title }}</p>
-      <p v-if="pendingAction?.action === 'delete'">将提交原生删除任务。使用中的共享模板须先解除关联。</p>
-      <p v-else>保留知识库中的文件。</p>
+      <p v-if="pendingAction?.action === 'delete'">{{ $t('workbench.attachmentWorkbench.dialogs.deleteNote') }}</p>
+      <p v-else>{{ $t('workbench.attachmentWorkbench.dialogs.detachNote') }}</p>
     </t-dialog>
   </section>
 </template>
@@ -136,6 +136,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import type { UploadFile } from 'tdesign-vue-next'
 import { listKnowledgeFiles, moveKnowledgeToFolder, delKnowledgeDetails } from '@/api/knowledge-base'
 import { write as writeRelation } from '@/api/business'
@@ -146,6 +147,7 @@ import { httpStatus } from '../business/model'
 const props = defineProps<{ kb: string; documentId: string; canWrite: boolean; parentState?: string }>()
 const emit = defineEmits<{ (event: 'locked', value: boolean): void; (event: 'changed'): void }>()
 const router = useRouter()
+const { t } = useI18n()
 const view = ref<AttachmentWorkbench>()
 const busy = ref(false)
 const error = ref('')
@@ -178,31 +180,73 @@ const deletionDeadlines = new Map<string, number>()
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 const operationID = () => crypto.randomUUID()
-const mappings: Record<string, string> = {
-  confirmed: '已自动匹配', candidate: '待确认', unmatched: '未匹配', manual: '已人工确认',
-}
-const states: Record<string, string> = { detached: '已解除', historical: '历史附件', deleting: '删除中', pending: '原件待回收', removed: '已删除，托管原件已回收', shared: '已删除，原件仍有引用' }
-const parseLabels: Record<string, string> = { pending: '等待解析', processing: '解析中', failed: '解析失败', deleting: '删除中' }
-const previewStates: Record<string, string> = { new: '可导入', existing: '沿用已入库文件', pending: '待对账', removed: '已移除' }
-const extractionLabels: Record<string, string> = { size_limit: '超出大小限制', read_failed: '读取失败', invalid_format: '格式校验失败', unsupported_format: '暂不支持此格式' }
-const importErrors: Record<string, string> = { upload_failed: '导入失败，可重试', revision_conflict: '版本或归属已变化，请重新提取', pending: '上传结果待核对，可重试核对', rejected: '文件未被知识库接收，可重试' }
-const reclaimErrors: Record<string, string> = { reclaim_requires_review: '资源归属需要核对，回收任务已保留。', storage_unavailable: '存储暂不可用，后台将重试回收。', index_cleanup_unconfirmed: '正在等待索引清理确认。' }
+const mappings = computed<Record<string, string>>(() => ({
+  confirmed: t('workbench.attachmentWorkbench.mappings.confirmed'),
+  candidate: t('workbench.attachmentWorkbench.mappings.candidate'),
+  unmatched: t('workbench.attachmentWorkbench.mappings.unmatched'),
+  manual: t('workbench.attachmentWorkbench.mappings.manual'),
+}))
+const states = computed<Record<string, string>>(() => ({
+  detached: t('workbench.attachmentWorkbench.states.detached'),
+  historical: t('workbench.attachmentWorkbench.states.historical'),
+  deleting: t('workbench.attachmentWorkbench.states.deleting'),
+  pending: t('workbench.attachmentWorkbench.states.pending'),
+  removed: t('workbench.attachmentWorkbench.states.removed'),
+  shared: t('workbench.attachmentWorkbench.states.shared'),
+}))
+const parseLabels = computed<Record<string, string>>(() => ({
+  pending: t('workbench.attachmentWorkbench.parse.pending'),
+  processing: t('workbench.attachmentWorkbench.parse.processing'),
+  failed: t('workbench.attachmentWorkbench.parse.failed'),
+  deleting: t('workbench.attachmentWorkbench.parse.deleting'),
+}))
+const previewStates = computed<Record<string, string>>(() => ({
+  new: t('workbench.attachmentWorkbench.preview.new'),
+  existing: t('workbench.attachmentWorkbench.preview.existing'),
+  pending: t('workbench.attachmentWorkbench.preview.pending'),
+  removed: t('workbench.attachmentWorkbench.preview.removed'),
+}))
+const extractionLabels = computed<Record<string, string>>(() => ({
+  size_limit: t('workbench.attachmentWorkbench.extraction.sizeLimit'),
+  read_failed: t('workbench.attachmentWorkbench.extraction.readFailed'),
+  invalid_format: t('workbench.attachmentWorkbench.extraction.invalidFormat'),
+  unsupported_format: t('workbench.attachmentWorkbench.extraction.unsupportedFormat'),
+}))
+const importErrors = computed<Record<string, string>>(() => ({
+  upload_failed: t('workbench.attachmentWorkbench.importErrors.uploadFailed'),
+  revision_conflict: t('workbench.attachmentWorkbench.importErrors.revisionConflict'),
+  pending: t('workbench.attachmentWorkbench.importErrors.pending'),
+  rejected: t('workbench.attachmentWorkbench.importErrors.rejected'),
+}))
+const reclaimErrors = computed<Record<string, string>>(() => ({
+  reclaim_requires_review: t('workbench.attachmentWorkbench.reclaimErrors.reclaimRequiresReview'),
+  storage_unavailable: t('workbench.attachmentWorkbench.reclaimErrors.storageUnavailable'),
+  index_cleanup_unconfirmed: t('workbench.attachmentWorkbench.reclaimErrors.indexCleanupUnconfirmed'),
+}))
+const reclaimLabels = computed<Record<string, string>>(() => ({
+  pending: t('workbench.attachmentWorkbench.reclaim.pending'),
+  removed: t('workbench.attachmentWorkbench.reclaim.removed'),
+  shared: t('workbench.attachmentWorkbench.reclaim.shared'),
+}))
 
 function reclaimLabel(item: AttachmentItem) {
   if (!item.resources_verified) return ''
-  return ({ pending: '资源待回收', removed: '已删除，已核验资源已回收', shared: '已删除，共享资源已保留' } as Record<string, string>)[item.state] || ''
+  return reclaimLabels.value[item.state] || ''
 }
 
 function importLabel(item: AttachmentPreview) {
   const result = importResults.value[item.fingerprint]
-  if (result?.error) return importErrors[result.error] || '导入失败'
-  if (result?.document_id) return '已导入'
-  return previewStates[item.state] || item.state
+  if (result?.error) return importErrors.value[result.error] || t('workbench.attachmentWorkbench.importErrors.fallback')
+  if (result?.document_id) return t('workbench.attachmentWorkbench.importDone')
+  return previewStates.value[item.state] || item.state
 }
-const relationTypes = [{ label: '共享模板', value: 'template_for' }, { label: '引用正式文件', value: 'cites' }]
+const relationTypes = computed(() => [
+  { label: t('workbench.attachmentWorkbench.relationTypes.template'), value: 'template_for' },
+  { label: t('workbench.attachmentWorkbench.relationTypes.cites'), value: 'cites' },
+])
 const referenceOptions = computed(() => [
-  { value: '', label: '无对应正文引用' },
-  ...references.value.map(item => ({ value: item.id, label: [item.sequence ? `附件 ${item.sequence}` : '', item.title, item.location].filter(Boolean).join(' · ') })),
+  { value: '', label: t('workbench.attachmentWorkbench.reference.none') },
+  ...references.value.map(item => ({ value: item.id, label: [item.sequence ? t('workbench.attachmentWorkbench.reference.attachmentSequence', { n: item.sequence }) : '', item.title, item.location].filter(Boolean).join(' · ') })),
 ])
 const chosenReference = computed(() => references.value.find(item => item.id === referenceID.value))
 const archiveCandidates = computed(() => (view.value?.items || []).filter(item => item.managed && item.state === 'current' && !item.folder_path))
@@ -249,12 +293,12 @@ function scheduleRefresh() {
 
 function fail(err: unknown) {
   if (props.parentState === 'superseded') {
-    error.value = '主件已被替代，附件不可用。'
+    error.value = t('workbench.attachmentWorkbench.messages.parentSuperseded')
     return
   }
   const status = httpStatus(err)
-  error.value = status === 409 ? '文件、名称或关联已变化，请刷新后重试。删除共享模板前请解除有效引用。'
-    : status === 400 ? '请核对选中的附件、文件格式和大小后重试。' : '附件操作未完成，请重试。'
+  error.value = status === 409 ? t('workbench.attachmentWorkbench.messages.conflict')
+    : status === 400 ? t('workbench.attachmentWorkbench.messages.invalid') : t('workbench.attachmentWorkbench.messages.generic')
 }
 
 async function load() {
@@ -309,7 +353,7 @@ function importSelected() {
     importResults.value = { ...importResults.value, ...Object.fromEntries(outcomes.map(item => [item.fingerprint, item])) }
     selected.value = outcomes.filter(item => item.error).map(item => item.fingerprint)
     await reload()
-    notice(selected.value.length ? '有附件未导入，请查看逐项结果。' : '所选附件已导入。', selected.value.length ? 'warning' : 'success')
+    notice(selected.value.length ? t('workbench.attachmentWorkbench.messages.importPartial') : t('workbench.attachmentWorkbench.messages.importDone'), selected.value.length ? 'warning' : 'success')
   })
 }
 
@@ -320,12 +364,12 @@ function selectUpload(files: UploadFile[]) {
 function upload() {
   return run(async () => {
     if (!view.value || !uploadFile.value) return
-    if (uploadFile.value.size >= 20 * 1024 * 1024) { notice('每份附件须小于 20 MiB。', 'warning'); return }
+    if (uploadFile.value.size >= 20 * 1024 * 1024) { notice(t('workbench.attachmentWorkbench.messages.uploadTooBig'), 'warning'); return }
     await uploadWorkbenchAttachment(props.kb, view.value.parent_id, view.value.parent_version, uploadFile.value)
     showUpload.value = false
     uploadFile.value = undefined
     await reload()
-    notice('附件已入库，解析进度可在知识库查看。')
+    notice(t('workbench.attachmentWorkbench.messages.uploadDone'))
   })
 }
 
@@ -358,7 +402,7 @@ function archive() {
     archiveIDs.value = []
     showArchive.value = false
     await reload()
-    notice('已移入「附件」目录。')
+    notice(t('workbench.attachmentWorkbench.messages.movedToAttachments'))
   })
 }
 
@@ -374,10 +418,10 @@ function linkPicked() {
     showPicker.value = false
     if (template && movePicked.value) {
       try { await moveKnowledgeToFolder(props.kb, [picked.value], '附件') }
-      catch { await reload(); notice('已建立关联，归档失败，请在知识库重试移动。', 'warning'); return }
+      catch { await reload(); notice(t('workbench.attachmentWorkbench.messages.linkedArchiveFailed'), 'warning'); return }
     }
     await reload()
-    notice('已建立关联。')
+    notice(t('workbench.attachmentWorkbench.messages.linked'))
   })
 }
 
@@ -411,9 +455,9 @@ function save() {
     const result = await mutate(editing.value, 'confirm')
     showEdit.value = false
     await reload()
-    if (result?.title_state === 'pending') notice('映射已确认，名称正在同步。', 'info')
-    else if (result?.title_state === 'conflict') notice('映射已确认，名称同步冲突。', 'warning')
-    else notice('附件映射已确认。')
+    if (result?.title_state === 'pending') notice(t('workbench.attachmentWorkbench.messages.mappingPending'), 'info')
+    else if (result?.title_state === 'conflict') notice(t('workbench.attachmentWorkbench.messages.mappingConflict'), 'warning')
+    else notice(t('workbench.attachmentWorkbench.messages.mappingConfirmed'))
   })
 }
 
@@ -424,7 +468,7 @@ function change(item: AttachmentItem, action: 'detach' | 'restore') {
     } else await mutate(item, action)
     pendingAction.value = null
     await reload()
-    notice(action === 'detach' ? '关联已解除，文件已保留。' : '已恢复附件关联。')
+    notice(action === 'detach' ? t('workbench.attachmentWorkbench.messages.detachDone') : t('workbench.attachmentWorkbench.messages.restoreDone'))
   })
 }
 
@@ -440,7 +484,7 @@ function executeAction() {
     }
     pendingAction.value = null
     await reload()
-    notice('已提交删除任务，请刷新查看回收结果。', 'info')
+    notice(t('workbench.attachmentWorkbench.messages.deleteSubmitted'), 'info')
   })
 }
 

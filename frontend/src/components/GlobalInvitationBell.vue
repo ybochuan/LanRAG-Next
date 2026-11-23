@@ -40,12 +40,33 @@
               </span>
             </button>
           </section>
+          <section v-if="desktopDownloads.length" class="notification-panel__downloads">
+            <h3>{{ t('notifications.downloads') }}<span>{{ desktopDownloads.length }}</span></h3>
+            <div v-for="item in desktopDownloads" :key="item.id" class="notification-item notification-item--download">
+              <span class="notification-item__body">
+                <span class="notification-item__heading">
+                  <span class="notification-item__title">{{ item.fileName }}</span>
+                </span>
+                <span class="notification-item__text">{{ item.sourceTitle }} · {{ formatDownloadSize(item.size) }}</span>
+                <span class="notification-item__footer">
+                  <span class="notification-item__status">
+                    <t-icon name="download" size="14px" class="notification-item__icon" />
+                    {{ item.syncState === 'failed' ? t('notifications.downloadsSyncFailed') : t('notifications.downloadsLabel') }}
+                  </span>
+                  <span class="notification-download__actions">
+                    <t-button variant="text" size="small" @click.stop="openDownload(item)">{{ t('notifications.downloadsOpen') }}</t-button>
+                    <t-button variant="text" size="small" @click.stop="revealDownload(item)">{{ t('notifications.downloadsReveal') }}</t-button>
+                  </span>
+                </span>
+              </span>
+            </div>
+          </section>
           <section class="notification-panel__history">
             <h3>{{ t('notifications.history') }}<span v-if="unread">{{ t('notifications.unreadCount', { count: unread }) }}</span></h3>
             <button v-if="hasNew" type="button" class="notification-panel__refresh" :disabled="loading || busy" @click="refresh(true)">
               {{ t('notifications.newItems') }}
             </button>
-            <button v-for="item in items" :key="item.id" type="button" class="notification-item"
+            <button v-for="item in visibleItems" :key="item.id" type="button" class="notification-item"
               :class="{ 'is-unread': !item.read_at }" :disabled="busy" @click="open(item)">
               <span class="notification-item__body">
                 <span class="notification-item__heading">
@@ -63,7 +84,7 @@
                 </span>
               </span>
             </button>
-            <p v-if="!items.length && !loading && !loadError" class="notification-panel__empty">{{ t('notifications.empty') }}</p>
+            <p v-if="!visibleItems.length && !loading && !loadError" class="notification-panel__empty">{{ t('notifications.empty') }}</p>
             <div v-if="loadError" class="notification-panel__error" role="status">
               {{ t('notifications.loadError') }}
               <button type="button" :disabled="loading || busy" @click="retry">{{ t('common.retry') }}</button>
@@ -118,6 +139,7 @@ import { useAuthStore } from '@/stores/auth'
 import MyInvitationsDialog from '@/components/MyInvitationsDialog.vue'
 import { notificationPreview } from '@/utils/notificationPreview'
 import { clearReadNotifications, listNotifications, markNotificationsRead, type AppNotification, type NotificationPage, type PendingNotification } from '@/api/automation'
+import { formatDownloadSize, isManagedDownloadAvailable, markBusinessDownloadsSeen, onBusinessDownloadSaved, openBusinessDownload, revealBusinessDownload, syncPendingBusinessDownloads, type BusinessDownloadRecord } from '@/utils/desktopDownload'
 
 const POLL_MS = 60_000
 const authStore = useAuthStore()
@@ -125,11 +147,16 @@ const router = useRouter()
 const { t, te, locale } = useI18n()
 const pendingInvitationCount = computed(() => authStore.pendingInvitationCount)
 const items = ref<AppNotification[]>([])
+const desktopDownloads = ref<BusinessDownloadRecord[]>([])
+const visibleItems = computed(() => items.value.filter(item =>
+  !(isManagedDownloadAvailable() && item.kind === 'download.completed')
+))
 const pending = ref<PendingNotification[]>([])
 const unread = ref(0)
 const readCount = ref(0)
 const pendingCount = computed(() => pendingInvitationCount.value + pending.value.length)
-const badgeCount = computed(() => pendingCount.value + unread.value)
+const desktopDownloadUnread = computed(() => panelVisible.value ? 0 : desktopDownloads.value.filter(item => item.unread === true).length)
+const badgeCount = computed(() => pendingCount.value + unread.value + desktopDownloadUnread.value)
 const nextCursor = ref('')
 const historyExpanded = ref(false)
 const hasNew = ref(false)
@@ -283,6 +310,7 @@ watch(panelVisible, open => {
   if (open) {
     clearBanners()
     void refresh(true)
+    void refreshDesktopDownloads(true)
   }
 })
 watch(() => [authStore.effectiveTenantId, authStore.user?.id], () => {
@@ -300,13 +328,62 @@ watch(() => [authStore.effectiveTenantId, authStore.user?.id], () => {
   newestNotificationTime = 0
   if (authStore.user) void refresh(true)
 })
+async function refreshDesktopDownloads(markSeen = false) {
+  if (!isManagedDownloadAvailable()) {
+    desktopDownloads.value = []
+    return
+  }
+  desktopDownloads.value = await syncPendingBusinessDownloads()
+  if (markSeen) await markDesktopDownloadsSeen()
+}
+
+async function markDesktopDownloadsSeen() {
+  const ids = desktopDownloads.value.filter(item => item.unread === true).map(item => item.id)
+  if (!ids.length) return
+  try {
+    await markBusinessDownloadsSeen(ids)
+    const seen = new Set(ids)
+    desktopDownloads.value = desktopDownloads.value.map(item => seen.has(item.id) ? { ...item, unread: false } : item)
+  } catch {
+    // Keep the local badge when persistence fails; the next panel open retries.
+  }
+}
+
+function upsertDesktopDownload(record: BusinessDownloadRecord) {
+  const index = desktopDownloads.value.findIndex(item => item.id === record.id)
+  desktopDownloads.value = index < 0
+    ? [record, ...desktopDownloads.value]
+    : desktopDownloads.value.map((item, i) => i === index ? { ...item, ...record } : item)
+  if (panelVisible.value) void markDesktopDownloadsSeen()
+}
+
+async function openDownload(item: BusinessDownloadRecord) {
+  try {
+    await openBusinessDownload(item.id)
+  } catch {
+    MessagePlugin.error(t('notifications.downloadsOpenFailed'))
+  }
+}
+
+async function revealDownload(item: BusinessDownloadRecord) {
+  try {
+    await revealBusinessDownload(item.id)
+  } catch {
+    MessagePlugin.error(t('notifications.downloadsRevealFailed'))
+  }
+}
+
+let stopDownloadEvents: (() => void) | undefined
 onMounted(() => {
   void refresh()
+  stopDownloadEvents = onBusinessDownloadSaved(upsertDesktopDownload)
+  void refreshDesktopDownloads()
   timer = setInterval(() => { void refresh() }, POLL_MS)
   document.addEventListener('visibilitychange', onVisible)
 })
 onBeforeUnmount(() => {
   ++version
+  stopDownloadEvents?.()
   clearInterval(timer)
   clearBanners()
   document.removeEventListener('visibilitychange', onVisible)
@@ -531,6 +608,14 @@ async function clearRead() {
   > span { font-weight: 400; }
 }
 .notification-panel__pending { margin-bottom: 20px; }
+.notification-panel__downloads { margin-bottom: 20px; }
+.notification-item--download {
+  cursor: default;
+  &:hover { background: transparent; }
+  & + & { margin-top: 4px; }
+  .notification-item__footer { flex-wrap: nowrap; }
+}
+.notification-download__actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; }
 .notification-task,
 .notification-item {
   display: flex;

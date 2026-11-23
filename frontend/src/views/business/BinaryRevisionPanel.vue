@@ -1,34 +1,34 @@
 <template>
   <section class="binary-revision" aria-labelledby="binary-revision-title">
     <div class="section-heading">
-      <h2 id="binary-revision-title">正式修订文件</h2>
+      <h2 id="binary-revision-title">{{ $t('workbench.binaryRevision.title') }}</h2>
       <span class="subtle">PDF / DOCX / XLSX / PPTX</span>
     </div>
-    <p class="subtle">上传修订后的正式源文件，解析完成后建立修订提案并绑定该文件。</p>
-    <t-alert v-if="differentRecovery" role="alert" theme="warning">本知识库已有其他待核对的修订操作。请先在修订发布页完成核对。
-      <t-button theme="primary" variant="text" size="small" @click="openRevisions">前往修订发布</t-button>
+    <p class="subtle">{{ $t('workbench.binaryRevision.intro') }}</p>
+    <t-alert v-if="differentRecovery" role="alert" theme="warning">{{ $t('workbench.binaryRevision.otherRecovery') }}
+      <t-button theme="primary" variant="text" size="small" @click="openRevisions">{{ $t('workbench.binaryRevision.goRevisions') }}</t-button>
     </t-alert>
     <form v-else @submit.prevent="submit(false)">
-      <p v-if="initialCorrection" class="subtle">源文档 · {{ initialCorrection.title || initialCorrection.document_id }} · 版本 {{ initialCorrection.version_id }}</p>
-      <p v-else-if="recovery?.correction" class="subtle">源文档 · {{ recovery.source }} · 版本 {{ recovery.correction.version_id }}</p>
-      <DocumentPicker v-else v-model="sourceId" :kb="kb" label="原制度文档" searchable :disabled="disabled || uploading || !!recovery" />
-      <p v-if="correction" class="subtle">已选勘误 · {{ correction.id }} · 修订 {{ correction.revision }}</p>
-      <label v-if="!recovery?.target">修订后文件
+      <p v-if="initialCorrection" class="subtle">{{ $t('workbench.binaryRevision.sourceVersion', { title: initialCorrection.title || initialCorrection.document_id, version: initialCorrection.version_id }) }}</p>
+      <p v-else-if="recovery?.correction" class="subtle">{{ $t('workbench.binaryRevision.sourceVersion', { title: recovery.source, version: recovery.correction.version_id }) }}</p>
+      <DocumentPicker v-else v-model="sourceId" :kb="kb" :label="$t('workbench.form.sourceDoc')" searchable :disabled="disabled || uploading || !!recovery" />
+      <p v-if="correction" class="subtle">{{ $t('workbench.binaryRevision.selectedCorrection', { id: correction.id, revision: correction.revision }) }}</p>
+      <label v-if="!recovery?.target">{{ $t('workbench.binaryRevision.revisedFile') }}
         <t-upload v-model="files" :auto-upload="false" :multiple="false" :max="1" accept=".pdf,.docx,.xlsx,.pptx" :disabled="disabled || uploading" @change="chooseFile" />
       </label>
-      <p v-if="file && !recovery?.target" class="subtle">已选择 · {{ file.name }}</p>
-      <p v-if="recovery && !recovery.target && !file" class="subtle">可先核对上次上传。需要补传时，请重新选择同一份文件。</p>
-      <p v-if="recovery?.target" class="subtle">修订文件标识：{{ recovery.target.id }}</p>
-      <p v-if="recovery?.proposal" class="subtle">原提案标识：{{ recovery.proposal.id }}</p>
+      <p v-if="file && !recovery?.target" class="subtle">{{ $t('workbench.binaryRevision.selectedFile', { name: file.name }) }}</p>
+      <p v-if="recovery && !recovery.target && !file" class="subtle">{{ $t('workbench.binaryRevision.recoveryHint') }}</p>
+      <p v-if="recovery?.target" class="subtle">{{ $t('workbench.binaryRevision.targetId', { id: recovery.target.id }) }}</p>
+      <p v-if="recovery?.proposal" class="subtle">{{ $t('workbench.binaryRevision.proposalId', { id: recovery.proposal.id }) }}</p>
       <t-alert v-if="error" role="alert" theme="error">{{ error }}</t-alert>
       <t-alert v-if="notice" role="status" theme="success">{{ notice }}</t-alert>
       <div class="recovery-actions">
         <t-button theme="primary" type="submit" :loading="uploading" :disabled="disabled || !scopeKey || storageUnavailable || (!recovery && (!sourceId || !file))">
-          {{ uploading ? progress : recovery ? '核对并继续' : '上传并建立建议' }}
+          {{ uploading ? progress : recovery ? $t('workbench.binaryRevision.checkContinue') : $t('workbench.binaryRevision.uploadCreate') }}
         </t-button>
-        <t-button v-if="canReparse" type="button" variant="outline" :disabled="disabled || uploading" @click="submit(true)">重新解析已上传文件</t-button>
-        <t-popconfirm v-if="recovery && !uploading" content="结束本页恢复？已上传的文件和已创建的提案会保留，请先核对对应列表。" @confirm="endRecovery">
-          <t-button type="button" variant="text" :disabled="disabled">结束本页恢复</t-button>
+        <t-button v-if="canReparse" type="button" variant="outline" :disabled="disabled || uploading" @click="submit(true)">{{ $t('workbench.binaryRevision.reparse') }}</t-button>
+        <t-popconfirm v-if="recovery && !uploading" :content="$t('workbench.binaryRevision.endRecoveryConfirm')" @confirm="endRecovery">
+          <t-button type="button" variant="text" :disabled="disabled">{{ $t('workbench.binaryRevision.endRecovery') }}</t-button>
         </t-popconfirm>
       </div>
     </form>
@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import type { UploadFile } from 'tdesign-vue-next'
 import { batchQueryKnowledge, downKnowledgeDetails, listKnowledgeFiles, reparseKnowledge, uploadKnowledgeFile } from '@/api/knowledge-base'
 import { list, verifyCorrectionRevision, write, type CorrectionRevisionSource } from '@/api/business'
@@ -53,6 +54,8 @@ const props = defineProps<{ kb: string; disabled: boolean; initialCorrection?: C
 const emit = defineEmits<{ created: []; locked: [value: boolean] }>()
 const auth = useAuthStore()
 const router = useRouter()
+const { t } = useI18n()
+const stageText = (stage: string) => t(stage === '上传' ? 'workbench.binaryRevision.stageUpload' : stage === '解析' ? 'workbench.binaryRevision.stageParse' : stage === '创建提案' ? 'workbench.binaryRevision.stageCreate' : 'workbench.binaryRevision.stageBind')
 const scopeKey = computed(() => recoveryKey(auth.user?.id, auth.effectiveTenantId, props.kb))
 const sourceId = ref('')
 const files = ref<UploadFile[]>([])
@@ -67,7 +70,7 @@ const differentRecovery = computed(() => {
 const uploading = ref(false)
 const storageUnavailable = ref(false)
 const canReparse = ref(false)
-const progress = ref('正在核对…')
+const progress = ref(t('workbench.binaryRevision.progressCheck'))
 const error = ref('')
 const notice = ref('')
 let run = 0
@@ -99,7 +102,7 @@ watch([scopeKey, () => props.initialCorrection], ([key, initial]) => {
     sourceId.value = initial?.document_id ?? recovery.value?.source ?? ''
   } catch {
     storageUnavailable.value = true
-    error.value = '无法读取本标签页的修订恢复记录。'
+    error.value = t('workbench.binaryRevision.readRecoveryFailed')
   }
 }, { immediate: true, flush: 'sync' })
 onScopeDispose(stop)
@@ -112,14 +115,14 @@ function persist(key: string, value?: BinaryRevisionRecovery) {
   try {
     const stored = readRecovery(sessionStorage.getItem(key))
     if (stored?.uploadOperation !== recovery.value?.uploadOperation) {
-      throw new RecoveryError('本标签页有其他修订操作，请重新打开面板核对。')
+      throw new RecoveryError(t('workbench.binaryRevision.otherOperation'))
     }
     if (value) sessionStorage.setItem(key, JSON.stringify(value))
     else sessionStorage.removeItem(key)
     recovery.value = value
   } catch (cause) {
     if (cause instanceof RecoveryError) throw cause
-    throw new RecoveryError('无法保存修订恢复记录，请检查浏览器的会话存储。')
+    throw new RecoveryError(t('workbench.binaryRevision.saveRecoveryFailed'))
   }
 }
 
@@ -133,7 +136,7 @@ function endRecovery() {
     canReparse.value = false
     error.value = ''
   } catch (cause) {
-    if (cause instanceof RecoveryError) error.value = cause.message
+    if (cause instanceof RecoveryError) error.value = cause.key ? t(cause.key) : cause.message
   }
 }
 
@@ -148,7 +151,7 @@ async function submit(retryParse: boolean) {
   const token = ++run
   const current = () => token === run && key === scopeKey.value
   function ensureCurrent() {
-    if (!current() || props.disabled) throw new RecoveryError('操作范围或权限已变化，请在原知识库继续核对。')
+    if (!current() || props.disabled) throw new RecoveryError(t('workbench.binaryRevision.operationChanged'))
   }
   function save(value: BinaryRevisionRecovery) {
     ensureCurrent()
@@ -162,8 +165,8 @@ async function submit(retryParse: boolean) {
       if (invalid?.(result)) throw new Error()
       return result
     } catch (cause) {
-      if (knownRejection(cause)) throw new RecoveryError(stage + '请求被拒绝（HTTP ' + httpStatus(cause) + '）。请核对后继续。')
-      throw new RecoveryError(stage + '请求结果未知。请核对并继续原操作。')
+      if (knownRejection(cause)) throw new RecoveryError(t('workbench.binaryRevision.rejected', { stage: stageText(stage), status: httpStatus(cause) }))
+      throw new RecoveryError(t('workbench.binaryRevision.resultUnknown', { stage: stageText(stage) }))
     }
   }
   async function verifyRecoveredUpload(row: NativeDocument) {
@@ -171,7 +174,7 @@ async function submit(retryParse: boolean) {
     ensureCurrent()
     const original = await downKnowledgeDetails(encodeURIComponent(target.id))
     if (original.size !== operation.size || await fingerprint(original) !== operation.fingerprint) {
-      throw new RecoveryError('原生文档的原件与本次修订文件不同，已暂停。')
+      throw new RecoveryError(t('workbench.binaryRevision.sourceMismatch'))
     }
     save({ ...operation, target })
   }
@@ -183,10 +186,10 @@ async function submit(retryParse: boolean) {
       })
       if (existing) return verifyRecoveredUpload(existing)
     }
-    if (!selectedFile) throw new RecoveryError('本次上传暂未查到对应文档。请重新选择同一份文件后继续。')
+    if (!selectedFile) throw new RecoveryError(t('workbench.binaryRevision.uploadNotFound'))
     if (operation.uploadAttempted && (fileType(selectedFile) !== operation.fileType || selectedFile.size !== operation.size ||
       await fingerprint(selectedFile) !== operation.fingerprint)) {
-      throw new RecoveryError('所选文件与本次修订文件的指纹不符。请重新选择原文件。')
+      throw new RecoveryError(t('workbench.binaryRevision.fingerprintMismatch'))
     }
     save({ ...operation, uploadAttempted: true })
     const response = await mutate(async () => {
@@ -203,7 +206,7 @@ async function submit(retryParse: boolean) {
     }, result => !result?.duplicate && (!result?.success || !result.data?.id))
     if (response.duplicate) {
       if (response.data?.metadata?.[uploadMarker] !== operation.uploadOperation) {
-        throw new RecoveryError('同库已有内容相同的文件，归属与本次上传不同。请先在文档列表核对。')
+        throw new RecoveryError(t('workbench.binaryRevision.duplicateOwner'))
       }
       return verifyRecoveredUpload(response.data)
     }
@@ -215,7 +218,7 @@ async function submit(retryParse: boolean) {
       ensureCurrent()
       const response = await batchQueryKnowledge('ids=' + encodeURIComponent(id), kb) as { success?: boolean; data?: NativeDocument[] }
       ensureCurrent()
-      if (!response?.success || !Array.isArray(response.data)) throw new RecoveryError('暂时无法核对原文件的解析状态，请继续核对。')
+      if (!response?.success || !Array.isArray(response.data)) throw new RecoveryError(t('workbench.binaryRevision.parseUnavailable'))
       const row = response.data.find(item => item.id === id)
       targetIdentity(row, kb, operation)
       const { parse_status: status, updated_at: updatedAt } = row!
@@ -224,10 +227,10 @@ async function submit(retryParse: boolean) {
       }
       if (status === 'completed') return
       if (status === 'failed') {
-        if (operation.reparseFrom) throw new RecoveryError('重新解析的结果仍待核对。请继续核对，或在原生文档列表检查解析任务。')
+        if (operation.reparseFrom) throw new RecoveryError(t('workbench.binaryRevision.reparseResultPending'))
         if (!retryParse || !updatedAt) {
           canReparse.value = !!updatedAt
-          throw new RecoveryError('已上传文件解析失败。可重新解析该文件，再继续本次修订。')
+          throw new RecoveryError(t('workbench.binaryRevision.parseFailed'))
         }
         retryParse = false
         save({ ...operation, reparseFrom: updatedAt })
@@ -242,11 +245,11 @@ async function submit(retryParse: boolean) {
         continue
       }
       if (status === 'deleting' || status === 'cancelled' || status === 'canceled') {
-        throw new RecoveryError('原文件已取消解析或正在删除，请在原生文档列表核对。')
+        throw new RecoveryError(t('workbench.binaryRevision.parseCancelled'))
       }
       await new Promise(resolve => setTimeout(resolve, 1000))
     }
-    throw new RecoveryError('仍在等待原文件解析。请稍后继续核对。')
+    throw new RecoveryError(t('workbench.binaryRevision.parseTimeout'))
   }
   async function bindingConfirmed() {
     ensureCurrent()
@@ -258,7 +261,7 @@ async function submit(retryParse: boolean) {
   let operation: BinaryRevisionRecovery
   let stage: RecoveryStage = '上传'
   uploading.value = true
-  progress.value = '正在核对上传…'
+  progress.value = t('workbench.binaryRevision.progressUpload')
   error.value = ''
   notice.value = ''
   canReparse.value = false
@@ -268,7 +271,7 @@ async function submit(retryParse: boolean) {
     else {
       if (initial) {
         try { await verifyCorrectionRevision(kb, initial) }
-        catch { throw new RecoveryError('所选勘误已变化或暂时无法核对，请返回勘误文档重新选择。') }
+        catch { throw new RecoveryError(t('workbench.binaryRevision.verifyCorrectionFailed')) }
         ensureCurrent()
       }
       operation = await startRecovery(selectedSource, selectedFile!, initial)
@@ -276,14 +279,14 @@ async function submit(retryParse: boolean) {
     }
     if (!operation.target) await recoverUpload()
     stage = '绑定'
-    progress.value = '正在核对提案…'
+    progress.value = t('workbench.binaryRevision.progressProposal')
     if (!operation.proposal || !(await bindingConfirmed())) {
       stage = '解析'
-      progress.value = '正在核对解析…'
+      progress.value = t('workbench.binaryRevision.progressParse')
       await waitForParsed()
       if (!operation.proposal) {
         stage = '创建提案'
-        progress.value = '正在核对并创建提案…'
+        progress.value = t('workbench.binaryRevision.progressCreate')
         const result = await mutate(() => write(kb, 'revision_create_binary', {
           operation_id: operation.createOperation, expected_revision: 0,
           business: { payload: {
@@ -294,7 +297,7 @@ async function submit(retryParse: boolean) {
         save({ ...operation, proposal: checkedCreation(result)! })
       }
       stage = '绑定'
-      progress.value = '正在核对并绑定…'
+      progress.value = t('workbench.binaryRevision.progressBind')
       if (!await bindingConfirmed()) {
         const { id, revision } = operation.proposal!
         await mutate(() => write(kb, 'revision_bind_binary', {
@@ -305,13 +308,13 @@ async function submit(retryParse: boolean) {
     }
     ensureCurrent()
     persist(key)
-    notice.value = '已确认修订提案（' + operation.proposal!.id + '）绑定该文件，请在列表中查看。'
+    notice.value = t('workbench.binaryRevision.confirmBinding', { id: operation.proposal!.id })
     sourceId.value = props.initialCorrection?.document_id ?? ''
     files.value = []
     file.value = undefined
     emit('created')
   } catch (cause) {
-    if (current()) error.value = cause instanceof RecoveryError ? cause.message : '暂时无法核对' + stage + '状态，请稍后继续。'
+    if (current()) error.value = cause instanceof RecoveryError ? (cause.key ? t(cause.key) : cause.message) : t('workbench.binaryRevision.checkStateFailed', { stage: stageText(stage) })
   } finally {
     if (current()) stop()
   }

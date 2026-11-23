@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -22,13 +23,19 @@ type App struct {
 	shutdownDone  chan struct{}
 	pickingDir    atomic.Bool
 	installed     *installedDesktop
+
+	downloadMu        sync.Mutex
+	downloadSessions  map[string]*businessDownloadSession
+	downloadRecordsMu sync.Mutex
+	pickingDownload   atomic.Bool
 }
 
 // NewApp creates a new App application struct.
 func NewApp() *App {
 	return &App{
-		shutdownCh:   make(chan struct{}, 1),
-		shutdownDone: make(chan struct{}),
+		shutdownCh:       make(chan struct{}, 1),
+		shutdownDone:     make(chan struct{}),
+		downloadSessions: make(map[string]*businessDownloadSession),
 	}
 }
 

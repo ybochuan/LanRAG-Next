@@ -1,73 +1,73 @@
 <template>
   <div class="feedback-review">
     <div class="feedback-layout" :class="{ 'with-evidence': kb && !restricted, 'with-annotation': showAnnotation }">
-      <t-card class="review-card" aria-label="问答快照" :bordered="true">
-        <h3>问答快照</h3>
-        <p v-if="restricted" class="subtle">此反馈仅共享评价与处理状态。问答及用户说明受限。</p>
+      <t-card class="review-card" :aria-label="$t('workbench.feedbackDetail.snapshotAria')" :bordered="true">
+        <h3>{{ $t('workbench.feedbackDetail.snapshot') }}</h3>
+        <p v-if="restricted" class="subtle">{{ $t('workbench.feedbackDetail.restricted') }}</p>
         <template v-else>
-          <h4 v-if="record.feedback_context?.question">用户问题<span v-if="record.feedback_context.question_truncated" class="subtle"> · 摘录</span></h4>
+          <h4 v-if="record.feedback_context?.question">{{ $t('workbench.feedbackDetail.userQuestion') }}<span v-if="record.feedback_context.question_truncated" class="subtle"> · {{ $t('workbench.feedbackDetail.excerpt') }}</span></h4>
           <p v-if="record.feedback_context?.question" class="review-text">{{ record.feedback_context.question }}</p>
-          <h4 v-if="record.feedback_context?.answer_excerpt">原始回答<span v-if="record.feedback_context.answer_truncated" class="subtle"> · 摘录</span></h4>
+          <h4 v-if="record.feedback_context?.answer_excerpt">{{ $t('workbench.feedbackDetail.originalAnswer') }}<span v-if="record.feedback_context.answer_truncated" class="subtle"> · {{ $t('workbench.feedbackDetail.excerpt') }}</span></h4>
           <p v-if="record.feedback_context?.answer_excerpt" class="review-text">{{ record.feedback_context.answer_excerpt }}</p>
-          <p v-if="!record.feedback_context?.question && !record.feedback_context?.answer_excerpt" class="subtle">本条反馈没有可查看的问答摘录。</p>
+          <p v-if="!record.feedback_context?.question && !record.feedback_context?.answer_excerpt" class="subtle">{{ $t('workbench.feedbackDetail.noQa') }}</p>
         </template>
         <div class="feedback-note">
-          <h4>用户反馈</h4>
+          <h4>{{ $t('workbench.feedbackDetail.userFeedback') }}</h4>
           <p class="rating-line">
-            <t-tag variant="light" :theme="rating==='like'?'success':'default'">{{ feedbackRatings[rating] || '问答反馈' }}</t-tag>
+            <t-tag variant="light" :theme="rating==='like'?'success':'default'">{{ feedbackRatingLabel(rating, t) || $t('workbench.feedbackDetail.feedbackFallback') }}</t-tag>
             <span v-if="reason">{{ reason }}</span>
           </p>
           <p v-if="!restricted && record.text" class="review-text">{{ record.text }}</p>
-          <p v-else-if="!restricted" class="subtle">用户未填写补充说明。</p>
+          <p v-else-if="!restricted" class="subtle">{{ $t('workbench.feedbackDetail.noNote') }}</p>
         </div>
       </t-card>
-      <t-card v-if="kb && !restricted" class="review-card" aria-label="本轮引用分块" :bordered="true">
-        <div class="citation-header"><h3>本轮引用分块</h3><span class="subtle">{{ citations.length }} 个分块</span></div>
-        <p v-if="!citations.length" class="subtle">本轮没有可核验的引用。可仅记录、待补证或驳回。</p>
+      <t-card v-if="kb && !restricted" class="review-card" :aria-label="$t('workbench.feedbackDetail.citationsAria')" :bordered="true">
+        <div class="citation-header"><h3>{{ $t('workbench.feedbackDetail.citationsTitle') }}</h3><span class="subtle">{{ $t('workbench.feedbackDetail.chunkCount', { n: citations.length }) }}</span></div>
+        <p v-if="!citations.length" class="subtle">{{ $t('workbench.feedbackDetail.noCitations') }}</p>
         <ol v-else class="citations">
           <li v-for="(chunk,index) in citations" :key="chunk.chunk_id" class="citation" :class="{ 'chosen-citation': selected?.chunk_id===chunk.chunk_id }">
             <div class="citation-header">
               <h4>{{ index + 1 }}. {{ documentName(chunk.document_id) }}</h4>
-              <t-tag v-if="evidence[chunk.chunk_id]?.status==='verified'" theme="success" variant="light" size="small">正文与指纹一致</t-tag>
+              <t-tag v-if="evidence[chunk.chunk_id]?.status==='verified'" theme="success" variant="light" size="small">{{ $t('workbench.feedbackDetail.verified') }}</t-tag>
             </div>
             <dl class="citation-meta">
-              <div><dt>来源版本</dt><dd><code>{{ chunk.version_id }}</code></dd></div>
-              <div><dt>分块</dt><dd>#{{ chunk.chunk_index }} · <code>{{ chunk.chunk_id }}</code></dd></div>
+              <div><dt>{{ $t('workbench.feedbackDetail.sourceVersion') }}</dt><dd><code>{{ chunk.version_id }}</code></dd></div>
+              <div><dt>{{ $t('workbench.feedbackDetail.chunk') }}</dt><dd>#{{ chunk.chunk_index }} · <code>{{ chunk.chunk_id }}</code></dd></div>
             </dl>
             <div class="review-actions">
               <t-button variant="outline" size="small" :loading="evidence[chunk.chunk_id]?.status==='loading'"
-                :aria-expanded="!!expanded[chunk.chunk_id]" @click="toggleEvidence(chunk)">{{ expanded[chunk.chunk_id] ? '收起正文' : '核对分块正文' }}</t-button>
+                :aria-expanded="!!expanded[chunk.chunk_id]" @click="toggleEvidence(chunk)">{{ expanded[chunk.chunk_id] ? $t('workbench.feedbackDetail.collapseBody') : $t('workbench.feedbackDetail.checkBody') }}</t-button>
               <t-button v-if="canAnnotate" variant="text" size="small" theme="primary"
                 :aria-pressed="selected?.chunk_id===chunk.chunk_id"
-                :disabled="locked || evidence[chunk.chunk_id]?.status!=='verified'" @click="selected=chunk">{{ selected?.chunk_id===chunk.chunk_id ? '已设为锚点' : '选为批注锚点' }}</t-button>
+                :disabled="locked || evidence[chunk.chunk_id]?.status!=='verified'" @click="selected=chunk">{{ selected?.chunk_id===chunk.chunk_id ? $t('workbench.feedbackDetail.anchorSet') : $t('workbench.feedbackDetail.setAnchor') }}</t-button>
             </div>
             <template v-if="expanded[chunk.chunk_id]">
-              <p v-if="evidence[chunk.chunk_id]?.status==='loading'" role="status" class="subtle">正在核对分块…</p>
+              <p v-if="evidence[chunk.chunk_id]?.status==='loading'" role="status" class="subtle">{{ $t('workbench.feedbackDetail.checkingChunk') }}</p>
               <pre v-else-if="evidence[chunk.chunk_id]?.status==='verified'" class="content-preview">{{ evidence[chunk.chunk_id].text }}</pre>
-              <p v-else role="status" class="subtle">暂时无法读取与记录指纹一致的分块正文。</p>
+              <p v-else role="status" class="subtle">{{ $t('workbench.feedbackDetail.chunkUnavailable') }}</p>
             </template>
           </li>
         </ol>
       </t-card>
-      <t-card v-if="showAnnotation" class="review-card annotation" aria-label="分块批注" :bordered="true">
-      <h3>分块批注</h3>
+      <t-card v-if="showAnnotation" class="review-card annotation" :aria-label="$t('workbench.feedbackDetail.annotationAria')" :bordered="true">
+      <h3>{{ $t('workbench.feedbackDetail.annotationTitle') }}</h3>
       <div v-if="anchor" class="feedback-note">
-        <h4>批注锚点</h4>
-        <p>{{ documentName(anchor.document_id) }} · 分块 #{{ anchor.chunk_index }}</p>
-        <p class="subtle">版本 <code>{{ anchor.version_id }}</code> · <code>{{ anchor.chunk_id }}</code></p>
+        <h4>{{ $t('workbench.feedbackDetail.anchorTitle') }}</h4>
+        <p>{{ documentName(anchor.document_id) }} · {{ $t('workbench.feedbackDetail.chunk') }} #{{ anchor.chunk_index }}</p>
+        <p class="subtle">{{ $t('workbench.feedbackDetail.version') }} <code>{{ anchor.version_id }}</code> · <code>{{ anchor.chunk_id }}</code></p>
       </div>
-      <p v-else-if="canAnnotate" class="subtle">核对本轮引用正文后，选择一个分块作为锚点。</p>
+      <p v-else-if="canAnnotate" class="subtle">{{ $t('workbench.feedbackDetail.anchorHint') }}</p>
       <template v-if="canAnnotate">
-        <label class="review-field">适用场景
-          <t-textarea v-model="scenario" :autosize="{ minRows: 2 }" :disabled="locked" placeholder="写明哪些问题适用这条批注" />
+        <label class="review-field">{{ $t('workbench.feedbackDetail.scenario') }}
+          <t-textarea v-model="scenario" :autosize="{ minRows: 2 }" :disabled="locked" :placeholder="$t('workbench.feedbackDetail.scenarioPlaceholder')" />
         </label>
-        <label class="review-field">适用项目
-          <t-input v-model="project" :disabled="locked" placeholder="按项目限定时输入项目全名" />
+        <label class="review-field">{{ $t('workbench.feedbackDetail.project') }}
+          <t-input v-model="project" :disabled="locked" :placeholder="$t('workbench.feedbackDetail.projectPlaceholder')" />
         </label>
-        <label class="review-field">审核批注
-          <t-textarea v-model="annotation" :autosize="{ minRows: 3 }" :disabled="locked" placeholder="写下核对分块后应采用的说明" />
+        <label class="review-field">{{ $t('workbench.feedbackDetail.annotation') }}
+          <t-textarea v-model="annotation" :autosize="{ minRows: 3 }" :disabled="locked" :placeholder="$t('workbench.feedbackDetail.annotationPlaceholder')" />
         </label>
-        <label v-if="priorCorrections.length" class="review-field">替代同一分块的勘误
+        <label v-if="priorCorrections.length" class="review-field">{{ $t('workbench.feedbackDetail.supersede') }}
           <t-select v-model="supersededID" :options="supersessionOptions" :disabled="locked" />
         </label>
         <template v-if="correctionsToKeep.length">
@@ -76,28 +76,28 @@
               {{ item.applies_project ? item.applies_project + ' · ' : '' }}{{ item.applies_when }} · {{ item.correction }}
             </li>
           </ul>
-          <t-checkbox v-model="reviewedPeers" :disabled="locked">已确认以上勘误与本条适用范围互斥，或针对不同事实</t-checkbox>
+          <t-checkbox v-model="reviewedPeers" :disabled="locked">{{ $t('workbench.feedbackDetail.reviewedPeers') }}</t-checkbox>
         </template>
-        <p v-if="loadingCorrections" role="status" class="subtle">正在核对可替代的勘误…</p>
-        <p v-if="correctionReadFailed" role="status" class="subtle">无法读取可替代的勘误。 <t-button variant="text" size="small" @click="readPriorCorrections">重试</t-button></p>
+        <p v-if="loadingCorrections" role="status" class="subtle">{{ $t('workbench.feedbackDetail.checkingCorrections') }}</p>
+        <p v-if="correctionReadFailed" role="status" class="subtle">{{ $t('workbench.feedbackDetail.correctionReadFailed') }} <t-button variant="text" size="small" @click="readPriorCorrections">{{ $t('workbench.feedbackDetail.retry') }}</t-button></p>
         <p v-if="approvalHint" class="subtle">{{ approvalHint }}</p>
-        <t-button theme="primary" :disabled="locked || !!approvalHint" @click="approve">批准分块批注</t-button>
+        <t-button theme="primary" :disabled="locked || !!approvalHint" @click="approve">{{ $t('workbench.feedbackDetail.approve') }}</t-button>
       </template>
       <template v-else>
-        <h4 v-if="record.applies_when">适用场景</h4>
+        <h4 v-if="record.applies_when">{{ $t('workbench.feedbackDetail.appliesWhen') }}</h4>
         <p v-if="record.applies_when" class="review-text">{{ record.applies_when }}</p>
-        <p v-if="record.feedback_anchor?.applies_project" class="review-text">适用项目：{{ record.feedback_anchor.applies_project }}</p>
-        <h4>审核定稿</h4>
+        <p v-if="record.feedback_anchor?.applies_project" class="review-text">{{ $t('workbench.feedbackDetail.appliesProject', { name: record.feedback_anchor.applies_project }) }}</p>
+        <h4>{{ $t('workbench.feedbackDetail.reviewedGuidance') }}</h4>
         <p class="review-text">{{ record.reviewed_guidance }}</p>
         <div v-if="record.annotation_checks" class="annotation-checks">
-          <h4>最近模型检查</h4>
-          <p v-if="!record.annotation_checks.length" class="subtle">暂无可核对的模型调用记录。</p>
+          <h4>{{ $t('workbench.feedbackDetail.modelChecks') }}</h4>
+          <p v-if="!record.annotation_checks.length" class="subtle">{{ $t('workbench.feedbackDetail.noChecks') }}</p>
           <ul v-else>
             <li v-for="(check, index) in record.annotation_checks" :key="`${check.checked_at}-${index}`">
               <t-tag variant="light" size="small" :theme="check.outcome === 'sent' ? 'success' : 'default'">
-                {{ checkLabels[check.outcome] || '检查结果未知' }}
+                {{ checkLabel(check.outcome) }}
               </t-tag>
-              <time class="subtle" :datetime="check.checked_at">{{ date(check.checked_at) }}</time>
+              <time class="subtle" :datetime="check.checked_at">{{ date(check.checked_at, locale) }}</time>
             </li>
           </ul>
         </div>
@@ -110,19 +110,23 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { clauseEvidence, correctionDocument, type CorrectionItem, type AnnotationCheckOutcome, type BusinessPayload, type BusinessRecord, type FeedbackCitationChunk } from '@/api/business'
-import { date, feedbackAwaiting, feedbackRating, feedbackRatings, feedbackReasons, feedbackRestricted, httpStatus } from './model'
+import { useI18n } from 'vue-i18n'
+import { date, feedbackAwaiting, feedbackRating, feedbackRatingLabel, feedbackReasonLabel, feedbackRestricted, httpStatus } from './model'
 
-const checkLabels: Record<AnnotationCheckOutcome, string> = {
-  sent: '已发送给模型',
-  matched: '来源已匹配，发送未确认',
-  source_mismatch: '当前来源未匹配锚点',
-  cooling_down: '仍在冷静期',
-  awaiting_activation: '待手动生效',
-  budget_or_limit: '达到批注预算或次数上限',
-  withdrawn: '批注已撤回',
-  quarantined: '批注已隔离',
-  guidance_unavailable: '指导服务未返回可用结果',
+const { t, locale } = useI18n()
+
+const checkLabelKeys: Record<AnnotationCheckOutcome, string> = {
+  sent: 'workbench.feedbackDetail.checkSent',
+  matched: 'workbench.feedbackDetail.checkMatched',
+  source_mismatch: 'workbench.feedbackDetail.checkSourceMismatch',
+  cooling_down: 'workbench.feedbackDetail.checkCooling',
+  awaiting_activation: 'workbench.feedbackDetail.checkAwaiting',
+  budget_or_limit: 'workbench.feedbackDetail.checkBudget',
+  withdrawn: 'workbench.feedbackDetail.checkWithdrawn',
+  quarantined: 'workbench.feedbackDetail.checkQuarantined',
+  guidance_unavailable: 'workbench.feedbackDetail.checkUnavailable',
 }
+const checkLabel = (outcome: AnnotationCheckOutcome) => t(checkLabelKeys[outcome] || 'workbench.feedbackDetail.checkUnknown')
 
 const props = defineProps<{
   record: BusinessRecord
@@ -134,7 +138,7 @@ const props = defineProps<{
 const emit = defineEmits<{ approve: [payload: BusinessPayload] }>()
 const restricted = computed(() => feedbackRestricted(props.record))
 const rating = computed(() => feedbackRating(props.record))
-const reason = computed(() => feedbackReasons[props.record.reason || ''])
+const reason = computed(() => feedbackReasonLabel(props.record.reason || '', t))
 const citations = computed(() => props.kb && !restricted.value ? props.record.citation_chunks || [] : [])
 const canAnnotate = computed(() => props.canWrite && feedbackAwaiting(props.record) && citations.value.length > 0)
 const selected = ref<FeedbackCitationChunk>()
@@ -147,7 +151,7 @@ const correctionsToKeep = computed(() => priorCorrections.value.filter(item => i
 watch(correctionsToKeep, () => { reviewedPeers.value = false })
 const loadingCorrections = ref(false), correctionReadFailed = ref(false)
 const supersessionOptions = computed(() => [
-  { value: '', label: '保留现有勘误' },
+  { value: '', label: t('workbench.feedbackDetail.keepExistingCorrection') },
   ...priorCorrections.value.map(item => ({ value: item.id, label: item.id + ' · ' + item.correction })),
 ])
 let correctionRead = 0
@@ -191,16 +195,16 @@ async function toggleEvidence(chunk: FeedbackCitationChunk) {
 }
 
 const approvalHint = computed(() => {
-  if (!selected.value || evidence.value[selected.value.chunk_id]?.status !== 'verified') return '先选择一个已核对正文的分块。'
-  if (!scenario.value.trim() || !annotation.value.trim()) return '填写适用场景和审核批注后即可批准。'
-  if (loadingCorrections.value || correctionReadFailed.value) return '核对同一分块的生效勘误后即可批准。'
-  if (correctionsToKeep.value.length && !reviewedPeers.value) return '确认可以保留的勘误，或选择需要替代的条目。'
+  if (!selected.value || evidence.value[selected.value.chunk_id]?.status !== 'verified') return t('workbench.feedbackDetail.hintSelectVerified')
+  if (!scenario.value.trim() || !annotation.value.trim()) return t('workbench.feedbackDetail.hintFillFields')
+  if (loadingCorrections.value || correctionReadFailed.value) return t('workbench.feedbackDetail.hintCheckCorrections')
+  if (correctionsToKeep.value.length && !reviewedPeers.value) return t('workbench.feedbackDetail.hintConfirmPeers')
   const projectName = project.value.trim()
-  if (projectName && ([...projectName].length < 2 || new TextEncoder().encode(projectName).length > 160)) return '适用项目请填写 2 个字符以上、160 字节以内的全名。'
+  if (projectName && ([...projectName].length < 2 || new TextEncoder().encode(projectName).length > 160)) return t('workbench.feedbackDetail.hintProjectLength')
   const instruction = `适用条件：${scenario.value.trim()}
 ${annotation.value.trim()}`
   const bytes = new TextEncoder().encode(instruction).length
-  if (bytes > 720) return `定稿合计 ${bytes} 字节，最多 720 字节。请缩短适用场景或审核批注。`
+  if (bytes > 720) return t('workbench.feedbackDetail.hintBytes', { bytes })
   return ''
 })
 function approve() {

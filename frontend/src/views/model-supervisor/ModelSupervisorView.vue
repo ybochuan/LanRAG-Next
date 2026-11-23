@@ -5,47 +5,47 @@
         <h2 id="supervisor-title"><ResourceIcon type="server" :size="24" class="page-icon" />{{ $t('workbench.supervisor.title') }}</h2>
         <div class="heading-actions">
           <t-button v-if="!desktop && hasToken" variant="outline" @click="toggleTokenForm">
-            {{ showTokenForm ? '取消' : '令牌' }}
+            {{ showTokenForm ? $t('workbench.supervisor.cancel') : $t('workbench.supervisor.token') }}
           </t-button>
-          <t-button variant="outline" :loading="busy" :disabled="!canManage" @click="reload">刷新</t-button>
+          <t-button variant="outline" :loading="busy" :disabled="!canManage" @click="reload">{{ $t('workbench.supervisor.refresh') }}</t-button>
         </div>
       </div>
-      <p class="section-description">{{ desktop ? '启停本机的 llama-server 实例，并检查 Windows 桌面能否访问模型。' : $t('workbench.supervisor.subtitle') }}</p>
+      <p class="section-description">{{ desktop ? $t('workbench.supervisor.desktopSubtitle') : $t('workbench.supervisor.subtitle') }}</p>
     </header>
 
     <div v-if="tokenFormVisible" role="status">
-      <p v-if="tokenError" class="token-error" role="alert">{{ tokenError }}</p>
-      <p v-else>模型管理器需要访问令牌。它的令牌和 Core 的登录态是两套，不会自动带上。</p>
+      <t-alert v-if="tokenError" theme="error" role="alert">{{ tokenError }}</t-alert>
+      <p v-else>{{ $t('workbench.supervisor.tokenRequired') }}</p>
       <t-form class="token-form" label-align="top" @submit.prevent="saveToken">
-        <t-form-item label="访问令牌" name="token">
+        <t-form-item :label="$t('workbench.supervisor.accessToken')" name="token">
           <t-input v-model="tokenDraft" type="password" autocomplete="off" placeholder="MODEL_SUPERVISOR_TOKEN" class="token-input" />
         </t-form-item>
-        <t-button theme="primary" type="submit">保存</t-button>
+        <t-button theme="primary" type="submit">{{ $t('workbench.supervisor.save') }}</t-button>
       </t-form>
-      <p class="hint">令牌只保存在本机浏览器里；服务地址 {{ api.baseUrl() }}。</p>
+      <p class="hint">{{ $t('workbench.supervisor.tokenHint') }} <code>{{ api.baseUrl() }}</code></p>
     </div>
 
     <template v-if="canManage">
       <t-alert v-if="error" theme="error" role="alert">{{ error }}</t-alert>
 
-      <section v-if="res" class="resource-bar" aria-label="主机资源">
+      <section v-if="res" class="resource-bar" :aria-label="$t('workbench.supervisor.hostResources')">
         <div class="resource-head">
-          <span class="resource-label">显存</span>
-          <strong>{{ res.free_gb.toFixed(2) }} / {{ res.total_gb.toFixed(2) }} GB 空闲</strong>
-          <span class="resource-note">预留 {{ res.reserve_gb }} GB 给系统</span>
+          <span class="resource-label">{{ $t('workbench.supervisor.vram') }}</span>
+          <strong>{{ res.free_gb.toFixed(2) }} / {{ res.total_gb.toFixed(2) }} GB · {{ $t('workbench.supervisor.freeTotal') }}</strong>
+          <span class="resource-note">{{ $t('workbench.supervisor.reserve', { mb: Math.round(res.reserve_gb * 1024) + ' MB' }) }}</span>
         </div>
-        <div class="meter" role="img" :aria-label="`显存空闲 ${res.free_gb} GB`">
+        <div class="meter" role="img" :aria-label="$t('workbench.supervisor.vramFreeAria', { mb: Math.round(res.free_gb * 1024) })">
           <span :style="{ width: usedPercent + '%' }" />
         </div>
-        <p v-if="res.state !== 'ok'" class="hint">{{ res.note || '显存状态未知，容量检查已跳过。' }}</p>
+        <p v-if="res.state !== 'ok'" class="hint">{{ res.note || $t('workbench.supervisor.vramUnknown') }}</p>
         <ul v-else class="gpu-list">
           <li v-for="gpu in res.gpus" :key="gpu.index">
-            {{ gpu.name }} · {{ (gpu.free_mb / 1024).toFixed(2) }} / {{ (gpu.total_mb / 1024).toFixed(2) }} GB 空闲
+            {{ $t('workbench.supervisor.gpuFree', { gpu: gpu.name, free: Math.round(gpu.free_mb), total: Math.round(gpu.total_mb) }) }}
           </li>
         </ul>
       </section>
 
-      <section class="cards" aria-label="模型实例">
+      <section class="cards" :aria-label="$t('workbench.supervisor.instancesAria')">
         <t-card v-for="item in instances" :key="item.id" class="card" :class="item.status" :bordered="true">
           <header>
             <div>
@@ -56,30 +56,30 @@
           </header>
 
           <dl class="facts">
-            <div><dt>任务</dt><dd>{{ taskLabel(item.task_type) }}</dd></div>
-            <div><dt>端口</dt><dd>{{ item.port }}</dd></div>
-            <div><dt>GPU 层</dt><dd>{{ item.gpu_layers > 0 ? `-ngl ${item.gpu_layers}` : '纯 CPU' }}</dd></div>
-            <div><dt>进程</dt><dd>{{ item.pid || '—' }}</dd></div>
+            <div><dt>{{ $t('workbench.supervisor.task') }}</dt><dd>{{ taskLabel(item.task_type) }}</dd></div>
+            <div><dt>{{ $t('workbench.supervisor.port') }}</dt><dd>{{ item.port }}</dd></div>
+            <div><dt>{{ $t('workbench.supervisor.gpuLayers') }}</dt><dd>{{ item.gpu_layers > 0 ? `-ngl ${item.gpu_layers}` : $t('workbench.supervisor.pureCpu') }}</dd></div>
+            <div><dt>{{ $t('workbench.supervisor.process') }}</dt><dd>{{ item.pid || '—' }}</dd></div>
             <div>
-              <dt>可达性</dt>
+              <dt>{{ $t('workbench.supervisor.reachability') }}</dt>
               <dd>
                 <span v-if="probes[item.id]" class="reach" :class="probes[item.id]!.reachability">
                   {{ reachLabel[probes[item.id]!.reachability] }}
                 </span>
-                <span v-else class="reach pending">{{ probing[item.id] ? '探测中…' : '未探测' }}</span>
+                <span v-else class="reach pending">{{ probing[item.id] ? $t('workbench.supervisor.probing') : $t('workbench.supervisor.notProbed') }}</span>
               </dd>
             </div>
           </dl>
 
           <p v-if="probes[item.id]" class="probe-detail">
-            <template v-if="probes[item.id]!.embedding_dim">向量维度 {{ probes[item.id]!.embedding_dim }} · </template>{{ probes[item.id]!.health_latency_ms }} ms
+            <template v-if="probes[item.id]!.embedding_dim">{{ $t('workbench.supervisor.embeddingDim', { dim: probes[item.id]!.embedding_dim }) }} · </template>{{ probes[item.id]!.health_latency_ms }} ms
           </p>
           <p v-if="item.last_error" class="probe-note error">{{ item.last_error }}</p>
 
           <div class="endpoint">
             <code>{{ item.endpoint.url }}</code>
             <t-button variant="text" size="small" @click="copy(item.endpoint.url, item.id)">
-              {{ copied === item.id ? '已复制' : '复制' }}
+              {{ copied === item.id ? $t('workbench.supervisor.copied') : $t('workbench.supervisor.copy') }}
             </t-button>
           </div>
 
@@ -91,7 +91,7 @@
               :loading="acting === item.id"
               @click="doStart(item)"
             >
-              {{ acting === item.id ? '正在启动…' : '启动' }}
+              {{ acting === item.id ? $t('workbench.supervisor.starting') : $t('workbench.supervisor.start') }}
             </t-button>
             <t-button
               v-else
@@ -100,74 +100,75 @@
               :loading="acting === item.id"
               @click="doStop(item)"
             >
-              {{ acting === item.id ? '正在停止…' : '停止' }}
+              {{ acting === item.id ? $t('workbench.supervisor.stopping') : $t('workbench.supervisor.stop') }}
             </t-button>
             <t-button variant="outline" size="small" @click="toggleLogs(item.id)">
-              {{ openLogs === item.id ? '收起日志' : '日志' }}
+              {{ openLogs === item.id ? $t('workbench.supervisor.collapseLogs') : $t('workbench.supervisor.logs') }}
             </t-button>
             <t-button variant="text" size="small" :disabled="probing[item.id]" @click="probeOne(item.id)">
-              重新探测
+              {{ $t('workbench.supervisor.reprobe') }}
             </t-button>
           </footer>
 
-          <section v-if="openLogs === item.id" class="log-panel" aria-label="运行日志">
+          <section v-if="openLogs === item.id" class="log-panel" :aria-label="$t('workbench.supervisor.logAria')">
             <header>
-              <span>{{ logLines.length }} 行</span>
-              <span v-if="logPaused" class="hint">已暂停滚动</span>
+              <span>{{ $t('workbench.supervisor.logLines', { n: logLines.length }) }}</span>
+              <span v-if="logPaused" class="hint">{{ $t('workbench.supervisor.paused') }}</span>
             </header>
             <pre ref="logBox"><code><span v-for="line in logLines" :key="line.seq" class="log-line"><span class="log-time">{{ clock(line.time) }}</span>{{ line.content }}<span v-if="line.count > 1" class="log-repeat"> ×{{ line.count }}</span>
 </span></code></pre>
-            <p v-if="!logLines.length" class="hint">暂无输出。</p>
+            <p v-if="!logLines.length" class="hint">{{ $t('workbench.supervisor.noOutput') }}</p>
           </section>
         </t-card>
 
-        <t-empty v-if="!instances.length && !busy" class="empty" description="还没有配置任何实例。" />
+        <t-empty v-if="!instances.length && !busy" class="empty" :description="$t('workbench.supervisor.empty')" />
       </section>
 
       <section class="add-panel">
         <div class="add-head">
-          <h2>新增模型实例</h2>
-          <t-button v-if="!desktop" variant="text" size="small" :disabled="busy" @click="loadCatalog">重新扫描模型目录</t-button>
+          <h2>{{ $t('workbench.supervisor.addTitle') }}</h2>
+          <t-button v-if="!desktop" variant="text" size="small" :disabled="busy" @click="loadCatalog">{{ $t('workbench.supervisor.rescan') }}</t-button>
         </div>
         <p v-if="!desktop" class="hint">
-          从 <code>{{ catalogData?.model_dir || 'data/models' }}</code> 选择 .gguf，运行时固定用
-          <code>{{ catalogData?.binary || 'data/bin/llama-server.exe' }}</code><span v-if="catalogData && !catalogData.binary_ready" class="warn">（未找到该文件）</span>
+          {{ $t('workbench.supervisor.catalogHint', { dir: catalogData?.model_dir || 'data/models' }) }}
+          <code>{{ catalogData?.binary || 'data/bin/llama-server.exe' }}</code>
+          <span v-if="catalogData && !catalogData.binary_ready" class="warn">{{ $t('workbench.supervisor.binaryMissing') }}</span>
         </p>
         <t-alert v-if="!desktop && catalogData?.note" theme="info">{{ catalogData.note }}</t-alert>
         <t-form class="add-form" label-align="top" @submit.prevent="doAdd">
           <div class="form-grid">
-            <t-form-item label="标识" name="id">
+            <t-form-item :label="$t('workbench.supervisor.idLabel')" name="id">
               <t-input v-model="form.id" placeholder="embedding" />
             </t-form-item>
-            <t-form-item v-if="desktop" label="模型文件" name="model">
+            <t-form-item v-if="desktop" :label="$t('workbench.supervisor.modelFile')" name="model">
               <div class="model-picker">
-                <t-button variant="outline" :disabled="busy" @click="chooseModelFile">选择 GGUF 文件</t-button>
+                <t-button variant="outline" :disabled="busy" @click="chooseModelFile">{{ $t('workbench.supervisor.chooseGGUF') }}</t-button>
                 <span v-if="selectedModelPath" class="model-name" :title="selectedModelPath">{{ form.model }}</span>
               </div>
             </t-form-item>
-            <t-form-item v-else label="模型文件" name="model">
-              <t-select v-model="form.model" :options="modelOptions" placeholder="选择 .gguf" />
+            <t-form-item v-else :label="$t('workbench.supervisor.modelFile')" name="model">
+              <t-select v-model="form.model" :options="modelOptions" :placeholder="$t('workbench.supervisor.chooseGGUFPlaceholder')" />
             </t-form-item>
-            <t-form-item label="任务" name="task_type">
+            <t-form-item :label="$t('workbench.supervisor.taskLabel')" name="task_type">
               <t-select v-model="form.task_type" :options="taskTypeOptions" />
             </t-form-item>
-            <t-form-item label="端口" name="port">
+            <t-form-item :label="$t('workbench.supervisor.portLabel')" name="port">
               <t-input-number v-model="form.port" :min="1" :max="65535" />
             </t-form-item>
-            <t-form-item label="GPU 设置" name="gpu_layers" class="field-gpu">
+            <t-form-item :label="$t('workbench.supervisor.gpuSettings')" name="gpu_layers" class="field-gpu">
               <div class="gpu-row">
-                <t-switch v-model="form.use_gpu" aria-label="使用 GPU" />
-                <span class="gpu-label">使用 GPU</span>
-                <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" placeholder="留空=全部" class="gpu-layers" aria-label="GPU 层数" />
-                <span class="gpu-label">层数</span>
+                <t-switch v-model="form.use_gpu" :aria-label="$t('workbench.supervisor.useGPU')" />
+                <span class="gpu-label">{{ $t('workbench.supervisor.useGPU') }}</span>
+                <t-input-number v-model="form.gpu_layers" :min="0" :max="1024" :disabled="!form.use_gpu" :placeholder="$t('workbench.supervisor.leaveEmptyAll')" class="gpu-layers" :aria-label="$t('workbench.supervisor.gpuLayers')" />
+                <span class="gpu-label">{{ $t('workbench.supervisor.layers') }}</span>
               </div>
             </t-form-item>
           </div>
           <div class="form-actions">
-            <t-button theme="primary" type="submit" :loading="busy" :disabled="desktop ? !selectedModelPath : !catalogData?.models.length">启动</t-button>
+            <t-button theme="primary" type="submit" :loading="busy" :disabled="desktop ? !selectedModelPath : !catalogData?.models.length">{{ $t('workbench.supervisor.startAction') }}</t-button>
           </div>
           <p class="hint">
-            层数对应 llama-server 的 <code>-ngl</code>：留空表示把整模型卸载到显卡（99）；显卡装不下时填一个较小值做部分卸载；0 等于纯 CPU。
+            {{ $t('workbench.supervisor.layersHint') }}
           </p>
         </t-form>
         <t-alert v-if="formError" theme="error">{{ formError }}</t-alert>
@@ -178,23 +179,26 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import * as api from '@/api/modelSupervisor'
 import { confirmAction } from '@/utils/confirm'
 
+const { t, locale } = useI18n()
+
 const desktop = api.isPackagedDesktop()
-const statusLabel: Record<api.InstanceStatus, string> = {
-  stopped: '已停止',
-  starting: '启动中',
-  running: '运行中',
-  stopping: '停止中',
-  failed: '异常退出'
-}
-const reachLabel: Record<api.Reachability, string> = {
-  loopback: desktop ? '本机可达' : '两侧可达',
-  gateway: '仅网关可达',
-  unverified: '未验证'
-}
+const statusLabel = computed<Record<api.InstanceStatus, string>>(() => ({
+  stopped: t('workbench.supervisor.statusStopped'),
+  starting: t('workbench.supervisor.statusStarting'),
+  running: t('workbench.supervisor.statusRunning'),
+  stopping: t('workbench.supervisor.statusStopping'),
+  failed: t('workbench.supervisor.statusFailed')
+}))
+const reachLabel = computed<Record<api.Reachability, string>>(() => ({
+  loopback: desktop ? t('workbench.supervisor.reachLoopbackDesktop') : t('workbench.supervisor.reachLoopbackWeb'),
+  gateway: t('workbench.supervisor.reachGateway'),
+  unverified: t('workbench.supervisor.reachUnverified')
+}))
 
 const hasToken = ref(!desktop && !!api.token())
 const canManage = computed(() => desktop || hasToken.value)
@@ -250,14 +254,14 @@ async function chooseModelFile() {
     selectedModelPath.value = path
     form.model = path.split(/[\\/]/).pop() || ''
   } catch (cause) {
-    formError.value = message(cause)
+    formError.value = fail(cause)
   }
 }
 // Status badge uses the shared tag palette instead of bespoke colours.
 const statusTheme=(status:string)=>({running:'success',failed:'danger',starting:'warning',stopping:'warning'} as Record<string,string>)[status]||'default'
 // TDesign select options built from the local catalog and the fixed task list.
 const modelOptions=computed(()=>((catalogData.value?.models??[]).map(file=>({label:`${file.name}（${formatSize(file.size_bytes)}）`,value:file.name}))))
-const taskTypeOptions=[{label:'向量化',value:'embedding'},{label:'重排',value:'rerank'},{label:'生成（对话）',value:'chat'}]
+const taskTypeOptions=computed(()=>[{label:t('workbench.supervisor.taskEmbedding'),value:'embedding'},{label:t('workbench.supervisor.taskRerank'),value:'rerank'},{label:t('workbench.supervisor.taskChat'),value:'chat'}])
 
 async function loadCatalog() {
   try {
@@ -281,9 +285,9 @@ function formatSize(bytes: number) {
 }
 
 function taskLabel(task: api.TaskType) {
-  if (task === 'rerank') return '重排'
-  if (task === 'chat') return '生成（对话）'
-  return '向量化'
+  if (task === 'rerank') return t('workbench.supervisor.taskRerank')
+  if (task === 'chat') return t('workbench.supervisor.taskChat')
+  return t('workbench.supervisor.taskEmbedding')
 }
 
 // Ports 8081/8082 are the defaults the Core database already points at, and 8083
@@ -334,8 +338,16 @@ function fail(cause: unknown): string {
     showTokenForm.value = false
     tokenDraft.value = ''
     error.value = ''
-    tokenError.value = '访问令牌无效或已失效，请重新填写模型管理器当前的 MODEL_SUPERVISOR_TOKEN。'
+    tokenError.value = t('workbench.supervisor.tokenInvalid')
     return ''
+  }
+  if (cause instanceof api.SupervisorError) {
+    if (cause.code === 'desktop_required') return t('workbench.supervisor.desktopRequired')
+    if (cause.code === 'not_ready') return t('workbench.supervisor.notReady')
+    if (cause.code === 'file_pick_unavailable') return t('workbench.supervisor.filePickUnavailable')
+    if (cause.code === 'unreachable') {
+      return t('workbench.supervisor.unreachable', { base: api.baseUrl(), origin: window.location.origin })
+    }
   }
   return message(cause)
 }
@@ -415,9 +427,9 @@ async function doStart(item: api.Instance) {
     if (api.isCapacityRefusal(cause)) {
       const detail = cause.detail ?? {}
       const proceed = await confirmAction({
-        title: '显存不足',
-        body: `需要约 ${detail.estimated_gb} GB，可用 ${detail.free_gb} GB（预留 ${detail.reserve_gb} GB）。仍然强行启动吗？`,
-        confirmText: '仍然启动',
+        title: t('workbench.supervisor.insufficientVramTitle'),
+        body: t('workbench.supervisor.insufficientVramBody', { free: Math.round(Number(detail.free_gb ?? 0) * 1024), needed: Math.round(Number(detail.estimated_gb ?? 0) * 1024) }),
+        confirmText: t('workbench.supervisor.forceStart'),
         danger: true
       })
       if (proceed) {
@@ -469,7 +481,7 @@ async function doAdd() {
     if (form.use_gpu && form.gpu_layers !== '') {
       const layers = Number(form.gpu_layers)
       if (!Number.isInteger(layers) || layers < 0 || layers > 1024) {
-        formError.value = 'GPU 层数必须是 0 到 1024 之间的整数'
+        formError.value = t('workbench.supervisor.gpuLayersInvalid', { max: 1024 })
         return
       }
       payload.gpu_layers = layers
@@ -534,14 +546,14 @@ async function copy(url: string, id: string) {
       if (copied.value === id) copied.value = ''
     }, 1500)
   } catch {
-    error.value = '复制失败，请手动选择地址。'
+    error.value = t('workbench.supervisor.copyFailed')
   }
 }
 
 function clock(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString('zh-CN', { hour12: false }) + ' '
+  return date.toLocaleTimeString(locale.value, { hour12: false }) + ' '
 }
 
 function message(cause: unknown) {
@@ -570,10 +582,10 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .section-header { display: flex; flex-direction: column; gap: 4px; margin-bottom: 20px; }
 .section-header__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .section-header h2 { margin: 0; font-size: var(--td-font-size-title-large); font-weight: 600; line-height: var(--td-line-height-title-large); display: flex; align-items: center; gap: 8px; color: var(--td-text-color-primary); }
-.section-description { margin: 0; color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-medium); font-weight: 400; line-height: 20px; }
+.section-description { margin: 0; color: var(--td-text-color-placeholder); font-size: var(--td-font-size-body-medium); font-weight: 400; line-height: var(--td-line-height-body-medium); }
 .page-icon { color: var(--td-text-color-primary); }
 .heading-actions { display: flex; gap: 8px; }
-.token-error { margin: 0 0 6px; color: var(--td-error-color); }
+
 .token-form { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; }
 .token-form .t-form-item { margin-bottom: 0; }
 .token-form .token-input { width: 360px; max-width: 100%; }
@@ -608,7 +620,7 @@ statusTimer = setInterval(() => void refreshStatuses(), STATUS_POLL_MS)
 .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .log-panel { border-top: 1px dashed var(--td-component-stroke); padding-top: 10px; }
 .log-panel header { display: flex; justify-content: space-between; font-size: var(--td-font-size-body-small); color: var(--td-text-color-placeholder); }
-.log-panel pre { margin: 6px 0 0; max-height: 260px; overflow: auto; background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); padding: 8px; font-size: var(--td-font-size-body-small); line-height: 1.5; }
+.log-panel pre { margin: 6px 0 0; max-height: 260px; overflow: auto; background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); border: 1px solid var(--td-component-stroke); border-radius: var(--td-radius-medium); padding: 8px; font-size: var(--td-font-size-body-small); line-height: var(--td-line-height-body-small); }
 .log-line { display: block; white-space: pre-wrap; word-break: break-all; }
 .log-time { color: var(--td-text-color-placeholder); margin-right: 6px; }
 .log-repeat { color: var(--td-warning-color); margin-left: 6px; }

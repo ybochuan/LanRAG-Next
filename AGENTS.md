@@ -127,3 +127,16 @@
 - 新增页面验收时抽查：页面内 `<select>`/`<input>`/`<button>` 出现次数应为 0（由 `<t-*>` 替代）；CSS 中不应出现新增硬编码颜色。
 - 骨架抽查：页面内 `.page-heading` / `.page-subtitle` / `<article class="card">` / 裸 `<form class="...">` 出现次数应为 0；页头必须是 `.section-header__top + .section-description`，卡片必须是 `<t-card :bordered="true">`，表单必须是 `<t-form>` + `<t-form-item>`。
 - i18n 抽查：新增键必须在六个 locale 中键集一致；本地化审计测试（`localeKeyAudit.test.ts`）必须通过。
+
+### 8.5 多语种与原生语言/字体适配（强制，2026-11-23 用户授权）
+
+适用范围：`frontend/` 下全部自建页面，重点包括 `views/lifecycle/LifecycleView.vue`、`views/lifecycle/AttachmentWorkbench.vue`、`views/lifecycle/SupplementEditor.vue`、`views/model-supervisor/ModelSupervisorView.vue`，以及 `views/lifecycle/model.ts`、`api/modelSupervisor.ts` 等文案来源。
+
+1. **所有可见文案必须国际化**：模板、脚本生成的按钮/选项/标签、`aria-label`、`placeholder`、`title`、空态、确认框、Toast、错误提示统一使用 `$t()` 或 `useI18n().t()`；不得在 `.vue` / `.ts` 中硬编码中文或英文界面文案。真实业务数据（如知识库文件夹名“附件”、文档标题、模型名）不属于 UI 文案，不得翻译。
+2. **六语键集一致**：新增或修改文案必须同时写入 `frontend/src/i18n/locales/{zh-CN,zh-TW,en-US,ru-RU,ko-KR,ja-JP}.ts`，键集完全一致；zh-CN、en-US 必须实译，其余语种提供对应语言译文，不得留空或复制中文。`npm run check-i18n` 与 `localeKeyAudit.test.ts` 必须通过。
+3. **脚本内文案同样走 t()**：`stateLabels`、`taskTypeOptions`、状态/任务/可达性/错误映射、复制成功/失败提示等，必须在组件内用 `computed` / `t()` 生成；不得在模块顶层导出写死的中文常量给页面直接渲染。
+4. **时间与区域格式跟随界面语言**：不得硬编码 `toLocaleTimeString('zh-CN')` / `toLocaleDateString('zh-CN')`；使用当前 `locale.value` 或 i18n 的日期时间格式化。数字、单位、文件名、路径保持原值，不翻译。
+5. **错误码与文案分离**：API/服务层抛错时携带稳定错误码（如 `SupervisorError` 的 `file_pick_unavailable` / `not_ready` / `unreachable` / `desktop_required`），由页面统一映射到六语词条；禁止把后端中文 `Error.message` 直接渲染给用户。
+6. **语言/字体继承原生**：不覆盖 `font-family`，统一继承 `--app-font-family` / `--td-font-family`；字号、圆角、颜色使用 TDesign token（见 8.2）；错误/提示使用 `<t-alert>`，禁止手写 `.token-error` / `.notice` / `.error` 色块。
+7. **长文本适配**：英文、俄文文本普遍长于中文；固定宽度侧栏、表格列、按钮和卡片必须允许换行、省略或提供 `title` / tooltip，不得以中文长度估算宽度。语言切换后必须复核主要页面无溢出、无截断、无中英混排残留。
+8. **验收**：除 8.3 门禁外，多语改动必须用真实桌面端或与桌面端同源的构建产物，至少核对 zh-CN 与 en-US 两个语言下的文档工作台、模型进程管理页面；切换语言后页面标题、页头、标签、按钮、空态、错误提示和日志时间全部使用目标语言。仅替换 locale 而不部署构建产物不算完成。

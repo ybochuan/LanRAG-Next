@@ -200,6 +200,7 @@ export type NotificationKind =
   | 'automation.failed'
   | 'automation.awaiting_approval'
   | 'automation.paused'
+  | 'download.completed'
 
 export interface AppNotification {
   id: string
@@ -244,4 +245,28 @@ export function clearReadNotifications() {
 /** Mark history ids read; no ids marks all history. Pending work is separate. */
 export function markNotificationsRead(ids: string[] = []) {
   return post<{ success: boolean }>('/api/v1/notifications/read', { ids })
+}
+
+export type DownloadNotificationSourceType = 'knowledge_document' | 'attachment' | 'artifact'
+
+export interface CreateDownloadNotificationInput {
+  file_name: string
+  source_type: DownloadNotificationSourceType
+  source_id: string
+  source_title: string
+  link?: string
+  download_id: string
+  file_size: number
+}
+
+/**
+ * Records a completed desktop download as read-only notification history. The
+ * service is idempotent by download_id, so a retry after a local sync failure
+ * returns the original notification instead of creating a duplicate.
+ */
+export function createDownloadNotification(input: CreateDownloadNotificationInput) {
+  return post<{ success: boolean; data: { id: string; created_at: string; duplicate: boolean } }>(
+    '/api/v1/notifications/download',
+    input,
+  )
 }

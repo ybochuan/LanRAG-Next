@@ -3,20 +3,20 @@
   <header class="page-heading">
    <h1 id="lifecycle-title"><ResourceIcon type="document" :size="20" class="page-icon" />{{ $t('workbench.title') }}</h1>
    <div class="scope-bar">
-    <label for="lifecycle-kb">知识库</label>
-    <t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" placeholder="选择知识库" class="scope-select" @update:model-value="syncScopeQuery" />
-    <t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light" size="small">{{ data.can_write?'可管理':'只读' }}</t-tag>
+    <label for="lifecycle-kb">{{ $t('workbench.lifecycle.knowledgeBase') }}</label>
+    <t-select id="lifecycle-kb" v-model="kb" :options="kbOptions" :disabled="loadingKB || detailLocked || viewLocked" :placeholder="$t('workbench.lifecycle.selectKnowledgeBase')" class="scope-select" @update:model-value="syncScopeQuery" />
+    <t-tag v-if="data" :theme="data.can_write?'primary':'default'" variant="light" size="small">{{ data.can_write ? $t('workbench.lifecycle.managed') : $t('workbench.lifecycle.readOnly') }}</t-tag>
    </div>
   </header>
-  <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="loadAll">重新载入</t-button></t-alert>
+  <t-alert v-if="error" theme="error">{{ error }} <t-button variant="text" size="small" @click="loadAll">{{ $t('workbench.common.reload') }}</t-button></t-alert>
   <t-alert v-if="data?.degraded" theme="info" role="status">{{ degradedMessage }}</t-alert>
-  <t-empty v-if="loadingKB" class="empty" role="status" description="正在加载知识库…" />
-  <t-empty v-else-if="!knowledgeBases.length && !error && !standaloneFeedback" class="empty" description="还没有可访问的知识库。创建或加入知识库后即可管理文档。" />
-  <t-empty v-else-if="!kb && !standaloneFeedback && knowledgeBases.length" class="empty" description="请选择一个知识库。" />
+  <t-empty v-if="loadingKB" class="empty" role="status" :description="$t('workbench.lifecycle.loadingKnowledgeBases')" />
+  <t-empty v-else-if="!knowledgeBases.length && !error && !standaloneFeedback" class="empty" :description="$t('workbench.lifecycle.noKnowledgeBases')" />
+  <t-empty v-else-if="!kb && !standaloneFeedback && knowledgeBases.length" class="empty" :description="$t('workbench.lifecycle.selectKnowledgeBasePrompt')" />
   <template v-if="kb || standaloneFeedback">
-   <div class="tabs" role="tablist" aria-label="工作台视图" @keydown="moveTabFocus">
+   <div class="tabs" role="tablist" :aria-label="$t('workbench.lifecycle.workbenchView')" @keydown="moveTabFocus">
     <t-button v-for="item in kb ? tabs : []" variant="text" :tabindex="!workspaceView && tab===item.key ? 0 : -1" :id="`tab-${item.key}`" :key="item.key" role="tab" :aria-selected="!workspaceView && tab===item.key" :aria-controls="`panel-${item.key}`" :class="{selected:!workspaceView && tab===item.key}" :disabled="viewLocked" @click="showList(item.key)">
-     {{ $t(item.labelKey) }}<t-tag v-if="item.key==='cleanup' && cleanupActionCount" theme="warning" size="small" variant="light" class="tab-count" :aria-label="cleanupActionCount+' 项待处理'">{{ cleanupActionCount }}</t-tag>
+     {{ $t(item.labelKey) }}<t-tag v-if="item.key==='cleanup' && cleanupActionCount" theme="warning" size="small" variant="light" class="tab-count" :aria-label="$t('workbench.lifecycle.cleanupPending',{n:cleanupActionCount})">{{ cleanupActionCount }}</t-tag>
     </t-button>
     <t-button v-for="item in workspaceTabs.filter(tab => kb || tab.key==='feedback-materials')" variant="text" aria-controls="panel-workspace" :tabindex="workspaceView===item.key ? 0 : -1" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ $t(item.labelKey) }}</t-button>
    </div>
@@ -33,7 +33,7 @@
      </section>
      <section v-else id="panel-correction-documents" role="tabpanel" aria-labelledby="tab-correction-documents">
       <CorrectionWorkspace v-if="kb" :scope="kb" :knowledge-bases="knowledgeBases" @open="openWorkspaceDocument" />
-      <t-empty v-else description="当前没有可访问的知识库。" />
+      <t-empty v-else :description="$t('workbench.lifecycle.noAccessibleKB')" />
      </section>
     </template>
     <BusinessView v-else-if="workspaceView==='associations'||workspaceView==='revisions'" :key="kb+workspaceView" :section="workspaceView" :scope="kb" :can-write="data?.can_write" @locked="viewLocked=$event" @open="openBusinessDocument" />
@@ -42,41 +42,41 @@
    <div v-if="tab==='documents'" class="document-filters">
      <t-input id="lifecycle-title-search" v-model="titleQuery" class="filter-title" :maxlength="160" :aria-label="$t('workbench.list.filterTitle')" :placeholder="$t('workbench.list.searchPlaceholder')" clearable @update:model-value="syncListQuery" />
      <t-select id="lifecycle-state-filter" v-model="filter" class="filter-state" :options="stateOptions" :aria-label="$t('workbench.list.filterState')" @update:model-value="syncListQuery" />
-     <t-button variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">刷新</t-button>
+     <t-button variant="outline" :loading="busy" :disabled="!kb" @click="loadAll">{{ $t('workbench.common.refresh') }}</t-button>
    </div>
    <div v-if="busy && tab==='documents'" class="loading" role="status">{{ $t('workbench.list.loading') }}</div>
    <template v-else-if="data || tab==='reviews'">
     <template v-if="data">
     <section v-if="tab==='cleanup'" id="panel-cleanup" class="document-panel cleanup-panel" role="tabpanel" aria-labelledby="tab-cleanup">
        <div class="section-heading panel-toolbar">
-        <h2>待清理记录</h2>
+        <h2>{{ $t('workbench.cleanup.title') }}</h2>
         <div class="toolbar-actions">
-         <label for="lifecycle-cleanup-state">任务状态</label>
+         <label for="lifecycle-cleanup-state">{{ $t('workbench.cleanup.statusFilter') }}</label>
          <t-select id="lifecycle-cleanup-state" v-model="cleanupFilter" :options="cleanupFilterOptions" class="cleanup-select" :disabled="cleanupChanging" @update:model-value="loadCleanup(1)" />
-         <t-button variant="outline" :loading="cleanupBusy" :disabled="cleanupChanging" @click="loadAll">刷新</t-button>
+         <t-button variant="outline" :loading="cleanupBusy" :disabled="cleanupChanging" @click="loadAll">{{ $t('workbench.common.refresh') }}</t-button>
         </div>
        </div>
-       <p class="source-note">原始文件已随知识库删除移除；这里保留的是扩展治理记录，默认保留 30 天，可延期或立即清理。</p>
-      <t-alert v-if="cleanupError" theme="error" role="alert">{{ cleanupError }} <t-button v-if="cleanupLoadFailed" variant="text" size="small" @click="loadCleanup()">重新载入</t-button></t-alert>
-      <p v-if="cleanupBusy" class="loading" role="status">正在加载清理记录…</p>
-      <div v-else-if="!cleanupError || cleanupItems.length" class="cleanup-list-scroll" tabindex="0" role="region" aria-label="清理记录">
+       <p class="source-note">{{ $t('workbench.cleanup.description') }}</p>
+      <t-alert v-if="cleanupError" theme="error" role="alert">{{ cleanupError }} <t-button v-if="cleanupLoadFailed" variant="text" size="small" @click="loadCleanup()">{{ $t('workbench.common.reload') }}</t-button></t-alert>
+      <p v-if="cleanupBusy" class="loading" role="status">{{ $t('workbench.cleanup.loading') }}</p>
+      <div v-else-if="!cleanupError || cleanupItems.length" class="cleanup-list-scroll" tabindex="0" role="region" :aria-label="$t('workbench.cleanup.region')">
        <table class="cleanup-table">
          <thead><tr>
-           <th class="cleanup-select" scope="col"><t-checkbox :checked="cleanupPageAllSelected" :indeterminate="cleanupPageIndeterminate" :disabled="!cleanupSelectableItems.length || cleanupChanging" aria-label="选择当前页可清理记录" @change="toggleCleanupPageSelection" /></th>
-           <th scope="col">文档</th>
-           <th class="cleanup-deleted" scope="col">删除时间</th>
-           <th class="cleanup-retained" scope="col">保留至</th>
-           <th class="cleanup-status" scope="col">状态</th>
-           <th class="cleanup-actions" scope="col">操作</th>
+           <th class="cleanup-select" scope="col"><t-checkbox :checked="cleanupPageAllSelected" :indeterminate="cleanupPageIndeterminate" :disabled="!cleanupSelectableItems.length || cleanupChanging" :aria-label="$t('workbench.cleanup.selectPage')" @change="toggleCleanupPageSelection" /></th>
+           <th scope="col">{{ $t('workbench.cleanup.colDocument') }}</th>
+           <th class="cleanup-deleted" scope="col">{{ $t('workbench.cleanup.colDeletedAt') }}</th>
+           <th class="cleanup-retained" scope="col">{{ $t('workbench.cleanup.colRetainedUntil') }}</th>
+           <th class="cleanup-status" scope="col">{{ $t('workbench.cleanup.colStatus') }}</th>
+           <th class="cleanup-actions" scope="col">{{ $t('workbench.cleanup.colActions') }}</th>
          </tr></thead>
         <tbody>
          <tr v-for="task in cleanupItems" :key="task.document_id" class="cleanup-row" :class="{ 'is-selected': cleanupSelected.has(task.document_id) }">
-          <td class="cleanup-select"><t-checkbox :checked="cleanupSelected.has(task.document_id)" :disabled="!cleanupSelectable(task) || cleanupChanging" :aria-label="'选择 '+(task.title || task.document_id)" @change="toggleCleanupSelection(task)" /></td>
+          <td class="cleanup-select"><t-checkbox :checked="cleanupSelected.has(task.document_id)" :disabled="!cleanupSelectable(task) || cleanupChanging" :aria-label="$t('workbench.cleanup.selectRow',{title:task.title || task.document_id})" @change="toggleCleanupSelection(task)" /></td>
           <td class="cleanup-document">
            <div class="cleanup-title" :title="task.title || task.document_id">{{ task.title || task.document_id }}</div>
            <div class="cleanup-compact-meta">
-            <span class="compact-deleted">删除 {{ date(task.native_deleted_at) }}</span>
-            <span class="compact-retained">保留至 {{ date(task.retained_until) }}</span>
+            <span class="compact-deleted">{{ $t('workbench.cleanup.deletedAtCompact',{date:date(task.native_deleted_at)}) }}</span>
+            <span class="compact-retained">{{ $t('workbench.cleanup.retainedUntilCompact',{date:date(task.retained_until)}) }}</span>
             <t-tag class="compact-status" variant="light" size="small" :theme="cleanupStatusTheme(task.effective_status)">{{ cleanupStatusLabel(task.effective_status) }}</t-tag>
            </div>
           </td>
@@ -84,25 +84,25 @@
           <td class="cleanup-retained">{{ date(task.retained_until) }}</td>
           <td class="cleanup-status"><t-tag variant="light" size="small" :theme="cleanupStatusTheme(task.effective_status)">{{ cleanupStatusLabel(task.effective_status) }}</t-tag><small v-if="task.effective_status==='failed'" class="cleanup-reason">{{ cleanupFailureReason(task) }}</small></td>
           <td class="cleanup-actions">
-           <t-button v-if="data?.can_write && (task.effective_status==='pending_cleanup'||task.effective_status==='awaiting_confirmation'||task.effective_status==='failed')" variant="outline" size="small" :disabled="cleanupChanging" @click="holdCleanup(task)">延期清理 90 天</t-button>
-           <t-popconfirm v-if="data?.can_write && (task.can_confirm || task.can_cleanup_now)" :content="task.can_confirm ? '清理此记录的扩展治理数据？原始文件已无法恢复。' : '立即清理此记录的扩展治理数据？原始文件已无法恢复，此操作不可撤销。'" theme="danger" @confirm="cleanupTask(task)"><t-button theme="danger" variant="outline" size="small" :disabled="cleanupChanging">{{ task.can_confirm ? (task.effective_status==='failed' ? '重试清理' : '清理扩展记录') : '立即清理扩展记录' }}</t-button></t-popconfirm>
+           <t-button v-if="data?.can_write && (task.effective_status==='pending_cleanup'||task.effective_status==='awaiting_confirmation'||task.effective_status==='failed')" variant="outline" size="small" :disabled="cleanupChanging" @click="holdCleanup(task)">{{ $t('workbench.cleanup.hold90') }}</t-button>
+           <t-popconfirm v-if="data?.can_write && (task.can_confirm || task.can_cleanup_now)" :content="task.can_confirm ? $t('workbench.cleanup.confirmDescription') : $t('workbench.cleanup.confirmNowDescription')" theme="danger" @confirm="cleanupTask(task)"><t-button theme="danger" variant="outline" size="small" :disabled="cleanupChanging">{{ task.can_confirm ? (task.effective_status==='failed' ? $t('workbench.cleanup.retryClean') : $t('workbench.cleanup.cleanRecord')) : $t('workbench.cleanup.cleanNow') }}</t-button></t-popconfirm>
           </td>
          </tr>
-         <tr v-if="!cleanupItems.length"><td colspan="6" class="empty">当前没有待清理记录。</td></tr>
+         <tr v-if="!cleanupItems.length"><td colspan="6" class="empty">{{ $t('workbench.cleanup.empty') }}</td></tr>
         </tbody>
        </table>
       </div>
       <p v-if="cleanupBatchMessage" role="status">{{ cleanupBatchMessage }}</p>
       <div v-if="cleanupSelectionCount" class="cleanup-batch-bar" role="status">
-       <span class="cleanup-batch-count">已选 {{ cleanupSelectionCount }} 条</span>
-       <t-button variant="outline" size="small" :disabled="cleanupChanging" @click="holdSelectedCleanup">批量延期 90 天</t-button>
-       <t-popconfirm content="批量清理所选记录的扩展治理数据？原始文件已无法恢复，此操作不可撤销。" theme="danger" @confirm="confirmSelectedCleanup"><t-button theme="danger" variant="outline" size="small" :disabled="cleanupChanging">批量清理扩展记录</t-button></t-popconfirm>
-       <t-button variant="text" size="small" @click="clearCleanupSelection">取消选择</t-button>
+       <span class="cleanup-batch-count">{{ $t('workbench.cleanup.selectedCount',{n:cleanupSelectionCount}) }}</span>
+       <t-button variant="outline" size="small" :disabled="cleanupChanging" @click="holdSelectedCleanup">{{ $t('workbench.cleanup.batchHold') }}</t-button>
+       <t-popconfirm :content="$t('workbench.cleanup.batchConfirm')" theme="danger" @confirm="confirmSelectedCleanup"><t-button theme="danger" variant="outline" size="small" :disabled="cleanupChanging">{{ $t('workbench.cleanup.batchClean') }}</t-button></t-popconfirm>
+       <t-button variant="text" size="small" @click="clearCleanupSelection">{{ $t('workbench.cleanup.clearSelection') }}</t-button>
       </div>
-      <nav v-if="cleanupLastPage > 1" class="pagination" aria-label="清理记录分页">
-       <t-button variant="outline" size="small" :disabled="cleanupPage <= 1 || cleanupChanging || cleanupBusy" @click="loadCleanup(cleanupPage - 1)">上一页</t-button>
-       <span role="status">第 {{ cleanupPage }} / {{ cleanupLastPage }} 页 · 共 {{ cleanupTotal }} 条</span>
-       <t-button variant="outline" size="small" :disabled="cleanupPage >= cleanupLastPage || cleanupChanging || cleanupBusy" @click="loadCleanup(cleanupPage + 1)">下一页</t-button>
+      <nav v-if="cleanupLastPage > 1" class="pagination" :aria-label="$t('workbench.cleanup.paginationAria')">
+       <t-button variant="outline" size="small" :disabled="cleanupPage <= 1 || cleanupChanging || cleanupBusy" @click="loadCleanup(cleanupPage - 1)">{{ $t('workbench.cleanup.prev') }}</t-button>
+       <span role="status">{{ $t('workbench.cleanup.pageStatus',{page:cleanupPage,total:cleanupLastPage,count:cleanupTotal}) }}</span>
+       <t-button variant="outline" size="small" :disabled="cleanupPage >= cleanupLastPage || cleanupChanging || cleanupBusy" @click="loadCleanup(cleanupPage + 1)">{{ $t('workbench.cleanup.next') }}</t-button>
       </nav>
      </section>
      <section v-if="tab==='documents'" id="panel-documents" class="document-panel" role="tabpanel" aria-labelledby="tab-documents">
@@ -122,15 +122,15 @@
            </t-button>
            <span v-else class="tree-toggle-spacer" aria-hidden="true"></span>
            <t-button variant="text" class="document-link" @click="openDocument(group.parent.document_id,group.parent.title,'life',kb,$event)">{{ group.parent.title || group.parent.document_id }}</t-button>
-           <t-tooltip v-if="group.parent.mapping_status" :content="mappingTagHint(group.parent.mapping_status)" placement="top"><t-tag variant="light" size="small" :theme="mappingTagTheme(group.parent.mapping_status)" class="annex-tag" :aria-label="'附件：'+mappingTagHint(group.parent.mapping_status)">附件</t-tag></t-tooltip>
+           <t-tooltip v-if="group.parent.mapping_status" :content="mappingTagHint(group.parent.mapping_status)" placement="top"><t-tag variant="light" size="small" :theme="mappingTagTheme(group.parent.mapping_status)" class="annex-tag" :aria-label="$t('workbench.lifecycle.attachmentAria',{hint:mappingTagHint(group.parent.mapping_status)})">{{ $t('workbench.lifecycle.attachmentTag') }}</t-tag></t-tooltip>
            <span v-if="group.children.length" class="attachment-count">{{ $t('workbench.list.attachmentCount',{n:group.children.length}) }}</span>
           </div>
            <div class="document-compact-meta">
-            <t-tag class="compact-state" variant="light" size="small" :theme="stateTagTheme(group.parent.state)">{{ stateLabels[group.parent.state] || group.parent.state }}</t-tag>
+            <t-tag class="compact-state" variant="light" size="small" :theme="stateTagTheme(group.parent.state)">{{ label(group.parent.state) }}</t-tag>
             <span class="compact-effective">{{ $t('workbench.list.colEffectiveUntil') }} {{ day(group.parent.annotations.effective_until) }}</span>
            </div>
           </td>
-          <td class="document-secondary document-state"><t-tag variant="light" size="small" :theme="stateTagTheme(group.parent.state)">{{ stateLabels[group.parent.state] || group.parent.state }}</t-tag></td>
+          <td class="document-secondary document-state"><t-tag variant="light" size="small" :theme="stateTagTheme(group.parent.state)">{{ label(group.parent.state) }}</t-tag></td>
           <td class="document-secondary document-family">{{ group.parent.business_family?.label || $t('workbench.list.unassigned') }}</td>
           <td class="document-secondary document-effective" :title="date(group.parent.annotations.effective_until)">{{ day(group.parent.annotations.effective_until) }}</td>
          </tr>
@@ -145,16 +145,16 @@
                <div class="attachment-child-main">
                 <div class="attachment-child-heading">
                  <t-button variant="text" class="document-link" @click="openDocument(child.document_id,child.title,'attachments',kb,$event)">{{ child.title || child.annex_original || child.document_id }}</t-button>
-                 <t-tooltip v-if="child.mapping_status" :content="mappingTagHint(child.mapping_status)" placement="top"><t-tag variant="light" size="small" :theme="mappingTagTheme(child.mapping_status)" class="annex-tag" :aria-label="'附件：'+mappingTagHint(child.mapping_status)">附件</t-tag></t-tooltip>
+                 <t-tooltip v-if="child.mapping_status" :content="mappingTagHint(child.mapping_status)" placement="top"><t-tag variant="light" size="small" :theme="mappingTagTheme(child.mapping_status)" class="annex-tag" :aria-label="$t('workbench.lifecycle.attachmentAria',{hint:mappingTagHint(child.mapping_status)})">{{ $t('workbench.lifecycle.attachmentTag') }}</t-tag></t-tooltip>
                 </div>
                 <small v-if="child.annex_original && child.annex_original !== child.title" class="attachment-original">{{ $t('workbench.list.originalFile',{name:child.annex_original}) }}</small>
                 <div class="document-compact-meta">
-                 <t-tag class="compact-state" variant="light" size="small" :theme="stateTagTheme(child.state)">{{ stateLabels[child.state] || child.state }}</t-tag>
+                 <t-tag class="compact-state" variant="light" size="small" :theme="stateTagTheme(child.state)">{{ label(child.state) }}</t-tag>
                  <span class="compact-effective">{{ $t('workbench.list.colEffectiveUntil') }} {{ day(child.annotations.effective_until) }}</span>
                 </div>
                </div>
               </div>
-              <div class="attachment-child-state"><t-tag variant="light" size="small" :theme="stateTagTheme(child.state)">{{ stateLabels[child.state] || child.state }}</t-tag></div>
+              <div class="attachment-child-state"><t-tag variant="light" size="small" :theme="stateTagTheme(child.state)">{{ label(child.state) }}</t-tag></div>
               <div class="attachment-child-family">{{ child.business_family?.label || $t('workbench.list.unassigned') }}</div>
               <div class="attachment-child-effective" :title="date(child.annotations.effective_until)">{{ day(child.annotations.effective_until) }}</div>
              </div>
@@ -166,16 +166,16 @@
         <tr v-if="!documentGroups.length" class="empty-row"><td colspan="4" class="empty">{{ $t('workbench.list.empty') }}</td></tr>
        </tbody>
       </table>
-      <div v-if="documentPageBusy" class="document-page-status" role="status">正在载入更多文档…</div>
+      <div v-if="documentPageBusy" class="document-page-status" role="status">{{ $t('workbench.lifecycle.loadingMore') }}</div>
       <div v-else-if="documentPageError" class="document-page-status" role="alert">
-       {{ documentPageError }} <t-button variant="outline" size="small" @click="loadMoreDocuments">重试加载</t-button>
+       {{ documentPageError }} <t-button variant="outline" size="small" @click="loadMoreDocuments">{{ $t('workbench.lifecycle.retryLoad') }}</t-button>
       </div>
      </div>
      <p class="source-note" role="status">{{ $t('workbench.list.groupedCount', { docs: mainDocumentCount, attachments: attachmentCount }) }}</p>
     </section>
     </template>
      <section v-if="tab==='reviews'" id="panel-reviews" class="panel" role="tabpanel" aria-labelledby="tab-reviews">
-      <div class="section-heading panel-toolbar"><h2>{{ $t('workbench.reviews.title') }}</h2><t-button variant="outline" :loading="reviewBusy" @click="loadReviews">刷新</t-button></div>
+      <div class="section-heading panel-toolbar"><h2>{{ $t('workbench.reviews.title') }}</h2><t-button variant="outline" :loading="reviewBusy" @click="loadReviews">{{ $t('workbench.common.refresh') }}</t-button></div>
       <p>{{ $t('workbench.reviews.desc') }}</p>
       <t-alert v-if="reviewError" theme="error" role="alert">{{ reviewError }}</t-alert>
       <p v-if="reviewBusy" role="status">{{ $t('workbench.reviews.loading') }}</p>
@@ -222,7 +222,7 @@
          <div class="review-list">
           <t-button v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" variant="text" @click="openDocument(alert.document_id,alert.title,'life',kb,$event)">
            <span><strong>{{ alert.title || alert.document_id }}</strong><small>{{ $t('workbench.reviews.due', { date: date(alert.review_due) }) }}</small><small v-if="alert.delivered_at">{{ $t('workbench.reviews.delivered', { date: date(alert.delivered_at) }) }}</small></span>
-           <t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state) }}</t-tag>
+           <t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state, t) }}</t-tag>
           </t-button>
          </div>
         </template>
@@ -233,7 +233,7 @@
        </section>
       </template>
      </section>
-    <template v-if="data"><section v-if="tab==='rules'" id="panel-rules" class="panel rules-panel" role="tabpanel" aria-labelledby="tab-rules"><div class="section-heading panel-toolbar"><h2>{{ $t('workbench.rules.title') }}</h2><t-button variant="outline" :loading="busy" :disabled="savingRules" @click="loadAll">刷新</t-button></div><p>{{ $t('workbench.rules.desc') }}</p><p class="source-note">{{ $t('workbench.rules.source', { source: ruleSourceLabel(data.rules), revision: data.rule_revision }) }}</p><form @submit.prevent="submitRules"><label>{{ $t('workbench.rules.delay') }}<t-input-number v-model="ruleForm.effective_delay_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>{{ $t('workbench.rules.valid') }}<t-input-number v-model="ruleForm.valid_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>{{ $t('workbench.rules.review') }}<t-input-number v-model="ruleForm.review_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><t-alert v-if="ruleError" theme="error" role="alert">{{ ruleError }}</t-alert><p v-if="ruleDirty" class="source-note" role="status">{{ ruleOutdated ? '服务器规则已更新。请核对草稿，载入最新规则后再编辑。' : '有未保存的修改，刷新列表会保留草稿。' }} <t-button variant="text" size="small" :disabled="savingRules" @click="resetRuleForm">{{ ruleOutdated ? '放弃草稿并载入最新规则' : '放弃草稿' }}</t-button></p><t-alert v-if="ruleSuccess" theme="success" role="status">{{ $t('workbench.rules.saved') }}</t-alert><t-button v-if="data.can_write" theme="primary" type="submit" :loading="savingRules" :disabled="!validRules(ruleForm) || ruleOutdated">{{ savingRules ? $t('workbench.rules.saving') : $t('workbench.rules.save') }}</t-button><p v-else class="source-note">{{ $t('workbench.rules.readonly') }}</p></form></section></template>
+    <template v-if="data"><section v-if="tab==='rules'" id="panel-rules" class="panel rules-panel" role="tabpanel" aria-labelledby="tab-rules"><div class="section-heading panel-toolbar"><h2>{{ $t('workbench.rules.title') }}</h2><t-button variant="outline" :loading="busy" :disabled="savingRules" @click="loadAll">{{ $t('workbench.common.refresh') }}</t-button></div><p>{{ $t('workbench.rules.desc') }}</p><p class="source-note">{{ $t('workbench.rules.source', { source: ruleSourceLabel(data.rules, t), revision: data.rule_revision }) }}</p><form @submit.prevent="submitRules"><label>{{ $t('workbench.rules.delay') }}<t-input-number v-model="ruleForm.effective_delay_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>{{ $t('workbench.rules.valid') }}<t-input-number v-model="ruleForm.valid_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><label>{{ $t('workbench.rules.review') }}<t-input-number v-model="ruleForm.review_days" :min="0" :max="36500" :step="1" :disabled="!data.can_write || savingRules" /></label><t-alert v-if="ruleError" theme="error" role="alert">{{ ruleError }}</t-alert><p v-if="ruleDirty" class="source-note" role="status">{{ ruleOutdated ? $t('workbench.lifecycle.ruleOutdatedDraft') : $t('workbench.lifecycle.ruleDirtyDraft') }} <t-button variant="text" size="small" :disabled="savingRules" @click="resetRuleForm">{{ ruleOutdated ? $t('workbench.lifecycle.discardAndReloadRules') : $t('workbench.lifecycle.discardRules') }}</t-button></p><t-alert v-if="ruleSuccess" theme="success" role="status">{{ $t('workbench.rules.saved') }}</t-alert><t-button v-if="data.can_write" theme="primary" type="submit" :loading="savingRules" :disabled="!validRules(ruleForm) || ruleOutdated">{{ savingRules ? $t('workbench.rules.saving') : $t('workbench.rules.save') }}</t-button><p v-else class="source-note">{{ $t('workbench.rules.readonly') }}</p></form></section></template>
    </template>
   </template>
   </template>
@@ -243,40 +243,40 @@
      <t-tag :theme="stateTagTheme(detail.snapshot.effective_state || detail.snapshot.current.state)" variant="light" size="small">{{ label(detail.snapshot.effective_state || detail.snapshot.current.state) }}</t-tag>
      <span>{{ detail.business_family?.label || $t('workbench.list.unassigned') }}</span>
     </span>
-    <span v-else>文档详情</span>
+    <span v-else>{{ $t('workbench.lifecycle.documentDetails') }}</span>
    </template>
    <template #header-actions>
-    <t-button v-if="detail" variant="outline" size="small" :disabled="detailLocked" :loading="openingCorrections" @click="openCurrentVersionCorrections">反馈文档</t-button>
-    <t-button variant="text" shape="square" aria-label="关闭文档详情" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
+    <t-button v-if="detail" variant="outline" size="small" :disabled="detailLocked" :loading="openingCorrections" @click="openCurrentVersionCorrections">{{ $t('workbench.lifecycle.feedbackDocument') }}</t-button>
+    <t-button variant="text" shape="square" :aria-label="$t('workbench.lifecycle.closeDocumentDetails')" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
    </template>
    <template #header-extra>
-    <nav class="detail-tabs" role="tablist" aria-label="文档详情标签">
-     <template v-for="(group, groupIndex) in detailGroups" :key="group.label">
+    <nav class="detail-tabs" role="tablist" :aria-label="$t('workbench.lifecycle.detailTabs')">
+     <template v-for="(group, groupIndex) in detailGroups" :key="group.labelKey">
       <span v-if="groupIndex" class="detail-tab-divider" aria-hidden="true"></span>
       <t-button v-for="item in group.tabs" :key="item.key" class="detail-tab" :class="{ 'is-active': detailTab===item.key }" size="small" variant="text" :disabled="detailLocked" role="tab" :aria-selected="detailTab===item.key" @click="detailTab=item.key">{{ $t(item.labelKey) }}</t-button>
      </template>
     </nav>
    </template>
    <div class="detail-drawer-body">
-     <div v-if="detailBusy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在加载文档…</span></div>
-     <t-alert v-if="detailError" theme="error" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">重新载入</t-button></t-alert>
+     <div v-if="detailBusy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.lifecycle.loadingDocument') }}</span></div>
+     <t-alert v-if="detailError" theme="error" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">{{ $t('workbench.common.reload') }}</t-button></t-alert>
      <template v-if="detail">
       <template v-if="detailTab==='life'">
-       <h3>有效期与复核</h3>
-       <p class="source-note">时间按本机时区显示（{{ timezone }}），保存为 UTC。清空日期不会恢复已失效文档。</p>
+       <h3>{{ $t('workbench.lifecycle.validityAndReview') }}</h3>
+       <p class="source-note">{{ $t('workbench.lifecycle.timezoneNote',{timezone}) }}</p>
         <t-alert v-if="dateConflictDraft && !documentConflict" theme="warning" role="status">
-         <p>下方表单已载入最新日期。你上次修改的日期仍在草稿中。</p>
-         <ul><li v-for="field in dateFields" v-show="dateConflictDraft[field.key] !== undefined" :key="field.key">{{ field.label }}：{{ dateConflictDraft[field.key]?.replace('T',' ') || '未设置' }}</li></ul>
-         <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" variant="outline" size="small" @click="applyDateConflictDraft">填回我的修改</t-button>
-         <t-button variant="text" size="small" @click="dateConflictDraft=undefined">放弃草稿</t-button>
+         <p>{{ $t('workbench.lifecycle.conflictLoaded') }}</p>
+         <ul><li v-for="field in dateFields" v-show="dateConflictDraft[field.key] !== undefined" :key="field.key">{{ $t(field.labelKey) }}：{{ dateConflictDraft[field.key]?.replace('T',' ') || $t('workbench.common.unset') }}</li></ul>
+         <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" variant="outline" size="small" @click="applyDateConflictDraft">{{ $t('workbench.lifecycle.fillMyChanges') }}</t-button>
+         <t-button variant="text" size="small" @click="dateConflictDraft=undefined">{{ $t('workbench.lifecycle.discardDraft') }}</t-button>
         </t-alert>
        <form @submit.prevent="submitDocument">
-        <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">此附件的生效/失效时间与生命周期状态继承主件。 <t-button variant="text" theme="primary" size="small" :disabled="detailLocked" @click="openParentDocument">打开主件</t-button></p>
-        <label>生效时间<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
-        <label>失效时间<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
-        <label>复核时间<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
+        <p v-if="detail.snapshot.attachment_parent_document_id" class="source-note">{{ $t('workbench.lifecycle.inheritedParent') }} <t-button variant="text" theme="primary" size="small" :disabled="detailLocked" @click="openParentDocument">{{ $t('workbench.lifecycle.openParent') }}</t-button></p>
+        <label>{{ $t('workbench.lifecycle.effectiveFrom') }}<t-date-picker v-model="effectiveFromPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
+        <label>{{ $t('workbench.lifecycle.effectiveUntil') }}<t-date-picker v-model="effectiveUntilPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
+        <label>{{ $t('workbench.lifecycle.reviewAt') }}<t-date-picker v-model="reviewDuePicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="dateEditingLocked" clearable /></label>
         <t-alert v-if="documentSuccess" theme="success" role="status">{{ documentSuccess }}</t-alert>
-         <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="dateEditingLocked">{{ savingDocument?'正在保存…':'保存日期' }}</t-button>
+         <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="dateEditingLocked">{{ savingDocument ? $t('workbench.lifecycle.saving') : $t('workbench.lifecycle.saveDates') }}</t-button>
        </form>
       </template>
       <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
@@ -289,23 +289,23 @@
       </template>
       <LineageView v-else-if="detailTab==='graph'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document-id="selectedID" @open="openGraphDocument" @correction="openVersionCorrections" />
       <template v-else-if="detailTab==='audit'">
-       <h3>生命周期事件</h3>
+       <h3>{{ $t('workbench.lifecycle.lifecycleEvents') }}</h3>
        <ol v-if="detail.events.length" class="timeline"><li v-for="event in detail.events" :key="event.event_id">
         <strong>{{ label(event.from_state) }} → {{ label(event.to_state) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ event.reason }}</p>
-       </li></ol><p v-else class="source-note">暂无事件。</p>
-       <p v-if="detail.events_truncated" class="source-note">仅展示最近 100 条事件。</p>
-      <h3>关联与版本操作</h3>
-      <p v-if="activityError" role="alert">{{ activityError }} <t-button variant="text" size="small" @click="loadActivity">重试</t-button></p>
-      <div v-else-if="activityBusy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取治理记录…</span></div>
+       </li></ol><p v-else class="source-note">{{ $t('workbench.lifecycle.noEvents') }}</p>
+       <p v-if="detail.events_truncated" class="source-note">{{ $t('workbench.lifecycle.eventsTruncated') }}</p>
+      <h3>{{ $t('workbench.lifecycle.relationsAndVersions') }}</h3>
+      <p v-if="activityError" role="alert">{{ activityError }} <t-button variant="text" size="small" @click="loadActivity">{{ $t('workbench.common.retry') }}</t-button></p>
+      <div v-else-if="activityBusy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.lifecycle.readingGovernance') }}</span></div>
       <ol v-else-if="activity.length" class="timeline"><li v-for="event in activity" :key="event.operation_id">
-       <strong>{{ governanceAction(event.action) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ statusLabels[event.status] || event.status }}</p>
+       <strong>{{ governanceAction(event.action) }}</strong><time>{{ date(event.occurred_at) }}</time><p>{{ statusLabel(event.status,t) || event.status }}</p>
       </li></ol>
-      <p v-else class="source-note">暂无关联与版本操作。</p>
+      <p v-else class="source-note">{{ $t('workbench.lifecycle.noGovernance') }}</p>
       <div v-if="activityPage>1 || activity.length===20" class="pagination">
-       <t-button variant="outline" size="small" :disabled="activityBusy || activityPage<=1" @click="activityPage--">上一页</t-button>
-       <t-button variant="outline" size="small" :disabled="activityBusy || activity.length<20" @click="activityPage++">下一页</t-button>
+       <t-button variant="outline" size="small" :disabled="activityBusy || activityPage<=1" @click="activityPage--">{{ $t('workbench.cleanup.prev') }}</t-button>
+       <t-button variant="outline" size="small" :disabled="activityBusy || activity.length<20" @click="activityPage++">{{ $t('workbench.cleanup.next') }}</t-button>
       </div>
-       <t-button variant="outline" @click="closeDocument(); showFeedbackReview()">查看反馈审核</t-button>
+       <t-button variant="outline" @click="closeDocument(); showFeedbackReview()">{{ $t('workbench.lifecycle.viewFeedbackReview') }}</t-button>
       </template>
       <BusinessView v-else-if="detailTab==='revisions'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="revisions" @locked="childLocked=$event" />
      </template>
@@ -322,7 +322,7 @@ import { documentActivity, documentTitle, type BusinessAction } from '@/api/busi
 import type { FamilyActivity } from '@/api/families'
 import { loadLineageGraph } from '@/api/lineage'
 import { correctionRoute } from '../feedback/model'
-import { actionLabels, httpStatus, statusLabels } from '../business/model'
+import { actionLabel, httpStatus, statusLabel } from '../business/model'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import * as api from '@/api/lifecycle'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
@@ -332,11 +332,11 @@ import SupplementEditor from './SupplementEditor.vue'
 import AttachmentWorkbench from './AttachmentWorkbench.vue'
 import { attachmentTasks, type AttachmentTaskList } from '@/api/attachmentWorkbench'
 import { useAuthStore } from '@/stores/auth'
-import { annotationsForSave, errorMessage, moveTabFocus, requestFence, reviewDeliveryLabel, ruleSourceLabel, stateLabels, states, toLocalInput, validRules } from './model'
+import { annotationsForSave, errorMessage, moveTabFocus, requestFence, reviewDeliveryLabel, ruleSourceLabel, stateLabel, states, toLocalInput, validRules } from './model'
 // TDesign select options; the workbench renders WeKnora-native selects, so the
 // option arrays live here instead of hand-written <option> children.
 const kbOptions=computed(()=>knowledgeBases.value.map(item=>({label:item.name,value:item.id})))
-const stateOptions=computed(()=>[{label:t('workbench.list.allStates'),value:''},...states.map(state=>({label:stateLabels[state],value:state}))])
+const stateOptions=computed(()=>[{label:t('workbench.list.allStates'),value:''},...states.map(state=>({label:stateLabel(state,t),value:state}))])
 const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWorkspaceView.vue'))
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const CorrectionWorkspace = defineAsyncComponent(() => import('../feedback/CorrectionWorkspace.vue'))
@@ -350,13 +350,13 @@ const workspaceTabs=[
  {key:'lineage',labelKey:'workbench.workspace.lineage'},
 ] as const
 const detailGroups=[
- {label:'治理',tabs:[{key:'life',labelKey:'workbench.detail.life'},{key:'revisions',labelKey:'workbench.detail.revisions'}]},
- {label:'关联',tabs:[{key:'family',labelKey:'workbench.detail.family'},{key:'attachments',labelKey:'workbench.detail.attachments'},{key:'relations',labelKey:'workbench.detail.relations'},{key:'graph',labelKey:'workbench.detail.graph'},{key:'suggestions',labelKey:'workbench.detail.suggestions'}]},
- {label:'记录',tabs:[{key:'audit',labelKey:'workbench.detail.audit'}]},
+ {labelKey:'workbench.lifecycle.groupGovernance',tabs:[{key:'life',labelKey:'workbench.detail.life'},{key:'revisions',labelKey:'workbench.detail.revisions'}]},
+ {labelKey:'workbench.lifecycle.groupRelations',tabs:[{key:'family',labelKey:'workbench.detail.family'},{key:'attachments',labelKey:'workbench.detail.attachments'},{key:'relations',labelKey:'workbench.detail.relations'},{key:'graph',labelKey:'workbench.detail.graph'},{key:'suggestions',labelKey:'workbench.detail.suggestions'}]},
+ {labelKey:'workbench.lifecycle.groupRecords',tabs:[{key:'audit',labelKey:'workbench.detail.audit'}]},
 ] as const
 type DetailTab=(typeof detailGroups)[number]['tabs'][number]['key']
 const route=useRoute(), router=useRouter()
-const { t }=useI18n()
+const { t, locale }=useI18n()
 const workspaceView=computed(()=>{
  const view=route.query.view
  if(view==='feedback-governance')return 'feedback-materials'
@@ -388,11 +388,11 @@ type DocumentSortKey=(typeof documentColumns)[number]['key']
 const sortKey=ref<DocumentSortKey>('title'),sortDirection=ref<1|-1>(1)
 const documentSortValue=(row:api.DocumentRow,key:DocumentSortKey)=>{
  if(key==='title')return (row.title||row.document_id).toLocaleLowerCase()
- if(key==='state')return stateLabels[row.state]||row.state
+ if(key==='state')return stateLabel(row.state,t)
  if(key==='family')return row.business_family?.label||''
  return row.annotations.effective_until||''
 }
-const sortedDocuments=computed(()=>allDocuments.value.filter(row=>!row.parent_document_id).sort((left,right)=>documentSortValue(left,sortKey.value).localeCompare(documentSortValue(right,sortKey.value),'zh-CN')*sortDirection.value))
+const sortedDocuments=computed(()=>allDocuments.value.filter(row=>!row.parent_document_id).sort((left,right)=>documentSortValue(left,sortKey.value).localeCompare(documentSortValue(right,sortKey.value),locale.value)*sortDirection.value))
 const attachmentRows=computed(()=>allDocuments.value.filter(row=>!!row.parent_document_id))
 const mainDocumentCount=computed(()=>sortedDocuments.value.length)
 const attachmentCount=computed(()=>attachmentRows.value.length)
@@ -415,9 +415,9 @@ const documentGroups=computed<DocumentGroup[]>(()=>{
   list.push(row)
   byParent.set(parent,list)
  }
- const groups:DocumentGroup[]=sortedDocuments.value.map(parent=>({parent,children:(byParent.get(parent.document_id)||[]).sort((left,right)=>attachmentSortValue(left).localeCompare(attachmentSortValue(right),'zh-CN'))}))
+ const groups:DocumentGroup[]=sortedDocuments.value.map(parent=>({parent,children:(byParent.get(parent.document_id)||[]).sort((left,right)=>attachmentSortValue(left).localeCompare(attachmentSortValue(right),locale.value))}))
  const attachedParents=new Set(groups.flatMap(group=>group.parent?[group.parent.document_id]:[]))
- const orphans=attachmentRows.value.filter(row=>!row.parent_document_id||!attachedParents.has(row.parent_document_id)).sort((left,right)=>attachmentSortValue(left).localeCompare(attachmentSortValue(right),'zh-CN'))
+ const orphans=attachmentRows.value.filter(row=>!row.parent_document_id||!attachedParents.has(row.parent_document_id)).sort((left,right)=>attachmentSortValue(left).localeCompare(attachmentSortValue(right),locale.value))
  if(orphans.length)groups.push({parent:null,children:orphans})
  return groups
 })
@@ -487,20 +487,20 @@ function toggleCleanupPageSelection(checked:boolean){
 function clearCleanupSelection(){cleanupSelected.value=new Set()}
 function cleanupTask(task:api.CleanupTask){return changeCleanup(task,task.can_confirm?'confirm':'confirm_now')}
 function cleanupFailureReason(task:api.CleanupTask){
- if(!task.can_confirm)return task.can_cleanup_now?'上次清理未完成，可立即清理或延期。':'无法核实保留期限，请联系管理员。'
+ if(!task.can_confirm)return task.can_cleanup_now?t('workbench.cleanup.failureNoConfirmCanNow'):t('workbench.cleanup.failureNoConfirmCant')
  const reason=task.last_error
- if(reason?.startsWith('business family still references document'))return '此文档仍被版本族引用。处理版本族成员关系后可重试。'
- if(reason?.includes('FOREIGN KEY constraint failed'))return '扩展记录仍被引用。核对相关治理记录后可重试。'
- return '上次清理未完成。可重试，若再次失败请联系管理员。'
+ if(reason?.startsWith('business family still references document'))return t('workbench.cleanup.failureFamily')
+ if(reason?.includes('FOREIGN KEY constraint failed'))return t('workbench.cleanup.failureForeignKey')
+ return t('workbench.cleanup.failureGeneric')
 }
-const cleanupStatusLabel=(status:string)=>({pending_cleanup:'记录保留中',awaiting_confirmation:'可清理',held:'延期清理',failed:'清理失败',cleaned:'已清理',cancelled:'已恢复'} as Record<string,string>)[status]||status
+const cleanupStatusLabel=(status:string)=>{const key=({pending_cleanup:'workbench.cleanup.statusPending',awaiting_confirmation:'workbench.cleanup.statusAwaiting',held:'workbench.cleanup.statusHeld',failed:'workbench.cleanup.statusFailed',cleaned:'workbench.cleanup.statusCleaned',cancelled:'workbench.cleanup.statusCancelled'} as Record<string,string>)[status];return key?t(key):status}
 const cleanupStatusTheme=(status:string)=>({pending_cleanup:'warning',awaiting_confirmation:'danger',held:'default',failed:'danger',cleaned:'success',cancelled:'default'} as Record<string,string>)[status]||'default'
 const cleanupActionCount=computed(()=>{
  if(tab.value==='cleanup' && cleanupListActionable.value!==undefined)return cleanupListActionable.value
  return data.value?.cleanup?.actionable ?? 0
 })
 const cleanupFilter=ref<api.CleanupStatus|''>('')
-const cleanupFilterOptions=[{label:'全部状态',value:''},...(['awaiting_confirmation','failed','pending_cleanup','held'] as const).map(value=>({label:cleanupStatusLabel(value),value}))]
+const cleanupFilterOptions=[{label:t('workbench.cleanup.filterAll'),value:''},...(['awaiting_confirmation','failed','pending_cleanup','held'] as const).map(value=>({label:cleanupStatusLabel(value),value}))]
 const reviewSort=ref<'asc'|'desc'>('asc')
 type TaskSectionKey='attachments'|'reviews'
 const collapsedTaskSections=ref<Set<TaskSectionKey>>(new Set())
@@ -542,13 +542,13 @@ const detailCanWrite=computed(()=>detail.value?.can_write ?? (selectedKB.value==
 const detailTab=ref<DetailTab>('life')
 const activity=ref<FamilyActivity[]>([]), activityBusy=ref(false), activityError=ref(''), activityPage=ref(1)
 const activityFence=requestFence()
-const governanceActions:Record<string,string>={family_member_add:'加入版本族',family_member_remove:'移出版本族',
- family_replace_create:'登记替代计划',family_replace_approve:'批准替代',family_replace_apply:'替代生效',family_replace_cancel:'撤回替代',
- supplements_active:'登记补充关系',supplements_revoked:'撤销补充关系',
- family_suggestion_confirm:'确认关联建议',family_suggestion_ignore:'忽略关联建议',family_replace_history:'补录历史版本链'}
-const governanceAction=(action:string)=>governanceActions[action]||actionLabels[action as BusinessAction]||action
+const governanceActions:Record<string,string>={family_member_add:'workbench.governance.familyMemberAdd',family_member_remove:'workbench.governance.familyMemberRemove',
+ family_replace_create:'workbench.governance.familyReplaceCreate',family_replace_approve:'workbench.governance.familyReplaceApprove',family_replace_apply:'workbench.governance.familyReplaceApply',family_replace_cancel:'workbench.governance.familyReplaceCancel',
+ supplements_active:'workbench.governance.supplementsActive',supplements_revoked:'workbench.governance.supplementsRevoked',
+ family_suggestion_confirm:'workbench.governance.familySuggestionConfirm',family_suggestion_ignore:'workbench.governance.familySuggestionIgnore',family_replace_history:'workbench.governance.familyReplaceHistory'}
+const governanceAction=(action:string)=>{const key=governanceActions[action];return key?t(key):actionLabel(action as BusinessAction,t)||action}
 const dateForm=reactive({effective_from:'',effective_until:'',review_due:''})
-const dateFields=[{key:'effective_from',label:'生效时间'},{key:'effective_until',label:'失效时间'},{key:'review_due',label:'复核时间'}] as const
+const dateFields=[{key:'effective_from',labelKey:'workbench.lifecycle.effectiveFrom'},{key:'effective_until',labelKey:'workbench.lifecycle.effectiveUntil'},{key:'review_due',labelKey:'workbench.lifecycle.reviewAt'}] as const
 const dateConflictDraft=ref<Partial<typeof dateForm>>()
 const dateEditingLocked=computed(()=>!detailCanWrite.value||detailLocked.value||documentConflict.value||!!dateConflictDraft.value||!!detail.value?.snapshot.attachment_parent_document_id)
 // Short-lived detail cache: flipping between drawer tabs or reopening the same
@@ -572,19 +572,19 @@ const hasDateDraft=computed(()=>!!dateConflictDraft.value||!!dateBaseline.value&
 const listFence=requestFence(),detailFence=requestFence(),reviewFence=requestFence(),cleanupFence=requestFence(),cleanupMutationFence=requestFence(),ruleFence=requestFence()
 const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone
 
-const date=(value?:string|null)=>value?new Date(value).toLocaleString():'未设置'
-const day=(value?:string|null)=>value?new Date(value).toLocaleDateString():'未设置'
-const label=(state:string)=>stateLabels[state as api.LifecycleState]||state||'初始'
+const date=(value?:string|null)=>value?new Date(value).toLocaleString(locale.value):t('workbench.common.unset')
+const day=(value?:string|null)=>value?new Date(value).toLocaleDateString(locale.value):t('workbench.common.unset')
+const label=(state:string)=>state?(states.includes(state as api.LifecycleState)?stateLabel(state as api.LifecycleState,t):state):t('workbench.states.initial')
 // Map lifecycle state onto a TDesign tag theme so the workbench badge uses the
 // native component palette instead of bespoke colours.
 const stateTagTheme=(state:string)=>({active:'success',scheduled:'primary',pending:'warning',stale:'warning',failed:'danger',archived:'default',superseded:'default'} as Record<string,string>)[state]||'default'
 const mappingTagTheme=(status:string)=>({candidate:'warning',unmatched:'default'} as Record<string,string>)[status]||'primary'
-const mappingTagHint=(status:string)=>status==='candidate'?'正文找到候选引用，但还不能确定对应哪一处，请到附件工作台确认对应引用。':status==='unmatched'?'主件正文没有引用这个附件，暂未建立对应。':'已自动对应正文引用，无需处理。'
+const mappingTagHint=(status:string)=>status==='candidate'?t('workbench.lifecycle.mappingCandidate'):status==='unmatched'?t('workbench.lifecycle.mappingUnmatched'):t('workbench.lifecycle.mappingMatched')
 const degradedMessage=computed(()=>{
  if(!data.value?.degraded)return ''
  const reasons=(data.value.degraded_reason||'').split(',').filter(Boolean)
- const labels=reasons.map(reason=>reason==='native_database_unavailable'?'原生文档服务暂不可用，标题可能为空':reason==='lifecycle_inconsistent'?'部分文档生命周期投影未通过核验，已标记为降级':reason)
- return `当前页面处于降级状态${labels.length?'：'+labels.join('；'):''}。`
+ const labels=reasons.map(reason=>reason==='native_database_unavailable'?t('workbench.lifecycle.degradedNativeDatabase'):reason==='lifecycle_inconsistent'?t('workbench.lifecycle.degradedLifecycleInconsistent'):reason)
+ return labels.length?t('workbench.lifecycle.degraded',{details:labels.join(t('workbench.lifecycle.degradedSeparator'))}):t('workbench.lifecycle.degradedNoDetails')
 })
 let previousFocus:HTMLElement|null=null
 let searchTimer:ReturnType<typeof setTimeout>|undefined
@@ -595,7 +595,7 @@ async function loadActivity(){
  try{
   const rows=await documentActivity(scope,id,activityPage.value)
   if(activityFence.current(token))activity.value=rows
- }catch{if(activityFence.current(token))activityError.value='无法读取治理记录。'}
+ }catch{if(activityFence.current(token))activityError.value=t('workbench.lifecycle.governanceReadError')}
  finally{if(activityFence.current(token))activityBusy.value=false}
 }
 watch([selectedID,selectedKB],()=>{activityPage.value=1})
@@ -603,7 +603,7 @@ watch([selectedID,selectedKB,detailTab,activityPage],loadActivity)
 function onDrawerVisible(value:boolean){if(!value)void closeDocument()}
 async function closeDocument(){
  if(detailLocked.value)return
- if(hasDateDraft.value&&!(await confirmAction({title:'关闭文档详情',body:'日期尚未保存，确定关闭文档详情？',confirmText:'关闭详情'})))return
+ if(hasDateDraft.value&&!(await confirmAction({title:t('workbench.lifecycle.closeConfirmTitle'),body:t('workbench.lifecycle.closeConfirmBody'),confirmText:t('workbench.lifecycle.closeConfirmText')})))return
  detailFence.invalidate();selectedID.value='';selectedKB.value='';detail.value=undefined;detailError.value='';documentSuccess.value='';dateBaseline.value='';dateConflictDraft.value=undefined
  const trigger=previousFocus
  previousFocus=null
@@ -631,7 +631,7 @@ async function loadOverview(){
  }catch(e){
   if(listFence.current(token)){
    if(!ruleDirty.value && !savingRules.value)data.value=undefined
-   allDocuments.value=[];documentTotal.value=0;error.value=errorMessage(e)
+   allDocuments.value=[];documentTotal.value=0;error.value=errorMessage(e,t)
   }
  }finally{if(listFence.current(token))busy.value=false}
 }
@@ -649,7 +649,7 @@ async function loadMoreDocuments(){
   documentTotal.value=more.total
   nextDocumentPage.value=rows.length && page*(more.page_size||documentPageSize)<more.total ? page+1 : 0
  }catch{
-  if(listFence.current(token))documentPageError.value='无法加载后续文档，已保留当前列表。'
+  if(listFence.current(token))documentPageError.value=t('workbench.lifecycle.loadMoreError')
  }finally{if(listFence.current(token))documentPageBusy.value=false}
 }
 function onDocumentScroll(){
@@ -664,9 +664,9 @@ async function loadReviews(){
  const [reviewResult,taskResult]=await Promise.allSettled([api.reviews(scope),attachmentTasks(scope)])
  if(!reviewFence.current(token))return
  if(reviewResult.status==='fulfilled'){reviewItems.value=reviewResult.value.alerts||[];reviewsTruncated.value=reviewResult.value.truncated}
- else reviewError.value=errorMessage(reviewResult.reason)
+ else reviewError.value=errorMessage(reviewResult.reason,t)
  if(taskResult.status==='fulfilled')attachmentTaskList.value=taskResult.value
- else attachmentTaskError.value='无法加载附件待办，请稍后刷新。'
+ else attachmentTaskError.value=t('workbench.lifecycle.attachmentTasksError')
  reviewsLoaded.value=true;reviewBusy.value=false
 }
 function openPendingAttachment(){
@@ -688,7 +688,7 @@ async function loadCleanup(page=cleanupPage.value):Promise<void>{
   cleanupItems.value=result.tasks||[]
   cleanupListActionable.value=result.actionable
  }catch{
-  if(cleanupFence.current(token)){cleanupItems.value=[];cleanupLoadFailed.value=true;cleanupError.value='无法载入清理任务，请重试。'}
+  if(cleanupFence.current(token)){cleanupItems.value=[];cleanupLoadFailed.value=true;cleanupError.value=t('workbench.cleanup.loadError')}
  }finally{if(cleanupFence.current(token))cleanupBusy.value=false}
 }
 function holdCleanup(task:api.CleanupTask){return changeCleanup(task,'hold')}
@@ -699,7 +699,7 @@ async function changeCleanup(task:api.CleanupTask,action:'hold'|'confirm'|'confi
  const operation=cleanupMutationFence.begin()
  cleanupChanging.value=true
  try{
-  if(action==='hold')await api.holdCleanup(scope,task.document_id,task.revision,90,'用户保留','hold-'+task.document_id+'-'+task.revision)
+  if(action==='hold')await api.holdCleanup(scope,task.document_id,task.revision,90,t('workbench.cleanup.holdReason'),'hold-'+task.document_id+'-'+task.revision)
   else if(action==='confirm_now')await api.confirmCleanupNow(scope,task.document_id,task.revision,'cleanup-now-'+task.document_id+'-'+task.revision)
   else await api.confirmCleanup(scope,task.document_id,task.revision,'cleanup-'+task.document_id+'-'+task.revision)
   if(cleanupMutationFence.current(operation)){await loadCleanup();if(cleanupMutationFence.current(operation))await loadOverview()}
@@ -707,7 +707,7 @@ async function changeCleanup(task:api.CleanupTask,action:'hold'|'confirm'|'confi
   if(!cleanupMutationFence.current(operation))return
   // An unsuccessful request may have advanced the task's revision.
   await loadCleanup()
-  if(cleanupMutationFence.current(operation)&&!cleanupError.value)cleanupError.value=httpStatus(e)===409?'清理条件已变化或当前记录仍有关联，请核对任务状态和保留期限。':'清理请求失败。请查看刷新后的任务状态，再决定是否重试。'
+  if(cleanupMutationFence.current(operation)&&!cleanupError.value)cleanupError.value=httpStatus(e)===409?t('workbench.cleanup.conflictError'):t('workbench.cleanup.requestError')
  }finally{if(cleanupMutationFence.current(operation))cleanupChanging.value=false}
 }
 function holdSelectedCleanup(){return batchCleanup('hold')}
@@ -722,15 +722,15 @@ async function batchCleanup(mode:'hold'|'cleanup'){
   for(const task of tasks){
    if(!cleanupMutationFence.current(operation))break
    try{
-    if(mode==='hold')await api.holdCleanup(scope,task.document_id,task.revision,90,'用户批量延期','batch-hold-'+task.document_id+'-'+task.revision)
+    if(mode==='hold')await api.holdCleanup(scope,task.document_id,task.revision,90,t('workbench.cleanup.batchHoldReason'),'batch-hold-'+task.document_id+'-'+task.revision)
     else if(task.can_confirm)await api.confirmCleanup(scope,task.document_id,task.revision,'batch-cleanup-'+task.document_id+'-'+task.revision)
     else await api.confirmCleanupNow(scope,task.document_id,task.revision,'batch-cleanup-now-'+task.document_id+'-'+task.revision)
     done++
    }catch{failed++}
   }
   if(!cleanupMutationFence.current(operation))return
-  const verb=mode==='hold'?'已延期':'已清理'
-  const summary=verb+' '+done+' 条扩展记录'+(failed?'，'+failed+' 条失败，请刷新后核对。':'。')
+  const verb=mode==='hold'?t('workbench.cleanup.batchHoldDone'):t('workbench.cleanup.batchCleanDone')
+  const summary=t('workbench.cleanup.batchSummary',{verb,done})+(failed?t('workbench.cleanup.batchFailedSuffix',{failed}):'')
   await loadCleanup()
   if(cleanupMutationFence.current(operation))cleanupBatchMessage.value=summary
  }finally{if(cleanupMutationFence.current(operation))cleanupChanging.value=false}
@@ -794,7 +794,7 @@ function openParentDocument(){
 async function openDocument(id:string,title?:string,nextTab:DetailTab='life',kbOverride=kb.value,event?:MouseEvent){
  const scope=kbOverride||kb.value
  if(detailLocked.value || !scope)return
- if(selectedID.value&&hasDateDraft.value&&!(await confirmAction({title:'切换文档',body:'日期尚未保存，确定切换到另一篇文档？',confirmText:'切换文档'})))return
+ if(selectedID.value&&hasDateDraft.value&&!(await confirmAction({title:t('workbench.lifecycle.switchConfirmTitle'),body:t('workbench.lifecycle.switchConfirmBody'),confirmText:t('workbench.lifecycle.switchConfirmText')})))return
  if(!selectedID.value)previousFocus=(event?.currentTarget || document.activeElement) as HTMLElement|null
  selectedKB.value=scope;selectedID.value=id;selectedTitle.value=title||'';detailTab.value=nextTab
  dateBaseline.value='';dateConflictDraft.value=undefined;documentConflict.value=false
@@ -822,7 +822,7 @@ async function loadDocument(fresh=false){
   applyDetail(value)
   documentConflict.value=false
   if(!selectedTitle.value)void documentTitle(scope,id).then(title=>{if(detailFence.current(token))selectedTitle.value=title}).catch(()=>{})
- }catch(e){if(detailFence.current(token))detailError.value=errorMessage(e)}
+ }catch(e){if(detailFence.current(token))detailError.value=errorMessage(e,t)}
  finally{if(detailFence.current(token))detailBusy.value=false}
 }
 function applyDateConflictDraft(){
@@ -837,11 +837,11 @@ async function submitDocument(){
   const result=await api.saveAnnotations(scope,id,original.revision,annotationsForSave(original,dateForm))
   if(!detailFence.current(token))return
   detailCache.set(detailKey(scope,id),{at:Date.now(),value:result});applyDetail(result)
-  documentSuccess.value=result.evaluation_status==='pending'?'日期已保存；状态待后台扫描确认，请稍后刷新。':'日期已保存，状态已重新核验。'
+  documentSuccess.value=result.evaluation_status==='pending'?t('workbench.lifecycle.dateSavedPending'):t('workbench.lifecycle.dateSaved')
   void loadOverview();void loadReviews()
  }catch(e){
   if(!detailFence.current(token))return
-  detailError.value=errorMessage(e)
+  detailError.value=errorMessage(e,t)
   if(httpStatus(e)===409){
    documentConflict.value=true
    detailCache.delete(detailKey(scope,id))
@@ -863,7 +863,7 @@ async function submitRules(){
    data.value.rules=result.rules;data.value.rule_revision=result.rule_revision
    resetRuleForm();ruleSuccess.value=true
   }
- }catch(e){if(ruleFence.current(token))ruleError.value=errorMessage(e)}
+ }catch(e){if(ruleFence.current(token))ruleError.value=errorMessage(e,t)}
  finally{if(ruleFence.current(token))savingRules.value=false}
 }
 watch([titleQuery,filter,kb],([,state,scope],[,previousState,previousScope])=>{if(!scope||scope!==previousScope)return;clearTimeout(searchTimer);listFence.invalidate();if(state!==previousState){void loadOverview();return}busy.value=true;searchTimer=setTimeout(loadOverview,250)})
@@ -881,7 +881,7 @@ watch(kb,()=>{
 watch([tab,kb],([value,scope],[,previousScope])=>{if(!scope||scope!==previousScope)return;if(value==='reviews'&&!reviewsLoaded.value&&!reviewBusy.value)void loadReviews().then(openPendingAttachment);if(value==='cleanup'&&!cleanupBusy.value)void loadCleanup()})
 
 function scopeFromQuery(value:unknown){return knowledgeBases.value.find(row=>row.id===value)?.id||knowledgeBases.value[0]?.id||''}
-async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];kb.value=scopeFromQuery(route.query.kb)}catch{if(kbFence.current(token))error.value='无法加载可访问的知识库，请检查登录状态后重试。'}finally{if(kbFence.current(token))loadingKB.value=false}}
+async function loadKnowledgeBases(){const token=kbFence.begin();kb.value='';knowledgeBases.value=[];loadingKB.value=true;error.value='';try{const response=await listKnowledgeBases();if(!kbFence.current(token))return;if(!response.success)throw new Error();knowledgeBases.value=response.data||[];kb.value=scopeFromQuery(route.query.kb)}catch{if(kbFence.current(token))error.value=t('workbench.lifecycle.knowledgeBasesError')}finally{if(kbFence.current(token))loadingKB.value=false}}
 watch(()=>auth.effectiveTenantId,()=>void loadKnowledgeBases())
 watch(()=>route.query,query=>{
  tab.value=listTab(query.tab)

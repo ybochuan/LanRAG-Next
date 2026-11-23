@@ -45,7 +45,9 @@ export interface NativePage {
   page_size?: number
 }
 
-export class RecoveryError extends Error {}
+export class RecoveryError extends Error {
+  constructor(message: string, readonly key?: string) { super(message) }
+}
 
 export async function fingerprint(file: Blob) {
   if (globalThis.crypto?.subtle) {
@@ -72,7 +74,7 @@ function operationId() {
 
 export async function startRecovery(source: string, file: File, correction?: CorrectionRevisionReference): Promise<BinaryRevisionRecovery> {
   const type = fileType(file)
-  if (!fileTypes.includes(type) || file.size === 0) throw new RecoveryError('请选择非空的 PDF、DOCX、XLSX 或 PPTX 文件。')
+  if (!fileTypes.includes(type) || file.size === 0) throw new RecoveryError('请选择非空的 PDF、DOCX、XLSX 或 PPTX 文件。', 'workbench.binaryRevision.invalidFile')
   return {
     source,
     ...(correction ? { correction: { id: correction.id, version_id: correction.version_id, revision: correction.revision } } : {}),
@@ -99,7 +101,7 @@ export function readRecovery(raw: string | null): BinaryRevisionRecovery | undef
     (recovery.target && (!recovery.uploadAttempted || !recovery.target.id || !nativeHash.test(recovery.target.hash))) ||
     (recovery.proposal && (!recovery.target || !recovery.proposal.id || recovery.proposal.revision !== 1)) ||
     (recovery.reparseFrom !== undefined && (!recovery.target || typeof recovery.reparseFrom !== 'string' || !recovery.reparseFrom))) {
-    throw new RecoveryError('本次恢复记录无法读取。')
+    throw new RecoveryError('本次恢复记录无法读取。', 'workbench.binaryRevision.recoveryRecordInvalid')
   }
   return recovery
 }
@@ -109,7 +111,7 @@ export function targetIdentity(row: NativeDocument | undefined, kb: string, reco
     row.file_type?.toLowerCase() !== recovery.fileType || row.file_size !== recovery.size || !nativeHash.test(row.file_hash) ||
     row.metadata?.agentrag_binary_revision !== '1' || row.metadata?.[uploadMarker] !== recovery.uploadOperation ||
     (recovery.target && (row.id !== recovery.target.id || row.file_hash !== recovery.target.hash))) {
-    throw new RecoveryError('原生文档与本次修订文件不符，已暂停，请在文档列表核对。')
+    throw new RecoveryError('原生文档与本次修订文件不符，已暂停，请在文档列表核对。', 'workbench.binaryRevision.nativeMismatch')
   }
   return { id: row.id, hash: row.file_hash }
 }
@@ -125,13 +127,13 @@ export async function findUploadedDocument(recovery: BinaryRevisionRecovery, rea
     if (!result.success || !Number.isSafeInteger(total) || total! < 0 || result.total !== total ||
       result.page !== page || result.page_size !== pageSize || (result.data == null && total !== 0) ||
       !Array.isArray(rows) || rows.length !== Math.min(pageSize, total! - seen.size)) {
-      throw new RecoveryError('无法完整核对原生文档列表，请稍后继续核对。')
+      throw new RecoveryError('无法完整核对原生文档列表，请稍后继续核对。', 'workbench.binaryRevision.listIncomplete')
     }
     for (const row of rows) {
-      if (!row?.id || seen.has(row.id)) throw new RecoveryError('核对期间原生文档列表发生变化，请稍后继续核对。')
+      if (!row?.id || seen.has(row.id)) throw new RecoveryError('核对期间原生文档列表发生变化，请稍后继续核对。', 'workbench.binaryRevision.listChanged')
       seen.add(row.id)
       if (row.metadata?.[uploadMarker] !== recovery.uploadOperation) continue
-      if (candidate) throw new RecoveryError('本次上传对应多份原生文档，请先在文档列表核对。')
+      if (candidate) throw new RecoveryError('本次上传对应多份原生文档，请先在文档列表核对。', 'workbench.binaryRevision.duplicateUpload')
       candidate = row
     }
     if (seen.size === total) return candidate
@@ -147,11 +149,11 @@ export function checkProposal(rows: BusinessRecord[], recovery: BinaryRevisionRe
   const correction = recovery.correction
   if (!row || row.id !== proposal.id || kind !== 'revision' || row.source_document_id !== recovery.source || row.proposed_patch !== '' ||
     (correction && (row.source_version_id !== correction.version_id || row.guidance_ids?.length !== 1 || row.guidance_ids[0] !== correction.id))) {
-    throw new RecoveryError('暂时无法核对原修订提案，请稍后继续核对。')
+    throw new RecoveryError('暂时无法核对原修订提案，请稍后继续核对。', 'workbench.binaryRevision.proposalCheckFailed')
   }
   if (row.target_document_id === recovery.target?.id) return true
   if (row.target_document_id || row.revision !== proposal.revision || row.status !== 'pending_review') {
-    throw new RecoveryError('原提案已变化，请在提案列表核对。')
+    throw new RecoveryError('原提案已变化，请在提案列表核对。', 'workbench.binaryRevision.proposalChanged')
   }
   return false
 }

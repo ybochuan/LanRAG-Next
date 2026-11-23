@@ -1,10 +1,10 @@
 <template>
   <section class="clause-evidence">
     <h4>{{ label }}</h4>
-    <dl><dt>锁定版本</dt><dd><code>{{ version }}</code></dd><dt>分块编号</dt><dd><code>{{ anchor.chunk_id }}</code></dd></dl>
-    <p v-if="loading" role="status" class="subtle">正在核对条款…</p>
+    <dl><dt>{{ $t('workbench.businessUi.clause.lockedVersion') }}</dt><dd><code>{{ version }}</code></dd><dt>{{ $t('workbench.businessUi.clause.chunkNumber') }}</dt><dd><code>{{ anchor.chunk_id }}</code></dd></dl>
+    <p v-if="loading" role="status" class="subtle">{{ $t('workbench.businessUi.clause.checking') }}</p>
     <pre v-else-if="body !== undefined" class="content-preview">{{ body }}</pre>
-    <p v-else class="subtle">无法读取与历史指纹一致的正文。可按锁定版本和分块编号核对记录。</p>
+    <p v-else class="subtle">{{ $t('workbench.businessUi.clause.unavailable') }}</p>
   </section>
 </template>
 
@@ -12,8 +12,10 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { clauseEvidence, type ClauseAnchor } from '@/api/business'
 import { requestFence } from '../lifecycle/model'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ kb: string; documentId: string; label: string; version: string; anchor: ClauseAnchor; current: boolean }>()
+const { t } = useI18n()
 const body = ref<string>(), loading = ref(false)
 const fence = requestFence()
 watch(() => [props.kb, props.documentId, props.anchor.chunk_id, props.anchor.content_hash, props.current], async () => {

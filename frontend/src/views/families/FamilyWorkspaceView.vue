@@ -3,80 +3,80 @@
     <header v-if="!scope" class="page-heading">
       <div><h2>{{ initialView==='suggestions' ? $t('workbench.family.suggestions') : $t('workbench.family.title') }}</h2><p v-if="!documentId">{{ $t('workbench.family.subtitle') }}</p></div>
     </header>
-    <section class="scope-bar" aria-label="工作范围">
-      <label v-if="!scope">知识库<t-select v-model="kb" :options="kbOptions" :disabled="catalogBusy || locked" class="kb-select" /></label>
-      <label v-if="kb">版本族<t-select v-model="familyId" :options="familyOptions" :disabled="busy || listBusy || locked" class="family-select" /></label>
+    <section class="scope-bar" :aria-label="$t('workbench.familyUi.scopeAria')">
+      <label v-if="!scope">{{ $t('workbench.familyUi.knowledgeBase') }}<t-select v-model="kb" :options="kbOptions" :disabled="catalogBusy || locked" class="kb-select" /></label>
+      <label v-if="kb">{{ $t('workbench.familyUi.family') }}<t-select v-model="familyId" :options="familyOptions" :disabled="busy || listBusy || locked" class="family-select" /></label>
       <div v-if="familyPage > 1 || families.length === 20" class="mini-pages">
-        <t-button variant="outline" size="medium" :disabled="busy || listBusy || locked || familyPage <= 1" @click="moveFamilies(-1)">上页文档族</t-button>
-        <t-button variant="outline" size="medium" :disabled="busy || listBusy || locked || families.length < 20" @click="moveFamilies(1)">下页文档族</t-button>
+        <t-button variant="outline" size="medium" :disabled="busy || listBusy || locked || familyPage <= 1" @click="moveFamilies(-1)">{{ $t('workbench.familyUi.prevFamily') }}</t-button>
+        <t-button variant="outline" size="medium" :disabled="busy || listBusy || locked || families.length < 20" @click="moveFamilies(1)">{{ $t('workbench.familyUi.nextFamily') }}</t-button>
       </div>
-      <t-tag v-if="kb" :theme="canWrite?'primary':'default'" variant="light" size="small">{{ canWrite ? '可管理' : '只读' }}</t-tag>
+      <t-tag v-if="kb" :theme="canWrite?'primary':'default'" variant="light" size="small">{{ canWrite ? $t('workbench.familyUi.manageable') : $t('workbench.familyUi.readOnly') }}</t-tag>
       <div ref="familyActionsBar" class="family-actions scope-actions">
-        <t-button variant="outline" size="medium" :loading="busy" :disabled="locked" @click="refresh">刷新</t-button>
-        <t-button v-if="canWrite && kb && initialView!=='suggestions'" size="medium" theme="primary" data-create-family :disabled="locked" @click="createOpen=true">创建版本族</t-button>
+        <t-button variant="outline" size="medium" :loading="busy" :disabled="locked" @click="refresh">{{ $t('workbench.familyUi.refresh') }}</t-button>
+        <t-button v-if="canWrite && kb && initialView!=='suggestions'" size="medium" theme="primary" data-create-family :disabled="locked" @click="createOpen=true">{{ $t('workbench.familyUi.createFamily') }}</t-button>
       </div>
     </section>
     <t-alert v-if="error" theme="error">{{ error }}</t-alert>
     <t-alert v-if="notice" theme="success" role="status">{{ notice }}</t-alert>
-    <t-alert v-if="pending && !saving" theme="warning" title="结果待核对" aria-label="待核对操作">
-      <p>结果待核对。重试将沿用同一操作编号和提交内容。</p>
+    <t-alert v-if="pending && !saving" theme="warning" :title="$t('workbench.familyUi.pendingTitle')" :aria-label="$t('workbench.familyUi.pendingAria')">
+      <p>{{ $t('workbench.familyUi.pendingBody') }}</p>
       <div class="alert-actions">
-        <t-button theme="primary" :disabled="!canWrite" @click="perform">重试原请求</t-button>
-        <t-button variant="outline" @click="pending=undefined; refresh()">结束重试并刷新</t-button>
+        <t-button theme="primary" :disabled="!canWrite" @click="perform">{{ $t('workbench.familyUi.retryOriginal') }}</t-button>
+        <t-button variant="outline" @click="pending=undefined; refresh()">{{ $t('workbench.familyUi.finishRetry') }}</t-button>
       </div>
     </t-alert>
-    <div v-if="catalogBusy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取知识库…</span></div>
-    <t-empty v-else-if="!scope && !bases.length" class="empty" description="还没有可访问的知识库。" />
+    <div v-if="catalogBusy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.familyUi.loadingKb') }}</span></div>
+    <t-empty v-else-if="!scope && !bases.length" class="empty" :description="$t('workbench.familyUi.noKb')" />
     <template v-if="kb">
-      <t-dialog v-model:visible="createOpen" header="创建版本族" width="480px" attach="body"
-        :confirm-btn="{ content: '创建版本族', disabled: locked || !newLabel }" @confirm="createFamily">
+      <t-dialog v-model:visible="createOpen" :header="$t('workbench.familyUi.createDialog')" width="480px" attach="body"
+        :confirm-btn="{ content: $t('workbench.familyUi.createFamily'), disabled: locked || !newLabel }" @confirm="createFamily">
         <t-form label-align="top">
-          <t-form-item label="新版本族名称">
-            <t-input v-model="newLabel" :maxlength="120" placeholder="例如：员工手册" :disabled="locked" />
+          <t-form-item :label="$t('workbench.familyUi.newName')">
+            <t-input v-model="newLabel" :maxlength="120" :placeholder="$t('workbench.familyUi.namePlaceholder')" :disabled="locked" />
           </t-form-item>
         </t-form>
       </t-dialog>
-      <p v-if="documentId && !familyId && !listBusy" class="subtle">选择版本族后，可查看成员或把当前文档加入此族。</p>
+      <p v-if="documentId && !familyId && !listBusy" class="subtle">{{ $t('workbench.familyUi.chooseFamilyHint') }}</p>
       <section v-if="family" class="family-summary">
         <div class="family-summary-main">
           <h2>{{ family.label }}</h2>
-          <span class="subtle">族修订 {{ family.revision }}</span>
+          <span class="subtle">{{ $t('workbench.familyUi.familyRevision', { n: family.revision }) }}</span>
           <span v-if="family.published_document_id" class="family-published">
-            当前发布件 · <t-button variant="text" size="small" class="doc-link" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</t-button>
-            <t-button v-if="family.published_version_node_id" variant="text" size="small" @click="openVersionHistory">版本历史</t-button>
+            {{ $t('workbench.familyUi.currentPublication') }} · <t-button variant="text" size="small" class="doc-link" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</t-button>
+            <t-button v-if="family.published_version_node_id" variant="text" size="small" @click="openVersionHistory">{{ $t('workbench.familyUi.versionHistory') }}</t-button>
           </span>
-          <span v-else class="subtle">尚未确认发布头。</span>
+          <span v-else class="subtle">{{ $t('workbench.familyUi.noPublication') }}</span>
         </div>
-        <t-alert v-if="family.published_document_id && family.published_head_availability==='missing'" theme="error" role="alert">当前发布件在原生文档中不可用。请从当前成员中选择新的发布头并显式确认恢复。</t-alert>
+        <t-alert v-if="family.published_document_id && family.published_head_availability==='missing'" theme="error" role="alert">{{ $t('workbench.familyUi.publicationMissing') }}</t-alert>
       </section>
       <div class="workspace-list-header family-list-header">
-        <div v-if="visibleTabs.length > 1" class="sub-tabs" role="tablist" aria-label="文档族视图" @keydown="moveTabFocus">
+        <div v-if="visibleTabs.length > 1" class="sub-tabs" role="tablist" :aria-label="$t('workbench.familyUi.familyViewAria')" @keydown="moveTabFocus">
           <t-button v-for="item in visibleTabs" :id="familyTabsId+'-'+item.key" :key="item.key" role="tab" :aria-controls="familyTabsId+'-panel'" variant="text" :class="{selected:tab===item.key}"
             :aria-selected="tab===item.key" :tabindex="(familyId ? tab===item.key : item.key==='unassigned') ? 0 : -1" :disabled="locked || (!familyId && item.key!=='unassigned')"
             @click="tab=item.key">{{ $t(item.labelKey) }}</t-button>
         </div>
-        <span class="workspace-toolbar-count">{{ currentListCount }} 项</span>
+        <span class="workspace-toolbar-count">{{ $t('workbench.familyUi.itemsCount', { n: currentListCount }) }}</span>
         <div class="workspace-toolbar-actions">
-          <t-button v-if="activeFamilyAction" variant="outline" size="medium" :aria-expanded="familyActionOpen" :disabled="locked" @click="familyActionOpen=!familyActionOpen">{{ familyActionOpen ? '收起操作' : activeFamilyAction }}</t-button>
+          <t-button v-if="activeFamilyAction" variant="outline" size="medium" :aria-expanded="familyActionOpen" :disabled="locked" @click="familyActionOpen=!familyActionOpen">{{ familyActionOpen ? $t('workbench.familyUi.collapseActions') : activeFamilyAction }}</t-button>
           <div v-if="page>1 || hasNext" class="workspace-pager">
-            <t-button variant="text" size="small" :disabled="busy || locked || page<=1" @click="page--">上一页</t-button>
-            <span>第 {{ page }} 页</span>
-            <t-button variant="text" size="small" :disabled="busy || locked || !hasNext" @click="page++">下一页</t-button>
+            <t-button variant="text" size="small" :disabled="busy || locked || page<=1" @click="page--">{{ $t('workbench.familyUi.prevPage') }}</t-button>
+            <span>{{ $t('workbench.familyUi.page', { page }) }}</span>
+            <t-button variant="text" size="small" :disabled="busy || locked || !hasNext" @click="page++">{{ $t('workbench.familyUi.nextPage') }}</t-button>
           </div>
         </div>
       </div>
       <div class="workspace-grid" :class="{'family-with-actions':documentId || (familyActionOpen && activeFamilyAction)}">
         <section class="workspace-list-panel family-list-panel" :id="familyTabsId+'-panel'" :role="visibleTabs.length>1 ? 'tabpanel' : undefined" :aria-labelledby="visibleTabs.length>1 ? familyTabsId+'-'+tab : undefined" :aria-label="currentTabLabel">
-          <div v-if="busy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>正在读取工作台…</span></div>
+          <div v-if="busy" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.familyUi.loadingWorkbench') }}</span></div>
           <template v-else>
             <template v-if="tab==='members' || tab==='removed' || tab==='unassigned'">
-              <p v-if="tab==='unassigned'" class="subtle">已建立观察记录且尚未归族的文档。新入库的生效文档也可通过右侧搜索加入。</p>
+              <p v-if="tab==='unassigned'" class="subtle">{{ $t('workbench.familyUi.unassignedHint') }}</p>
               <div v-if="members.length" class="workspace-list-scroll family-list-scroll">
                 <div class="workspace-list-table" role="table" :aria-label="currentTabLabel">
                   <div class="workspace-list-head" role="row">
-                    <span role="columnheader">文档</span>
-                    <span role="columnheader" class="workspace-head-status">状态</span>
-                    <span role="columnheader" class="workspace-head-actions">操作</span>
+                    <span role="columnheader">{{ $t('workbench.familyUi.colDocument') }}</span>
+                    <span role="columnheader" class="workspace-head-status">{{ $t('workbench.familyUi.colStatus') }}</span>
+                    <span role="columnheader" class="workspace-head-actions">{{ $t('workbench.familyUi.colActions') }}</span>
                   </div>
                   <div class="workspace-list-body" role="rowgroup">
                     <div v-for="row in members" :key="row.document_id" class="workspace-list-row family-row" role="row" @click="openDocument(row.document_id)">
@@ -84,112 +84,112 @@
                         <div class="workbench-title-line">
                           <t-button variant="text" class="workbench-row-title" :disabled="locked" @click.stop="openDocument(row.document_id)">{{ title(row.document_id) }}</t-button>
                         </div>
-                        <small v-if="row.removed_at">移出于 {{ date(row.removed_at) }} · {{ row.reason === 'member_removed' ? '成员移出' : row.reason }}</small>
+                        <small v-if="row.removed_at">{{ $t('workbench.familyUi.removedAt', { date: date(row.removed_at, locale) }) }} · {{ row.reason === 'member_removed' ? $t('workbench.familyUi.memberRemoved') : row.reason }}</small>
                         <span class="workspace-compact-meta">
-                          <span v-if="row.removed_at">移出于 {{ date(row.removed_at) }}</span>
+                          <span v-if="row.removed_at">{{ $t('workbench.familyUi.removedAt', { date: date(row.removed_at, locale) }) }}</span>
                           <span class="workspace-compact-status">{{ row.state ? lifecycleLabel(row.state) : '—' }}</span>
                         </span>
                       </div>
                       <div class="workspace-cell workspace-cell-status" role="cell"><t-tag v-if="row.state" variant="light" size="small" :theme="lifecycleTagTheme(row.state)">{{ lifecycleLabel(row.state) }}</t-tag></div>
                       <div class="workspace-cell workspace-cell-actions" role="cell">
-                        <t-button v-if="canWrite && family && tab==='unassigned'" variant="outline" size="small" :disabled="locked" @click.stop="addMember(row.document_id)">加入本族</t-button>
-                        <t-button v-if="canWrite && family && tab==='members' && row.document_id!==family.published_document_id" variant="text" size="small" :disabled="locked" @click.stop="askRemoval(row.document_id)">移出</t-button>
+                        <t-button v-if="canWrite && family && tab==='unassigned'" variant="outline" size="small" :disabled="locked" @click.stop="addMember(row.document_id)">{{ $t('workbench.familyUi.addToFamily') }}</t-button>
+                        <t-button v-if="canWrite && family && tab==='members' && row.document_id!==family.published_document_id" variant="text" size="small" :disabled="locked" @click.stop="askRemoval(row.document_id)">{{ $t('workbench.familyUi.remove') }}</t-button>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <p v-else class="empty">{{ tab==='members' && !familyId ? '请选择或创建文档族。' : '这一页没有文档。' }}</p>
+              <p v-else class="empty">{{ tab==='members' && !familyId ? $t('workbench.familyUi.noFamily') : $t('workbench.familyUi.emptyPage') }}</p>
               <form v-if="canWrite && family && family.published_head_availability==='missing' && tab==='members'" class="family-recovery" @submit.prevent="recoverHead">
-                <h3>恢复发布头</h3>
-                <p>当前发布件已不可用。恢复会以显式确认的成员替换发布头，并保留历史记录。</p>
-                <label>新的发布头
+                <h3>{{ $t('workbench.familyUi.recoverTitle') }}</h3>
+                <p>{{ $t('workbench.familyUi.recoverBody') }}</p>
+                <label>{{ $t('workbench.familyUi.newHead') }}
                   <t-select v-model="recoverDocument" :options="recoverOptions" :disabled="locked || saving" />
                 </label>
-                <label>恢复原因<t-input v-model="recoverReason" :maxlength="512" :disabled="locked || saving" placeholder="说明原发布件不可用的依据" /></label>
-                <t-button theme="primary" type="submit" :disabled="locked || saving || !recoverDocument || !recoverReason">确认恢复发布头</t-button>
+                <label>{{ $t('workbench.familyUi.recoverReason') }}<t-input v-model="recoverReason" :maxlength="512" :disabled="locked || saving" :placeholder="$t('workbench.familyUi.recoverPlaceholder')" /></label>
+                <t-button theme="primary" type="submit" :disabled="locked || saving || !recoverDocument || !recoverReason">{{ $t('workbench.familyUi.confirmRecover') }}</t-button>
               </form>
               <form v-if="removing && canWrite" class="family-remove" @submit.prevent="removeMember">
-                <p>移出「{{ title(removing) }}」后保留文档和治理记录。</p>
-                <label>移出原因<t-input v-model="removalReason" :maxlength="160" :disabled="locked" /></label>
-                <t-button theme="primary" type="submit" :disabled="locked || !removalReason">确认移出</t-button>
-                <t-button variant="outline" :disabled="locked" @click="removing=''">取消</t-button>
+                <p>{{ $t('workbench.familyUi.removeBody', { title: title(removing) }) }}</p>
+                <label>{{ $t('workbench.familyUi.removeReason') }}<t-input v-model="removalReason" :maxlength="160" :disabled="locked" /></label>
+                <t-button theme="primary" type="submit" :disabled="locked || !removalReason">{{ $t('workbench.familyUi.confirmRemove') }}</t-button>
+                <t-button variant="outline" :disabled="locked" @click="removing=''">{{ $t('workbench.familyUi.cancel') }}</t-button>
               </form>
             </template>
             <template v-else-if="tab==='relations' || tab==='history'">
               <div v-if="relations.length" class="workspace-list-scroll family-list-scroll">
-                <div class="workspace-list-table" role="table" aria-label="文档族关系">
+                <div class="workspace-list-table" role="table" :aria-label="$t('workbench.familyUi.relationAria')">
                   <div class="workspace-list-head" role="row">
-                    <span role="columnheader">关系</span>
-                    <span role="columnheader" class="workspace-head-status">状态</span>
-                    <span role="columnheader" class="workspace-head-actions">操作</span>
+                    <span role="columnheader">{{ $t('workbench.familyUi.colRelation') }}</span>
+                    <span role="columnheader" class="workspace-head-status">{{ $t('workbench.familyUi.colStatus') }}</span>
+                    <span role="columnheader" class="workspace-head-actions">{{ $t('workbench.familyUi.colActions') }}</span>
                   </div>
                   <div class="workspace-list-body" role="rowgroup">
                     <div v-for="row in relations" :key="row.id" class="workspace-list-row family-row" role="row">
                       <div class="workspace-cell workspace-cell-main" role="cell">
                         <div class="workbench-title-line">
                           <strong>{{ relationLabel(row.edge_type) }}</strong>
-                          <t-tag variant="light" size="small" :theme="row.scope==='internal'?'primary':'default'">{{ row.scope==='internal' ? '族内' : '族外' }}</t-tag>
+                          <t-tag variant="light" size="small" :theme="row.scope==='internal'?'primary':'default'">{{ row.scope==='internal' ? $t('workbench.familyUi.scopeInternal') : $t('workbench.familyUi.scopeExternal') }}</t-tag>
                         </div>
                         <span class="workspace-row-subtitle">{{ title(row.document_id, row.knowledge_base_id || kb) }} → {{ title(row.target_document_id, row.target_knowledge_base_id || kb) }}</span>
                         <span class="workspace-compact-meta">
-                          <span>{{ row.scope==='internal' ? '族内' : '族外' }}</span>
+                          <span>{{ row.scope==='internal' ? $t('workbench.familyUi.scopeInternal') : $t('workbench.familyUi.scopeExternal') }}</span>
                           <span class="workspace-compact-status">{{ relationStatus(row) }}</span>
                         </span>
                       </div>
                       <div class="workspace-cell workspace-cell-status" role="cell"><t-tag variant="light" size="small" :theme="row.status==='active'?'success':'default'">{{ relationStatus(row) }}</t-tag></div>
                       <div class="workspace-cell workspace-cell-actions" role="cell">
                         <t-button v-for="action in relationActions(row)" :key="action" variant="outline" size="small" :disabled="locked"
-                          @click="changeRelation(row,action)">{{ actionLabels[action] }}</t-button>
+                          @click="changeRelation(row,action)">{{ actionLabel(action, t) }}</t-button>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <t-empty v-else class="empty" description="这一页没有关系。" />
+              <t-empty v-else class="empty" :description="$t('workbench.familyUi.emptyRelations')" />
             </template>
             <template v-else-if="tab==='replacements'">
               <div v-if="plans.length" class="workspace-list-scroll family-list-scroll">
-                <div class="workspace-list-table" role="table" aria-label="同族替代计划">
+                <div class="workspace-list-table" role="table" :aria-label="$t('workbench.familyUi.replacementPlan')">
                   <div class="workspace-list-head" role="row">
-                    <span role="columnheader">替代计划</span>
-                    <span role="columnheader" class="workspace-head-status">状态</span>
-                    <span role="columnheader" class="workspace-head-actions">操作</span>
+                    <span role="columnheader">{{ $t('workbench.familyUi.replacementPlan') }}</span>
+                    <span role="columnheader" class="workspace-head-status">{{ $t('workbench.familyUi.colStatus') }}</span>
+                    <span role="columnheader" class="workspace-head-actions">{{ $t('workbench.familyUi.colActions') }}</span>
                   </div>
                   <div class="workspace-list-body" role="rowgroup">
                     <div v-for="row in plans" :key="row.id" class="workspace-list-row family-row" role="row">
                       <div class="workspace-cell workspace-cell-main" role="cell">
                         <div class="workbench-title-line"><strong>{{ title(row.old_document_id) }} → {{ title(row.new_document_id) }}</strong></div>
-                        <span class="workspace-row-subtitle">{{ replacementStatus(row.status) }} · 制度生效 {{ date(row.effective_at) }}</span>
-                        <small v-if="row.applied_at">系统登记 {{ date(row.applied_at) }}</small>
+                        <span class="workspace-row-subtitle">{{ replacementStatus(row.status) }} · {{ $t('workbench.familyUi.effectiveAt', { date: date(row.effective_at, locale) }) }}</span>
+                        <small v-if="row.applied_at">{{ $t('workbench.familyUi.registeredAt', { date: date(row.applied_at, locale) }) }}</small>
                         <p v-if="row.status==='pending_review' && approvalBlock(row)" class="subtle">{{ approvalBlock(row) }}</p>
                         <span class="workspace-compact-meta">
-                          <span>制度生效 {{ date(row.effective_at) }}</span>
+                          <span>{{ $t('workbench.familyUi.effectiveAt', { date: date(row.effective_at, locale) }) }}</span>
                           <span class="workspace-compact-status">{{ replacementStatus(row.status) }}</span>
                         </span>
                       </div>
                       <div class="workspace-cell workspace-cell-status" role="cell"><t-tag variant="light" size="small" :theme="row.status==='applied'?'success':row.status==='needs_review'?'warning':'default'">{{ replacementStatus(row.status) }}</t-tag></div>
                       <div class="workspace-cell workspace-cell-actions" role="cell">
                         <t-button v-if="canWrite && row.status==='pending_review' && !approvalBlock(row)" theme="primary" size="small" :disabled="locked"
-                          @click="approve(row)">批准替代</t-button>
+                          @click="approve(row)">{{ $t('workbench.familyUi.approveReplacement') }}</t-button>
                         <t-button v-if="canWrite && ['pending_review','scheduled','needs_review'].includes(row.status)" variant="outline" size="small"
-                          :disabled="locked" @click="cancel(row)">撤回计划</t-button>
+                          :disabled="locked" @click="cancel(row)">{{ $t('workbench.familyUi.withdrawPlan') }}</t-button>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <t-empty v-else class="empty" description="还没有同族替代计划。" />
+              <t-empty v-else class="empty" :description="$t('workbench.familyUi.emptyPlans')" />
             </template>
             <FamilySuggestionPanel v-else-if="tab==='suggestions' && inbox" :inbox="inbox" :title="title" :can-write="canWrite"
               :disabled="locked" @scan="scanSuggestions" @confirm="confirmSuggestion" @confirm-batch="confirmSuggestions"
               @ignore="ignoreSuggestion" @policy="saveSuggestionPolicy" />
             <div v-else-if="activity.length" class="workspace-list-scroll family-list-scroll">
-              <div class="workspace-list-table" role="table" aria-label="文档族活动">
+              <div class="workspace-list-table" role="table" :aria-label="$t('workbench.familyUi.activityAria')">
                 <div class="workspace-list-head" role="row">
-                  <span role="columnheader">操作</span>
-                  <span role="columnheader" class="workspace-head-time">时间</span>
-                  <span role="columnheader" class="workspace-head-id">操作编号</span>
+                  <span role="columnheader">{{ $t('workbench.familyUi.colAction') }}</span>
+                  <span role="columnheader" class="workspace-head-time">{{ $t('workbench.familyUi.colTime') }}</span>
+                  <span role="columnheader" class="workspace-head-id">{{ $t('workbench.familyUi.colOperationId') }}</span>
                 </div>
                 <div class="workspace-list-body" role="rowgroup">
                   <div v-for="row in activity" :key="row.operation_id" class="workspace-list-row family-row" role="row">
@@ -197,17 +197,17 @@
                       <div class="workbench-title-line"><strong>{{ activityLabel(row.action) }}</strong></div>
                       <span class="workspace-row-subtitle">{{ row.actor_id }} · {{ replacementStatus(row.status) }}</span>
                       <span class="workspace-compact-meta">
-                        <span>{{ date(row.occurred_at) }}</span>
-                        <span>操作编号 {{ row.operation_id }}</span>
+                        <span>{{ date(row.occurred_at, locale) }}</span>
+                        <span>{{ $t('workbench.familyUi.operationId', { id: row.operation_id }) }}</span>
                       </span>
                     </div>
-                    <div class="workspace-cell workspace-cell-time" role="cell"><small>{{ date(row.occurred_at) }}</small></div>
-                    <div class="workspace-cell workspace-cell-id" role="cell"><small>操作编号 {{ row.operation_id }}</small></div>
+                    <div class="workspace-cell workspace-cell-time" role="cell"><small>{{ date(row.occurred_at, locale) }}</small></div>
+                    <div class="workspace-cell workspace-cell-id" role="cell"><small>{{ $t('workbench.familyUi.operationId', { id: row.operation_id }) }}</small></div>
                   </div>
                 </div>
               </div>
             </div>
-            <t-empty v-else class="empty" description="这一页没有治理记录。" />
+            <t-empty v-else class="empty" :description="$t('workbench.familyUi.emptyActivity')" />
           </template>
         </section>
         <FamilyDocumentPanel v-if="documentId" :key="kb+':'+documentId" :kb="kb" :document-id="documentId" :title="title(documentId)"
@@ -215,49 +215,49 @@
         <section v-if="canWrite && family && familyActionOpen && activeFamilyAction" class="family-action-panel" :aria-label="activeFamilyAction">
           <div class="family-action-head">
             <h3>{{ activeFamilyAction }}</h3>
-            <t-button variant="text" size="small" :disabled="locked" @click="familyActionOpen=false">收起操作</t-button>
+            <t-button variant="text" size="small" :disabled="locked" @click="familyActionOpen=false">{{ $t('workbench.familyUi.collapseAction') }}</t-button>
           </div>
           <template v-if="tab==='members' || tab==='unassigned'">
-            <t-button v-if="documentId && familyId!==currentFamily" variant="outline" :disabled="locked" @click="addMember(documentId)">将当前文档加入此族</t-button>
+            <t-button v-if="documentId && familyId!==currentFamily" variant="outline" :disabled="locked" @click="addMember(documentId)">{{ $t('workbench.familyUi.addCurrent') }}</t-button>
             <t-form label-align="top" @submit.prevent="addMember(addId)">
-              <t-form-item label="选择主件"><DocumentPicker :key="kb" v-model="addId" :kb="kb" label="选择主件" searchable :disabled="locked" /></t-form-item>
-              <t-button theme="primary" type="submit" :disabled="locked || !addId">加入本族</t-button>
+              <t-form-item :label="$t('workbench.familyUi.selectMain')"><DocumentPicker :key="kb" v-model="addId" :kb="kb" :label="$t('workbench.familyUi.selectMain')" searchable :disabled="locked" /></t-form-item>
+              <t-button theme="primary" type="submit" :disabled="locked || !addId">{{ $t('workbench.familyUi.addToFamily') }}</t-button>
             </t-form>
           </template>
           <template v-else-if="tab==='replacements'">
             <t-form label-align="top" @submit.prevent="createReplacement">
-              <p class="subtle">选择本族的两份生效主件。批准且达到生效时间后，旧件退出普通检索。</p>
-              <t-form-item label="被替代的旧件"><DocumentPicker v-model="oldDocument" :kb="kb" label="被替代的旧件" :disabled="locked || !!family.published_document_id" searchable /></t-form-item>
-              <t-form-item label="新件"><DocumentPicker v-model="newDocument" :kb="kb" label="新件" :exclude="oldDocument" :disabled="locked" searchable /></t-form-item>
-              <t-form-item label="生效时间"><t-date-picker v-model="effectiveAtPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked" clearable /></t-form-item>
-              <t-button theme="primary" type="submit" :disabled="locked || !newDocument || !oldDocument || !effectiveAt">提交审核</t-button>
+              <p class="subtle">{{ $t('workbench.familyUi.chooseTwo') }}</p>
+              <t-form-item :label="$t('workbench.familyUi.oldDocument')"><DocumentPicker v-model="oldDocument" :kb="kb" :label="$t('workbench.familyUi.oldDocument')" :disabled="locked || !!family.published_document_id" searchable /></t-form-item>
+              <t-form-item :label="$t('workbench.familyUi.newDocument')"><DocumentPicker v-model="newDocument" :kb="kb" :label="$t('workbench.familyUi.newDocument')" :exclude="oldDocument" :disabled="locked" searchable /></t-form-item>
+              <t-form-item :label="$t('workbench.familyUi.effectiveTime')"><t-date-picker v-model="effectiveAtPicker" enable-time-picker format="YYYY-MM-DD HH:mm" value-type="YYYY-MM-DD HH:mm" :disabled="locked" clearable /></t-form-item>
+              <t-button theme="primary" type="submit" :disabled="locked || !newDocument || !oldDocument || !effectiveAt">{{ $t('workbench.familyUi.submitReview') }}</t-button>
             </t-form>
-            <h3>补录历史版本链</h3>
-            <p>按生效日期核对已到期的连续草案；尚未建立发布件时，从最早草案的旧件开始补录。</p>
-            <t-button variant="outline" :loading="historyBusy" :disabled="locked" @click="loadHistory">{{ historyBusy ? '正在核对…' : '预览历史链' }}</t-button>
+            <h3>{{ $t('workbench.familyUi.historyChain') }}</h3>
+            <p>{{ $t('workbench.familyUi.historyHint') }}</p>
+            <t-button variant="outline" :loading="historyBusy" :disabled="locked" @click="loadHistory">{{ historyBusy ? $t('workbench.familyUi.checkingChain') : $t('workbench.familyUi.previewHistory') }}</t-button>
             <p v-if="historyError" role="alert">{{ historyError }}</p>
             <template v-if="history">
-              <p v-if="history.blocked_reason" role="status">{{ historyBlocks[history.blocked_reason] || '历史链需要重新核验。' }}</p>
+              <p v-if="history.blocked_reason" role="status">{{ historyBlocks[history.blocked_reason] || $t('workbench.familyUi.historyBlockedFallback') }}</p>
               <template v-else-if="history.fingerprint && history.final_document_id">
                 <ol class="family-items">
                   <li v-for="step in history.steps" :key="step.id">
                     {{ title(step.old_document_id) }} → {{ title(step.new_document_id) }}
-                    <small>制度生效 {{ date(step.effective_at) }} · 旧件退出普通检索</small>
+                    <small>{{ $t('workbench.familyUi.effectiveAt', { date: date(step.effective_at, locale) }) }} · {{ $t('workbench.familyUi.oldLeavesSearch') }}</small>
                   </li>
                 </ol>
-                <p>确认后的发布件 · <strong>{{ title(history.final_document_id) }}</strong></p>
-                <t-button theme="primary" :loading="historyBusy" :disabled="locked" @click="confirmHistory">确认整链补录</t-button>
+                <p>{{ $t('workbench.familyUi.confirmedFinal') }} · <strong>{{ title(history.final_document_id) }}</strong></p>
+                <t-button theme="primary" :loading="historyBusy" :disabled="locked" @click="confirmHistory">{{ $t('workbench.familyUi.confirmHistory') }}</t-button>
               </template>
             </template>
           </template>
           <template v-else-if="tab==='relations'">
             <t-form label-align="top">
-              <t-form-item label="本族成员"><t-select v-model="relationMember" :options="relationMemberOptions" :disabled="locked" /></t-form-item>
+              <t-form-item :label="$t('workbench.familyUi.familyMembers')"><t-select v-model="relationMember" :options="relationMemberOptions" :disabled="locked" /></t-form-item>
               <div class="mini-pages">
-                <t-button variant="outline" size="small" :disabled="locked || memberPage<=1" @click="memberPage--">上页成员</t-button>
-                <t-button variant="outline" size="small" :disabled="locked || !moreMembers" @click="memberPage++">下页成员</t-button>
+                <t-button variant="outline" size="small" :disabled="locked || memberPage<=1" @click="memberPage--">{{ $t('workbench.familyUi.prevMember') }}</t-button>
+                <t-button variant="outline" size="small" :disabled="locked || !moreMembers" @click="memberPage++">{{ $t('workbench.familyUi.nextMember') }}</t-button>
               </div>
-              <t-form-item v-if="relationMember" label="成员在关系中的位置"><t-select v-model="relationEnd" :options="relationEndOptions" :disabled="locked" /></t-form-item>
+              <t-form-item v-if="relationMember" :label="$t('workbench.familyUi.relationPosition')"><t-select v-model="relationEnd" :options="relationEndOptions" :disabled="locked" /></t-form-item>
             </t-form>
             <CreateForm v-if="relationMember" :key="relationMember+relationEnd" :kb="kb" kind="relation" :disabled="locked"
               :knowledge-bases="bases" :fixed-document="{id:relationMember,title:title(relationMember),end:relationEnd}" @submit="submitRelation" />
@@ -277,10 +277,10 @@ import { documentTitles, write, type BusinessAction, type BusinessBody, type Bus
 import * as api from '@/api/families'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-import { actionLabels, actionsFor, buildIntent, date, edgeLabels, httpStatus, shortID, statusLabels } from '../business/model'
+import { actionLabel, actionsFor, buildIntent, date, edgeLabel, httpStatus, shortID, statusLabel } from '../business/model'
 import CreateForm from '../business/CreateForm.vue'
 import DocumentPicker from '../business/DocumentPicker.vue'
-import { moveTabFocus, requestFence, stateLabels } from '../lifecycle/model'
+import { moveTabFocus, requestFence, stateLabel } from '../lifecycle/model'
 import FamilyDocumentPanel from './FamilyDocumentPanel.vue'
 import FamilySuggestionPanel from './FamilySuggestionPanel.vue'
 import { confirmAction } from '@/utils/confirm'
@@ -293,7 +293,7 @@ const tabs: {key:api.FamilyTab; labelKey:string}[] = [
   {key:'relations',labelKey:'workbench.family.tabs.relations'}, {key:'history',labelKey:'workbench.family.tabs.history'}, {key:'replacements',labelKey:'workbench.family.tabs.replacements'},
   {key:'activity',labelKey:'workbench.family.tabs.activity'}, {key:'suggestions',labelKey:'workbench.family.tabs.suggestions'},
 ]
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const familyTabsId=useId()
 const currentTabLabel = computed(() => {
   const hit = tabs.find(item => item.key === tab.value)
@@ -310,25 +310,25 @@ const currentListCount = computed(() => {
 const visibleTabs = computed(() => props.documentId
   ? tabs.filter(item => props.initialView==='suggestions' ? item.key==='suggestions' : ['members','removed','replacements','activity'].includes(item.key))
   : tabs)
-const familyActions: Partial<Record<string,string>> = {
-  family_create:'创建文档族', family_member_add:'加入成员', family_member_remove:'移出成员',
-  family_replace_create:'提交替代计划', family_replace_approve:'批准替代', family_replace_cancel:'撤回替代',
-  family_replace_apply:'同族替代生效', family_replace_history:'补录历史版本链', family_head_recover:'恢复发布头', family_backfill_apply:'确认历史回填',
-  supplements_active:'登记补充关系', supplements_revoked:'撤销补充关系',
-  family_suggestion_scan:'申请扫描', family_suggestion_confirm:'确认建议',
-  family_suggestion_ignore:'忽略建议', family_suggestion_policy_set:'保存建议权重',
+const familyActionKeys: Partial<Record<string,string>> = {
+  family_create:'workbench.familyUi.actionCreate', family_member_add:'workbench.governance.familyMemberAdd', family_member_remove:'workbench.governance.familyMemberRemove',
+  family_replace_create:'workbench.governance.familyReplaceCreate', family_replace_approve:'workbench.governance.familyReplaceApprove', family_replace_cancel:'workbench.governance.familyReplaceCancel',
+  family_replace_apply:'workbench.governance.familyReplaceApply', family_replace_history:'workbench.governance.familyReplaceHistory', family_head_recover:'workbench.familyUi.recoverTitle', family_backfill_apply:'workbench.familyUi.confirmHistory',
+  supplements_active:'workbench.governance.supplementsActive', supplements_revoked:'workbench.governance.supplementsRevoked',
+  family_suggestion_scan:'workbench.family.suggestions', family_suggestion_confirm:'workbench.governance.familySuggestionConfirm',
+  family_suggestion_ignore:'workbench.governance.familySuggestionIgnore', family_suggestion_policy_set:'workbench.familyUi.confirmSuggestion',
 }
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const bases = ref<{id:string;name:string}[]>([]), kb = ref(''), familyId = ref('')
 const families = ref<api.BusinessFamily[]>([]), family = ref<api.BusinessFamily>()
 // TDesign selects take data options; the current selection stays visible even
 // when it is not on the loaded page of families.
-const kbOptions=computed(()=>[{label:'请选择知识库',value:''},...bases.value.map(item=>({label:item.name,value:item.id}))])
+const kbOptions=computed(()=>[{label:t('workbench.familyUi.selectKb'),value:''},...bases.value.map(item=>({label:item.name,value:item.id}))])
 const lifecycleTagTheme=(state:string)=>({active:'success',scheduled:'primary',pending:'warning',stale:'warning',failed:'danger'} as Record<string,string>)[state]||'default'
 // Members eligible to become the new published head.
-const recoverOptions=computed(()=>[{label:'选择当前族内可用成员',value:''},...members.value.filter(row=>row.document_id!==family.value?.published_document_id&&row.availability!=='missing'&&row.availability!=='deleted').map(row=>({label:title(row.document_id),value:row.document_id}))])
-const relationMemberOptions=computed(()=>[{label:'请选择本族成员',value:''},...relationMembers.value.map(row=>({label:title(row.document_id),value:row.document_id}))])
-const relationEndOptions=[{label:'作为源文档',value:'source'},{label:'作为目标文档',value:'target'}]
+const recoverOptions=computed(()=>[{label:t('workbench.familyUi.selectMember'),value:''},...members.value.filter(row=>row.document_id!==family.value?.published_document_id&&row.availability!=='missing'&&row.availability!=='deleted').map(row=>({label:title(row.document_id),value:row.document_id}))])
+const relationMemberOptions=computed(()=>[{label:t('workbench.familyUi.selectMember'),value:''},...relationMembers.value.map(row=>({label:title(row.document_id),value:row.document_id}))])
+const relationEndOptions=computed(()=>[{label:t('workbench.familyUi.relationSource'),value:'source'},{label:t('workbench.familyUi.relationTarget'),value:'target'}])
 const familyOptions=computed(()=>{
   // Show the family name only; the short id is appended just when two families
   // share a name, so the list stays readable without losing disambiguation.
@@ -339,7 +339,7 @@ const familyOptions=computed(()=>{
     value:row.business_family_id,
   }))
   if(familyId.value&&!rows.some(row=>row.value===familyId.value))rows.unshift({label:family.value?.label||familyId.value,value:familyId.value})
-  return [{label:'请选择文档族',value:''},...rows]
+  return [{label:t('workbench.familyUi.selectFamily'),value:''},...rows]
 })
 const familyPage = ref(1), page = ref(1), tab = ref<api.FamilyTab>(props.initialView || 'members')
 const catalogBusy = ref(false), listBusy = ref(false), busy = ref(false), canWrite = ref(false)
@@ -347,9 +347,9 @@ const error = ref(''), notice = ref(''), newLabel = ref(''), addId = ref('')
 const createOpen=ref(false),familyActionOpen=ref(false),familyActionsBar=ref<HTMLElement>()
 const activeFamilyAction=computed(()=>{
   if(!canWrite.value || !family.value || documentId.value)return ''
-  if(tab.value==='members'||tab.value==='unassigned')return '加入成员'
-  if(tab.value==='replacements')return '编辑替代计划'
-  return tab.value==='relations'?'新增关联':''
+  if(tab.value==='members'||tab.value==='unassigned')return t('workbench.familyUi.addToFamily')
+  if(tab.value==='replacements')return t('workbench.familyUi.actionEditPlan')
+  return tab.value==='relations'?t('workbench.familyUi.actionAddRelation'):''
 })
 const documentId = ref(''), documentBusy = ref(false), removing = ref(''), removalReason = ref('')
 const oldDocument = ref(''), newDocument = ref(''), effectiveAt = ref('')
@@ -377,21 +377,21 @@ const batch = ref<{ total:number; completed:number }>()
 const locked = computed(() => saving.value || !!pending.value || documentBusy.value)
 const catalogFence = requestFence(), listFence = requestFence(), viewFence = requestFence()
 const historyFence = requestFence()
-const historyBlocks: Record<string,string> = {
-  missing_applied_head: '发布件缺少生效日期，无法核对历史链，请先恢复发布头。',
-  scheduled_replacement: '已有待生效的替代，请先处理该计划。',
-  no_past_drafts: '当前没有已到生效日期的历史草案。',
-  history_limit: '本族历史草案超过一次可核对的范围。',
-  disconnected_history: '草案未形成从当前发布件开始的连续版本链，或需要复核日期与来源版本。',
-  document_needs_review: '有文档已失效、正在受其他治理限制，或来源版本已改变，请复核后再处理。',
-}
+const historyBlocks = computed<Record<string,string>>(() => ({
+  missing_applied_head: t('workbench.familyUi.historyBlockMissingHead'),
+  scheduled_replacement: t('workbench.familyUi.historyBlockScheduled'),
+  no_past_drafts: t('workbench.familyUi.historyBlockNoDrafts'),
+  history_limit: t('workbench.familyUi.historyBlockLimit'),
+  disconnected_history: t('workbench.familyUi.historyBlockDisconnected'),
+  document_needs_review: t('workbench.familyUi.historyBlockNeedsReview'),
+}))
 
 const title = (id: string, scope=kb.value) => scope===kb.value ? (names.value[id] || id) : (crossNames.value.get(nameKey(scope,id)) || id)
-const lifecycleLabel = (state: string) => stateLabels[state as LifecycleState] || state
-const activityLabel = (action: string) => familyActions[action] || actionLabels[action as BusinessAction] || action
-const replacementStatus = (state: string) => state==='applied' ? '已执行' : statusLabels[state] || ({created:'已创建',member_added:'已加入',member_removed:'已移出'} as Record<string,string>)[state] || state
-const relationLabel = (kind: string) => edgeLabels[kind] || ({supersedes:'替代',split_from:'拆分自',merged_into:'合并至'} as Record<string,string>)[kind] || kind
-const relationStatus = (row: api.FamilyRelation) => row.status==='active' && !row.current ? '历史记录' : replacementStatus(row.status)
+const lifecycleLabel = (state: string) => stateLabel(state as LifecycleState, t)
+const activityLabel = (action: string) => familyActionKeys[action] ? t(familyActionKeys[action]) : actionLabel(action as BusinessAction, t)
+const replacementStatus = (state: string) => state==='applied' ? t('workbench.familyUi.statusApplied') : state==='created' ? t('workbench.familyUi.statusCreated') : state==='member_added' ? t('workbench.familyUi.statusMemberAdded') : state==='member_removed' ? t('workbench.familyUi.statusMemberRemoved') : statusLabel(state, t)
+const relationLabel = (kind: string) => edgeLabel(kind, t)
+const relationStatus = (row: api.FamilyRelation) => row.status==='active' && !row.current ? statusLabel('historical', t) : replacementStatus(row.status)
 
 async function loadCatalog() {
   const token = catalogFence.begin()
@@ -408,7 +408,7 @@ async function loadCatalog() {
     const preferred = route.query.kb
     kb.value = bases.value.find(row=>row.id===preferred)?.id || bases.value[0]?.id || ''
   } catch {
-    if (catalogFence.current(token)) error.value = '无法读取可访问的知识库。'
+    if (catalogFence.current(token)) error.value = t('workbench.familyUi.errorLoadCatalog')
   } finally {
     if (catalogFence.current(token)) catalogBusy.value = false
   }
@@ -434,7 +434,7 @@ async function loadFamilies(select = false) {
   } catch {
     if (!listFence.current(token)) return
     canWrite.value = false
-    error.value = '无法读取文档族列表。'
+    error.value = t('workbench.familyUi.errorLoadFamilies')
   } finally {
     if (listFence.current(token)) listBusy.value = false
   }
@@ -514,7 +514,7 @@ async function loadView() {
       family.value = undefined
       canWrite.value = false
     }
-    error.value = '无法读取此工作台视图。请刷新或重新选择文档族。'
+    error.value = t('workbench.familyUi.errorLoadView')
   } finally {
     if (viewFence.current(token)) busy.value = false
   }
@@ -556,7 +556,7 @@ function removeMember() {
 }
 async function recoverHead() {
   if (!canWrite.value || locked.value || !family.value || !recoverDocument.value || !recoverReason.value.trim()) return
-  if (!(await confirmAction({title:'恢复发布头',body:`确认将「${title(recoverDocument.value)}」恢复为当前发布头？`,confirmText:'恢复发布头'}))) return
+  if (!(await confirmAction({title:t('workbench.familyUi.recoverTitle'),body:t('workbench.familyUi.recoverConfirmBody',{title:title(recoverDocument.value)}),confirmText:t('workbench.familyUi.confirmRecover')}))) return
   familyWrite('family_head_recover',{document_id:recoverDocument.value,reason:recoverReason.value.trim(),second_confirmation:true},family.value.business_family_id,family.value.revision)
 }
 function createReplacement() {
@@ -568,20 +568,20 @@ function createReplacement() {
 }
 function approvalBlock(row: api.FamilyReplacement) {
   const current = family.value
-  if (!current || row.business_family_id!==current.business_family_id) return '请先重新载入当前版本族。'
-  if (current.published_document_id && row.old_document_id!==current.published_document_id) return '等待前一版生效或复核替代顺序。'
+  if (!current || row.business_family_id!==current.business_family_id) return t('workbench.familyUi.reloadFamily')
+  if (current.published_document_id && row.old_document_id!==current.published_document_id) return t('workbench.familyUi.waitPrevious')
   if (row.family_revision!==current.revision || (current.published_version_node_id && row.old_version_node_id!==current.published_version_node_id)) {
-    return '草案的族修订或锁定版本已变化，需重新核验。'
+    return t('workbench.familyUi.draftChanged')
   }
-  if (plans.value.some(plan=>plan.status==='scheduled')) return '已有待生效的替代计划。'
+  if (plans.value.some(plan=>plan.status==='scheduled')) return t('workbench.familyUi.scheduledExists')
   if (Number.isFinite(Date.parse(row.effective_at)) && Date.parse(row.effective_at) <= Date.now()) {
-    return '制度生效时间已过，请使用下方“补录历史版本链”一次处理。'
+    return t('workbench.familyUi.effectivePassed')
   }
   return ''
 }
 async function approve(row: api.FamilyReplacement) {
   if (!canWrite.value || locked.value || row.status!=='pending_review' || approvalBlock(row)) return
-  if (await confirmAction({title:'批准替代计划',body:`批准后，「${title(row.old_document_id)}」将在 ${date(row.effective_at)} 被替代并退出普通检索。确认批准？`,confirmText:'批准替代',danger:true})) {
+  if (await confirmAction({title:t('workbench.familyUi.approveTitle'),body:t('workbench.familyUi.approveBody',{title:title(row.old_document_id),date:date(row.effective_at, locale.value)}),confirmText:t('workbench.familyUi.approveReplacement'),danger:true})) {
     familyWrite('family_replace_approve',{second_confirmation:true},row.id,row.revision)
   }
 }
@@ -602,7 +602,7 @@ async function loadHistory() {
     names.value={...names.value,...labels}
     history.value=preview
   } catch {
-    if (historyFence.current(token)) historyError.value='暂时无法核对历史链，请刷新后重试。'
+    if (historyFence.current(token)) historyError.value=t('workbench.familyUi.errorHistory')
   } finally {
     if (historyFence.current(token)) historyBusy.value=false
   }
@@ -611,27 +611,27 @@ async function confirmHistory() {
   const preview=history.value
   if (!preview?.fingerprint || !preview.final_document_id || !canWrite.value || locked.value ||
       family.value?.business_family_id!==preview.business_family_id || family.value.revision!==preview.family_revision) return
-  if (!(await confirmAction({title:'补录历史版本链',body:`确认补录 ${preview.steps.length} 段历史更替？旧件将退出普通检索，当前发布件将变更为「${title(preview.final_document_id)}」。`,confirmText:'补录历史',danger:true}))) return
+  if (!(await confirmAction({title:t('workbench.familyUi.historyChain'),body:t('workbench.familyUi.historyConfirmBody',{count:preview.steps.length,title:title(preview.final_document_id)}),confirmText:t('workbench.familyUi.historyBackfill'),danger:true}))) return
   familyWrite('family_replace_history',{second_confirmation:true,history_fingerprint:preview.fingerprint,
     replacement_ids:preview.steps.map(step=>step.id)},preview.business_family_id,preview.family_revision)
 }
 async function cancel(row: api.FamilyReplacement) {
-  if (await confirmAction({title:'撤回替代计划',body:'确认撤回此替代计划？',confirmText:'撤回计划',danger:true})) familyWrite('family_replace_cancel',{},row.id,row.revision)
+  if (await confirmAction({title:t('workbench.familyUi.cancelPlanTitle'),body:t('workbench.familyUi.cancelPlanBody'),confirmText:t('workbench.familyUi.withdrawPlan'),danger:true})) familyWrite('family_replace_cancel',{},row.id,row.revision)
 }
 function scanSuggestions() {
   if (family.value) familyWrite('family_suggestion_scan',{},family.value.business_family_id)
 }
 async function confirmSuggestion(row:api.FamilySuggestion,effectiveAt?:string) {
   const prompt=row.edge_type==='supersedes'
-    ? `提交「${title(row.document_id)}」替代「${title(row.target_document_id)}」的审核计划？旧件在批准并生效后退出普通检索。`
-    : row.kind==='membership' ? `确认将「${title(row.document_id)}」加入当前文档族？`
-    : `确认登记「${title(row.document_id)}」→「${title(row.target_document_id)}」的${relationLabel(row.edge_type || '')}关系？`
-  if (await confirmAction({title:'确认建议',body:prompt,confirmText:'确认建议'})) familyWrite('family_suggestion_confirm',{effective_at:effectiveAt},row.id,row.revision)
+    ? t('workbench.familyUi.suggestionSupersede',{title:title(row.document_id),target:title(row.target_document_id)})
+    : row.kind==='membership' ? t('workbench.familyUi.suggestionMembership',{title:title(row.document_id)})
+    : t('workbench.familyUi.suggestionRelation',{title:title(row.document_id),target:title(row.target_document_id),relation:relationLabel(row.edge_type || '')})
+  if (await confirmAction({title:t('workbench.familyUi.confirmSuggestion'),body:prompt,confirmText:t('workbench.familyUi.confirmSuggestion')})) familyWrite('family_suggestion_confirm',{effective_at:effectiveAt},row.id,row.revision)
 }
 async function confirmSuggestions(rows:api.FamilySuggestion[]) {
   if (!kb.value || !canWrite.value || locked.value || !rows.length || rows.some(row=>row.edge_type==='supersedes')) return
   const unique = [...new Map(rows.map(row=>[row.id,row])).values()]
-  if (!(await confirmAction({title:'批量确认建议',body:`确认当前选择的 ${unique.length} 条建议？每条建议会单独核对并提交。`,confirmText:'确认建议'}))) return
+  if (!(await confirmAction({title:t('workbench.familyUi.batchSuggestions'),body:t('workbench.familyUi.batchBody',{count:unique.length}),confirmText:t('workbench.familyUi.confirmSuggestion')}))) return
   batch.value = {total:unique.length,completed:0}
   pending.value = unique.map(row=>({kb:kb.value,action:'family_suggestion_confirm',
     body:{operation_id:crypto.randomUUID(),expected_revision:row.revision,business:{id:row.id,payload:{}}}}))
@@ -652,8 +652,8 @@ function relationActions(row: api.FamilyRelation) {
   return actionsFor('relation',row,canWrite.value)
 }
 async function changeRelation(row: api.FamilyRelation,action: BusinessAction) {
-  const prompt = action==='repeal_approve' ? '批准后将在计划时间执行废止，旧制度归档并退出普通检索。确认批准？' : `确认${actionLabels[action]}？`
-  if (await confirmAction({title:'确认操作',body:prompt,confirmText:'确认',danger:action==='repeal_approve'})) submit(action,buildIntent(action,row,{},crypto.randomUUID()).body)
+  const prompt = action==='repeal_approve' ? t('workbench.familyUi.approvedRepeal') : t('workbench.familyUi.confirmActionBody',{action:actionLabel(action,t)})
+  if (await confirmAction({title:t('workbench.familyUi.confirmOperation'),body:prompt,confirmText:t('workbench.familyUi.confirm'),danger:action==='repeal_approve'})) submit(action,buildIntent(action,row,{},crypto.randomUUID()).body)
 }
 function submit(action: BusinessAction|FamilyAction, body: BusinessBody) {
   if (!kb.value || !canWrite.value || locked.value) return
@@ -677,7 +677,7 @@ async function perform() {
       emit('changed')
       queue.shift()
       if (batch.value) batch.value.completed++
-      else notice.value = `${activityLabel(command.action)}已记录。`
+      else notice.value = t('workbench.familyUi.noticeRecorded',{action:activityLabel(command.action)})
       if (command.action==='family_create') {
         newLabel.value = ''
         createOpen.value=false
@@ -690,23 +690,23 @@ async function perform() {
       if (command.action==='family_replace_create') newDocument.value = ''
       if (command.action==='family_head_recover') { recoverDocument.value = ''; recoverReason.value = '' }
     }
-    if (batch.value) notice.value = `已确认 ${batch.value.completed} 条建议。`
+    if (batch.value) notice.value = t('workbench.familyUi.noticeBatch',{done:batch.value.completed})
     pending.value = undefined
     batch.value = undefined
     refresh()
   } catch (e) {
     if (pending.value!==queue) return
-    if (batch.value) notice.value = `本批已确认 ${batch.value.completed}/${batch.value.total} 条建议。`
+    if (batch.value) notice.value = t('workbench.familyUi.noticeBatchPartial',{done:batch.value.completed,total:batch.value.total})
     const code = httpStatus(e)
     if (code && [400,403,404,409].includes(code)) {
       pending.value = undefined
       batch.value = undefined
-      error.value = code===403 ? '没有操作权限，请核对账号权限。'
-        : code===409 ? '记录或业务条件已改变，请刷新核对后重试。'
-        : code===404 ? '目标记录不存在，请刷新后重试。'
-        : '操作被拒绝，请核对当前业务条件或文档状态。'
+      error.value = code===403 ? t('workbench.familyUi.errorNoPermission')
+        : code===409 ? t('workbench.familyUi.errorConflict')
+        : code===404 ? t('workbench.familyUi.errorNotFound')
+        : t('workbench.familyUi.errorRejected')
       if (code===403) canWrite.value = false
-    } else error.value = '服务暂不可用。可重试原请求。'
+    } else error.value = t('workbench.familyUi.errorService')
   } finally {
     if (kb.value===scope) {
       saving.value=false
@@ -742,7 +742,7 @@ watch(()=>auth.effectiveTenantId,loadCatalog)
 watch(locked,value=>emit('locked',value))
 onBeforeRouteLeave(()=>{
   if (!locked.value) return true
-  error.value = '请先完成或核对当前操作，再离开工作台。'
+  error.value = t('workbench.familyUi.leaveBlocked')
   return false
 })
 onMounted(loadCatalog)

@@ -7,7 +7,9 @@ import (
 	stderrors "errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -508,6 +510,108 @@ func (h *AutomationHandler) ClearReadNotifications(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+const maxDownloadNotificationBytes = 256 << 20
+
+var downloadNotificationIDPattern = regexp.MustCompile("^[A-Za-z0-9_-]{1,36}$")
+
+// downloadNotificationRequest is the desktop client's record of a business
+// file it saved locally. Tenant and user always come from the authenticated
+// caller, never this body.
+type downloadNotificationRequest struct {
+	FileName    string `json:"file_name"`
+	SourceType  string `json:"source_type"`
+	SourceID    string `json:"source_id"`
+	SourceTitle string `json:"source_title"`
+	Link        string `json:"link"`
+	DownloadID  string `json:"download_id"`
+	FileSize    int64  `json:"file_size"`
+}
+
+// CreateDownloadNotification godoc
+// @Summary      记录一次业务文件下载
+// @Description  桌面端在文件保存成功后调用；同一 download_id 幂等
+// @Tags         通知
+// @Accept       json
+// @Produce      json
+// @Param        request  body      downloadNotificationRequest  true  "下载记录"
+// @Success      200      {object}  map[string]interface{}  "{id, created_at, duplicate}"
+// @Security     Bearer
+// @Router       /notifications/download [post]
+func (h *AutomationHandler) CreateDownloadNotification(c *gin.Context) {
+	caller := types.CallerFromContext(c.Request.Context())
+	if caller.TenantID == 0 || strings.TrimSpace(caller.UserID) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized"})
+		return
+	}
+	var req downloadNotificationRequest
+	dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&req) != nil || dec.Decode(new(any)) != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
+		return
+	}
+	fileName := sanitizeDownloadFileName(req.FileName)
+	sourceID := strings.TrimSpace(req.SourceID)
+	downloadID := strings.TrimSpace(req.DownloadID)
+	link, linkOK := validDownloadNotificationLink(req.Link)
+	valid := strings.TrimSpace(req.FileName) != "" &&
+		(req.SourceType == "knowledge_document" || req.SourceType == "attachment" || req.SourceType == "artifact") &&
+		downloadNotificationIDPattern.MatchString(sourceID) &&
+		downloadNotificationIDPattern.MatchString(downloadID) &&
+		len([]rune(strings.TrimSpace(req.SourceTitle))) <= 255 &&
+		linkOK &&
+		req.FileSize >= 0 && req.FileSize <= maxDownloadNotificationBytes
+	if !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "invalid_request"})
+		return
+	}
+	if h.notifications == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "notification_unavailable"})
+		return
+	}
+	body := ""
+	if sourceTitle := strings.TrimSpace(req.SourceTitle); sourceTitle != "" {
+		body = "来源：" + sourceTitle
+	}
+	notification, created, err := h.notifications.NotifyDownloadOnce(c.Request.Context(), &types.Notification{
+		ID:         downloadID,
+		TenantID:   caller.TenantID,
+		UserID:     strings.TrimSpace(caller.UserID),
+		Kind:       types.NotificationDownloadCompleted,
+		Title:      fileName,
+		Body:       body,
+		Link:       link,
+		SourceType: "download",
+		SourceID:   downloadID,
+	})
+	if err != nil {
+		logger.Warnf(c.Request.Context(), "Record download notification %s: %v", downloadID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "notification_unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"id": notification.ID, "created_at": notification.CreatedAt, "duplicate": !created,
+	}})
+}
+
+func validDownloadNotificationLink(raw string) (string, bool) {
+	link := strings.TrimSpace(raw)
+	if link == "" {
+		return "", true
+	}
+	if len(link) > 512 {
+		return "", false
+	}
+	parsed, err := url.Parse(link)
+	if err != nil || parsed.Scheme != "" || parsed.Host != "" || parsed.User != nil {
+		return "", false
+	}
+	if !strings.HasPrefix(parsed.Path, "/platform/") || strings.HasPrefix(parsed.Path, "/platform//") {
+		return "", false
+	}
+	return link, true
 }
 
 // reviewAlertNotification is the narrow DTO the trusted Host uses to ask Core

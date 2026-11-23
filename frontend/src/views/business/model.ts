@@ -54,6 +54,41 @@ export const edgeLabels: Record<string, string> = {
   explains_more: '补充说明', reading_note: '内容提示',
 }
 
+export type Translate = (key: string, params?: Record<string, unknown>) => string
+export const feedbackRatingKeys: Record<string, string> = Object.fromEntries(Object.keys(feedbackRatings).map(key => [key, 'workbench.businessLabels.rating.' + key]))
+export const feedbackReasonKeys: Record<string, string> = Object.fromEntries(Object.keys(feedbackReasons).map(key => [key, 'workbench.businessLabels.reason.' + key]))
+export function feedbackRatingLabel(value: string, t?: Translate): string {
+  const key = feedbackRatingKeys[value]
+  return key && t ? t(key) : feedbackRatings[value] || value
+}
+export function feedbackReasonLabel(value: string, t?: Translate): string {
+  const key = feedbackReasonKeys[value]
+  return key && t ? t(key) : feedbackReasons[value] || value
+}
+export function relationReviewLabel(value: string, t?: Translate): string {
+  const key = relationReviewKeys[value]
+  return key && t ? t(key) : relationReviewLabels[value] || value
+}
+export function clauseDecisionLabel(value: string, t?: Translate): string {
+  const key = clauseDecisionKeys[value]
+  return key && t ? t(key) : clauseDecisions[value] || value
+}
+export const statusLabelKeys: Record<string, string> = Object.fromEntries(Object.keys(statusLabels).map(key => [key, 'workbench.businessLabels.status.' + key]))
+export const actionLabelKeys: Record<string, string> = Object.fromEntries(Object.keys(actionLabels).map(key => [key, 'workbench.businessLabels.action.' + key]))
+export const edgeLabelKeys: Record<string, string> = Object.fromEntries(Object.keys(edgeLabels).map(key => [key, 'workbench.businessLabels.edge.' + key]))
+export function statusLabel(state: string, t?: Translate): string {
+  const key = statusLabelKeys[state]
+  return key && t ? t(key) : statusLabels[state] || state
+}
+export function actionLabel(action: BusinessAction, t?: Translate): string {
+  const key = actionLabelKeys[action]
+  return key && t ? t(key) : actionLabels[action] || action
+}
+export function edgeLabel(kind: string, t?: Translate): string {
+  const key = edgeLabelKeys[kind]
+  return key && t ? t(key) : edgeLabels[kind] || kind
+}
+
 export const relationChoices = [
   { key: 'amends', label: '修订', direction: '修订文件 → 被修订制度' },
   { key: 'interprets', label: '解释', direction: '解释文件 → 被解释制度' },
@@ -79,7 +114,15 @@ export const relationReviewLabels: Record<string, string> = {
 }
 export const readingRelation = (type?: string) => type === 'explains_more' || type === 'reading_note'
 
-export function relationSentence(type: string | undefined, source: string, target: string): string {
+export const relationSentenceKeys: Record<string, string> = {
+  amends: 'workbench.businessSentences.amends', interprets: 'workbench.businessSentences.interprets', related_to: 'workbench.businessSentences.relatedTo',
+  cites: 'workbench.businessSentences.cites', implements: 'workbench.businessSentences.implements', template_for: 'workbench.businessSentences.templateFor',
+  repeals: 'workbench.businessSentences.repeals', exception_to: 'workbench.businessSentences.exceptionTo', conflicts_with: 'workbench.businessSentences.conflictsWith',
+  supplements: 'workbench.businessSentences.supplements', attachment_of: 'workbench.businessSentences.attachmentOf', explains_more: 'workbench.businessSentences.explainsMore',
+  reading_note: 'workbench.businessSentences.readingNote', default: 'workbench.businessSentences.default',
+}
+export function relationSentence(type: string | undefined, source: string, target: string, t?: Translate): string {
+  if (t) return t(relationSentenceKeys[type || ''] || relationSentenceKeys.default, { source, target })
   switch (type) {
     case 'amends': return `《${source}》修订《${target}》`
     case 'interprets': return `《${source}》解释《${target}》`
@@ -102,6 +145,8 @@ export const clauseRelation = (type?: string) => type === 'exception_to' || type
 export const clauseDecisions: Record<string, string> = {
   prefer_source: '按源条款处理', prefer_target: '按目标条款处理', contextual: '按裁决说明区分适用条件',
 }
+export const relationReviewKeys: Record<string, string> = Object.fromEntries(Object.keys(relationReviewLabels).map(key => [key, 'workbench.businessLabels.relationReview.' + key]))
+export const clauseDecisionKeys: Record<string, string> = Object.fromEntries(Object.keys(clauseDecisions).map(key => [key, 'workbench.businessLabels.clause.' + key]))
 export function canActivate(row: BusinessRecord, now: number): boolean {
   return row.status === 'approved' && !!row.ready_at && Number.isFinite(Date.parse(row.ready_at)) && Date.parse(row.ready_at) <= now
 }
@@ -133,32 +178,33 @@ export function actionsFor(kind: BusinessKind, row: BusinessRecord, canWrite: bo
 }
 export interface WriteIntent { action: BusinessAction; body: BusinessBody }
 const bytes = (text: string) => new TextEncoder().encode(text).length
-export function buildIntent(action: BusinessAction, row: BusinessRecord | undefined, payload: BusinessPayload, operation: string): WriteIntent {
-  if (!operation || (row && (!row.id || !Number.isInteger(row.revision) || row.revision < 1))) throw new Error('请重新载入记录。')
+export function buildIntent(action: BusinessAction, row: BusinessRecord | undefined, payload: BusinessPayload, operation: string, t?: Translate): WriteIntent {
+  const err = (key: string, fallback: string) => new Error(t ? t(key) : fallback)
+  if (!operation || (row && (!row.id || !Number.isInteger(row.revision) || row.revision < 1))) throw err('workbench.businessErrors.reload', '请重新载入记录。')
   if (['feedback_create', 'guidance_seed', 'revision_create'].includes(action)) {
-    if (!payload.text?.trim()) throw new Error('请填写完整内容。')
-    if (bytes(payload.text) > (action === 'revision_create' ? 48000 : 16000)) throw new Error('内容过长，请缩短后再提交。')
-    if (action !== 'revision_create' && (!payload.topic?.trim() || bytes(payload.topic) > 128)) throw new Error('请填写简短的主题。')
+    if (!payload.text?.trim()) throw err('workbench.businessErrors.contentRequired', '请填写完整内容。')
+    if (bytes(payload.text) > (action === 'revision_create' ? 48000 : 16000)) throw err('workbench.businessErrors.contentTooLong', '内容过长，请缩短后再提交。')
+    if (action !== 'revision_create' && (!payload.topic?.trim() || bytes(payload.topic) > 128)) throw err('workbench.businessErrors.topicRequired', '请填写简短的主题。')
   }
-  if ((action === 'revision_create' || action === 'split_create') && (!payload.document_id || !payload.guidance_ids?.length || payload.guidance_ids.length > 3 || new Set(payload.guidance_ids).size !== payload.guidance_ids.length)) throw new Error('请选择源文档和 1–3 条生效指导。')
+  if ((action === 'revision_create' || action === 'split_create') && (!payload.document_id || !payload.guidance_ids?.length || payload.guidance_ids.length > 3 || new Set(payload.guidance_ids).size !== payload.guidance_ids.length)) throw err('workbench.businessErrors.sourceGuidanceRequired', '请选择源文档和 1–3 条生效指导。')
   if (action === 'split_create') {
     const parts = payload.split_parts ?? []
-    if (parts.length < 2 || parts.length > 8) throw new Error('请填写 2–8 份拆分文档。')
+    if (parts.length < 2 || parts.length > 8) throw err('workbench.businessErrors.splitCount', '请填写 2–8 份拆分文档。')
     const titles = parts.map(part => part.title.trim())
     if (titles.some(title => !title || bytes(title) > 120) || parts.some(part => !part.text.trim())) {
-      throw new Error('请填写每份文档的简短标题和完整正文。')
+      throw err('workbench.businessErrors.splitFields', '请填写每份文档的简短标题和完整正文。')
     }
-    if (new Set(titles.map(title => title.toLowerCase())).size !== parts.length) throw new Error('分件标题不能重复。')
+    if (new Set(titles.map(title => title.toLowerCase())).size !== parts.length) throw err('workbench.businessErrors.splitDuplicate', '分件标题不能重复。')
     if (parts.reduce((size, part) => size + bytes(part.text.replace(/\r\n/g, '\n').trim() + '\n'), 0) > 48000) {
-      throw new Error('批次正文过长，请缩短后再提交。')
+      throw err('workbench.businessErrors.batchTooLong', '批次正文过长，请缩短后再提交。')
     }
   }
-  if (['relation_declare', 'repeal_create', 'clause_create'].includes(action) && (!payload.document_id || !payload.target_document_id || payload.document_id === payload.target_document_id)) throw new Error('请选择两个不同的文档。')
-  if (action === 'repeal_create' && !(Date.parse(payload.effective_at || '') > 0)) throw new Error('请填写废止生效时间。')
+  if (['relation_declare', 'repeal_create', 'clause_create'].includes(action) && (!payload.document_id || !payload.target_document_id || payload.document_id === payload.target_document_id)) throw err('workbench.businessErrors.twoDocuments', '请选择两个不同的文档。')
+  if (action === 'repeal_create' && !(Date.parse(payload.effective_at || '') > 0)) throw err('workbench.businessErrors.repealTime', '请填写废止生效时间。')
   if (action === 'clause_create' && (!clauseRelation(payload.edge_type) || !payload.source_clause || !payload.target_clause ||
-      !payload.applies_when?.trim() || bytes(payload.applies_when) > 4000)) throw new Error('请选择两端条款，并填写适用条件。')
+      !payload.applies_when?.trim() || bytes(payload.applies_when) > 4000)) throw err('workbench.businessErrors.clauseFields', '请选择两端条款，并填写适用条件。')
   if (action === 'clause_resolve' && (!Object.hasOwn(clauseDecisions, payload.resolution || '') ||
-      !payload.text?.trim() || bytes(payload.text) > 4000)) throw new Error('请选择裁决方式，并填写裁决依据。')
+      !payload.text?.trim() || bytes(payload.text) > 4000)) throw err('workbench.businessErrors.clauseResolution', '请选择裁决方式，并填写裁决依据。')
   const copied = JSON.parse(JSON.stringify(payload)) as BusinessPayload
   if (copied.source_clause) Object.freeze(copied.source_clause)
   if (copied.target_clause) Object.freeze(copied.target_clause)
@@ -173,13 +219,14 @@ export function httpStatus(error: unknown): number | undefined {
   const value = error as { response?: { status?: number }; $httpStatus?: number }
   return value?.response?.status ?? value?.$httpStatus
 }
-export function businessError(error: unknown): string {
+export function businessError(error: unknown, t?: Translate): string {
   const status = httpStatus(error)
-  if (status === 403) return '当前账号没有此知识库的操作权限。'
-  if (status === 409) return '记录或业务条件已改变，请重新载入。'
-  if (status === 400) return '提交内容无效，请检查文档、指导和完整正文。'
-  if (status === 404) return '记录已不可访问，请重新载入。'
-  return '服务暂不可用，结果尚未确认。请刷新核对，或用原请求重试。'
+  const pick = (key: string, fallback: string) => t ? t(key) : fallback
+  if (status === 403) return pick('workbench.businessErrors.forbidden', '当前账号没有此知识库的操作权限。')
+  if (status === 409) return pick('workbench.businessErrors.conflict', '记录或业务条件已改变，请重新载入。')
+  if (status === 400) return pick('workbench.businessErrors.invalid', '提交内容无效，请检查文档、指导和完整正文。')
+  if (status === 404) return pick('workbench.businessErrors.notFound', '记录已不可访问，请重新载入。')
+  return pick('workbench.businessErrors.unavailable', '服务暂不可用，结果尚未确认。请刷新核对，或用原请求重试。')
 }
-export const date = (value?: string | null) => value ? new Date(value).toLocaleString() : '未设置'
+export const date = (value?: string | null, locale?: string) => value ? new Date(value).toLocaleString(locale || undefined) : '—'
 export const shortID = (value?: string) => value ? value.slice(0, 8) : '—'

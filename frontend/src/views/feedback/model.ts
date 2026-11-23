@@ -1,5 +1,9 @@
 import type { CorrectionDocumentSummary, CorrectionReference, CorrectionState } from '@/api/business'
 
+export const correctionStateKeys: Record<CorrectionState, string> = {
+  active: 'workbench.correction.stateActive', all: 'workbench.correction.stateAll', withdrawn: 'workbench.correction.stateWithdrawn',
+  superseded: 'workbench.correction.stateSuperseded', inactive: 'workbench.correction.stateInactive',
+}
 export const correctionStateLabels: Record<CorrectionState, string> = {
   active: '有效', all: '全部已发布状态', withdrawn: '已撤回', superseded: '已替代', inactive: '已失效',
 }
