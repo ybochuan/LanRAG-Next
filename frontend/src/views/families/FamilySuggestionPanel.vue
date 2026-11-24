@@ -21,6 +21,7 @@
         <t-tag variant="light" size="small" theme="primary">{{ $t('workbench.familySuggestion.score', { value: percent(item.confidence) }) }}</t-tag>
         <p v-if="item.kind==='membership'">{{ $t('workbench.familySuggestion.memberRef', { title: title(item.document_id), target: title(item.target_document_id) }) }}</p>
         <p v-else>{{ title(item.document_id) }} → {{ title(item.target_document_id) }}</p>
+        <t-button v-if="item.document_id && item.target_document_id" :data-reader-family="item.id" variant="text" size="small" :disabled="disabled" @click="emit('read',item)">{{ $t('reader.compare') }}</t-button>
         <ul class="evidence">
           <li v-for="reason in item.evidence.reasons" :key="reason">{{ reasons[reason] || reason }}</li>
         </ul>
@@ -68,6 +69,7 @@ const props = defineProps<{inbox:FamilySuggestionInbox; title:(id:string)=>strin
 const { t } = useI18n()
 const emit = defineEmits<{
   scan:[];
+  read:[row:FamilySuggestion];
   confirm:[row:FamilySuggestion,effectiveAt?:string];
   confirmBatch:[rows:FamilySuggestion[]];
   ignore:[row:FamilySuggestion];
@@ -92,6 +94,11 @@ const policyOpen = ref<string[]>([])
 function toggleSelection(id:string){const at=selected.value.indexOf(id);if(at>=0)selected.value.splice(at,1);else selected.value.push(id)}
 const settings = reactive({similarity_weight:0,declaration_weight:0,structure_weight:0,threshold:0})
 const queued = computed(()=>props.inbox.scan_status==='queued')
+function readerDirty() {
+  return selected.value.length>0 || props.inbox.items.some(item=>!!effectiveDates[item.id])
+    || (Object.keys(settings) as (keyof typeof settings)[]).some(key=>settings[key]!==props.inbox.policy[key])
+}
+defineExpose({readerDirty})
 const validWeights = computed(()=>{
   const {similarity_weight,declaration_weight,structure_weight,threshold}=settings
   return [similarity_weight,declaration_weight,structure_weight,threshold].every(n=>typeof n==='number'&&n>=0&&n<=1)

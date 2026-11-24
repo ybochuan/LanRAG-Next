@@ -1,5 +1,5 @@
 <template>
-  <section class="business-page family-workspace" :class="{ 'embedded-family': scope }">
+  <section ref="workspace" class="business-page family-workspace" :class="{ 'embedded-family': scope }">
     <header v-if="!scope" class="page-heading">
       <div><h2>{{ initialView==='suggestions' ? $t('workbench.family.suggestions') : $t('workbench.family.title') }}</h2><p v-if="!documentId">{{ $t('workbench.family.subtitle') }}</p></div>
     </header>
@@ -44,6 +44,7 @@
           <span v-if="family.published_document_id" class="family-published">
             {{ $t('workbench.familyUi.currentPublication') }} · <t-button variant="text" size="small" class="doc-link" :disabled="locked" @click="openDocument(family.published_document_id)">{{ title(family.published_document_id) }}</t-button>
             <t-button v-if="family.published_version_node_id" variant="text" size="small" @click="openVersionHistory">{{ $t('workbench.familyUi.versionHistory') }}</t-button>
+            <t-button v-if="family.published_document_id" data-reader-family="history" variant="text" size="small" :disabled="locked" @click="readHistory">{{ $t('reader.groups.history') }}</t-button>
           </span>
           <span v-else class="subtle">{{ $t('workbench.familyUi.noPublication') }}</span>
         </div>
@@ -139,6 +140,7 @@
                       </div>
                       <div class="workspace-cell workspace-cell-status" role="cell"><t-tag variant="light" size="small" :theme="row.status==='active'?'success':'default'">{{ relationStatus(row) }}</t-tag></div>
                       <div class="workspace-cell workspace-cell-actions" role="cell">
+                        <t-button v-if="row.document_id && row.target_document_id" :data-reader-family="row.id" variant="text" size="small" :disabled="locked" @click="readRelation(row)">{{ $t('reader.compare') }}</t-button>
                         <t-button v-for="action in relationActions(row)" :key="action" variant="outline" size="small" :disabled="locked"
                           @click="changeRelation(row,action)">{{ actionLabel(action, t) }}</t-button>
                       </div>
@@ -170,6 +172,7 @@
                       </div>
                       <div class="workspace-cell workspace-cell-status" role="cell"><t-tag variant="light" size="small" :theme="row.status==='applied'?'success':row.status==='needs_review'?'warning':'default'">{{ replacementStatus(row.status) }}</t-tag></div>
                       <div class="workspace-cell workspace-cell-actions" role="cell">
+                        <t-button v-if="row.old_document_id && row.new_document_id" :data-reader-family="row.id" variant="text" size="small" :disabled="locked" @click="compareReplacement(row)">{{ $t('reader.compare') }}</t-button>
                         <t-button v-if="canWrite && row.status==='pending_review' && !approvalBlock(row)" theme="primary" size="small" :disabled="locked"
                           @click="approve(row)">{{ $t('workbench.familyUi.approveReplacement') }}</t-button>
                         <t-button v-if="canWrite && ['pending_review','scheduled','needs_review'].includes(row.status)" variant="outline" size="small"
@@ -181,9 +184,9 @@
               </div>
               <t-empty v-else class="empty" :description="$t('workbench.familyUi.emptyPlans')" />
             </template>
-            <FamilySuggestionPanel v-else-if="tab==='suggestions' && inbox" :inbox="inbox" :title="title" :can-write="canWrite"
+            <FamilySuggestionPanel v-else-if="tab==='suggestions' && inbox" ref="suggestionPanel" :inbox="inbox" :title="title" :can-write="canWrite"
               :disabled="locked" @scan="scanSuggestions" @confirm="confirmSuggestion" @confirm-batch="confirmSuggestions"
-              @ignore="ignoreSuggestion" @policy="saveSuggestionPolicy" />
+              @ignore="ignoreSuggestion" @policy="saveSuggestionPolicy" @read="readSuggestion" />
             <div v-else-if="activity.length" class="workspace-list-scroll family-list-scroll">
               <div class="workspace-list-table" role="table" :aria-label="$t('workbench.familyUi.activityAria')">
                 <div class="workspace-list-head" role="row">
@@ -243,6 +246,7 @@
                   <li v-for="step in history.steps" :key="step.id">
                     {{ title(step.old_document_id) }} → {{ title(step.new_document_id) }}
                     <small>{{ $t('workbench.familyUi.effectiveAt', { date: date(step.effective_at, locale) }) }} · {{ $t('workbench.familyUi.oldLeavesSearch') }}</small>
+                    <t-button :data-reader-family="step.id" variant="text" size="small" :disabled="locked" @click="compareReplacement(step, true)">{{ $t('reader.compare') }}</t-button>
                   </li>
                 </ol>
                 <p>{{ $t('workbench.familyUi.confirmedFinal') }} · <strong>{{ title(history.final_document_id) }}</strong></p>
@@ -284,9 +288,10 @@ import { moveTabFocus, requestFence, stateLabel } from '../lifecycle/model'
 import FamilyDocumentPanel from './FamilyDocumentPanel.vue'
 import FamilySuggestionPanel from './FamilySuggestionPanel.vue'
 import { confirmAction } from '@/utils/confirm'
+import type { FamilyReaderState, ReaderSource, WorkbenchReaderRequest } from '@/stores/documentReader'
 
-const props = defineProps<{ scope?:string; documentId?:string; currentFamily?:string; initialView?:api.FamilyTab; canWrite?:boolean }>()
-const emit = defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string]; changed:[]; locked:[value:boolean] }>()
+const props = defineProps<{ scope?:string; documentId?:string; currentFamily?:string; initialView?:api.FamilyTab; canWrite?:boolean; readerReturn?:FamilyReaderState; readerSource?:ReaderSource }>()
+const emit = defineEmits<{ open:[id:string,title:string,knowledgeBaseID?:string]; changed:[]; locked:[value:boolean]; read:[request:WorkbenchReaderRequest] }>()
 
 const tabs: {key:api.FamilyTab; labelKey:string}[] = [
   {key:'members',labelKey:'workbench.family.tabs.members'}, {key:'unassigned',labelKey:'workbench.family.tabs.unassigned'}, {key:'removed',labelKey:'workbench.family.tabs.removed'},
@@ -375,6 +380,67 @@ type PendingOperation = {kb:string;action:BusinessAction|FamilyAction;body:Busin
 const pending = ref<PendingOperation[]>()
 const batch = ref<{ total:number; completed:number }>()
 const locked = computed(() => saving.value || !!pending.value || documentBusy.value)
+const workspace = ref<HTMLElement>()
+const suggestionPanel=ref<{readerDirty:()=>boolean}>()
+let readerReturn = props.readerReturn
+let restoringReader = false
+function readerList() { return workspace.value?.querySelector<HTMLElement>('.family-list-scroll') }
+function readerState(): FamilyReaderState {
+  return { family: familyId.value, tab: tab.value, familyPage: familyPage.value, page: page.value, memberPage: memberPage.value, scroll: readerList()?.scrollTop || 0 }
+}
+function readerDirty() {
+  return createOpen.value || familyActionOpen.value || !!removing.value
+    || !!recoverDocument.value || !!recoverReason.value || !!suggestionPanel.value?.readerDirty()
+}
+defineExpose({readerState, readerDirty})
+
+function readHistory() {
+  const current = family.value
+  if (!current?.published_document_id || locked.value) return
+  emit('read', {
+    left: {kb:kb.value, id:current.published_document_id, version:current.published_version_node_id || undefined},
+    view:'history', source:{kind:'family',family:current.business_family_id},
+  })
+}
+function compareReplacement(row:api.FamilyReplacement, historyPreview=false) {
+  if (locked.value || !row.old_document_id || !row.new_document_id) return
+  emit('read', {
+    left:{kb:kb.value,id:row.old_document_id,version:row.old_version_node_id || undefined},
+    right:{kb:kb.value,id:row.new_document_id},
+    source:{kind:'family',family:row.business_family_id,record:row.id,historyPreview},
+  })
+}
+function readRelation(row:api.FamilyRelation) {
+  if (locked.value || !row.document_id || !row.target_document_id) return
+  emit('read', {
+    left:{kb:row.knowledge_base_id || kb.value,id:row.document_id},
+    right:{kb:row.target_knowledge_base_id || kb.value,id:row.target_document_id},
+    source:{kind:'family',family:familyId.value,record:row.id,revision:row.revision},
+  })
+}
+function readSuggestion(row:api.FamilySuggestion) {
+  if (locked.value || !row.document_id || !row.target_document_id) return
+  emit('read', {
+    left:{kb:kb.value,id:row.document_id},right:{kb:kb.value,id:row.target_document_id},
+    source:{kind:'family',family:familyId.value,record:row.id,revision:row.revision},
+  })
+}
+async function restoreReaderFocus() {
+  const saved = readerReturn
+  readerReturn = undefined
+  if (!saved) return
+  const scope=kb.value, id=familyId.value, view=tab.value
+  const source=props.readerSource
+  if (source?.kind==='family' && source.historyPreview) await loadHistory()
+  await nextTick()
+  if (scope!==kb.value || id!==familyId.value || view!==tab.value) return
+  const scroller=readerList()
+  if (scroller) scroller.scrollTop=saved.scroll
+  if (source?.kind==='family' && id===source.family) {
+    const buttons=workspace.value?.querySelectorAll<HTMLElement>('[data-reader-family]') || []
+    Array.from(buttons).find(button=>button.dataset.readerFamily===(source.record || 'history'))?.focus({preventScroll:true})
+  }
+}
 const catalogFence = requestFence(), listFence = requestFence(), viewFence = requestFence()
 const historyFence = requestFence()
 const historyBlocks = computed<Record<string,string>>(() => ({
@@ -727,17 +793,28 @@ watch(kb,()=>{
   documentId.value=''; documentBusy.value=false; removing.value=''; addId.value=''; newLabel.value=''
   createOpen.value=false;familyActionOpen.value=false
   recoverDocument.value=''; recoverReason.value=''
-  if (kb.value) void loadFamilies(true)
+  if (readerReturn && kb.value) {
+    restoringReader=true
+    const saved=readerReturn
+    familyId.value=saved.family
+    tab.value=visibleTabs.value.some(item=>item.key===saved.tab) ? saved.tab : tab.value
+    familyPage.value=saved.familyPage
+    page.value=saved.page
+    memberPage.value=saved.memberPage
+    void nextTick(()=>{restoringReader=false})
+    void loadFamilies(true)
+  } else if (kb.value) void loadFamilies(true)
 })
 watch(familyId,()=>{
+  if (restoringReader) return
   family.value=families.value.find(row=>row.business_family_id===familyId.value)
   documentId.value=''; removing.value=''; relationMember.value=''; memberPage.value=1; inbox.value=undefined
   recoverDocument.value=''; recoverReason.value=''
   oldDocument.value=''; newDocument.value=''; effectiveAt.value=''; page.value=1
 })
-watch(tab,()=>{ page.value=1; removing.value='' })
+watch(tab,()=>{ if (!restoringReader) page.value=1; removing.value='' })
 watch([kb,familyId,tab],()=>{familyActionOpen.value=false;resetHistory()})
-watch([kb,familyId,tab,page,memberPage],loadView,{flush:'post'})
+watch([kb,familyId,tab,page,memberPage],async()=>{await loadView();await restoreReaderFocus()},{flush:'post'})
 watch(()=>auth.effectiveTenantId,loadCatalog)
 watch(locked,value=>emit('locked',value))
 onBeforeRouteLeave(()=>{

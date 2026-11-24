@@ -6,6 +6,7 @@ import ts from 'typescript'
 import * as vue from 'vue'
 import { translate } from '../../test-utils/i18n'
 import type { CorrectionDocument, CorrectionState } from '../../api/business'
+import type { CorrectionReaderState } from '@/stores/documentReader'
 import { requestFence } from '../lifecycle/model'
 import * as model from './model'
 
@@ -16,7 +17,8 @@ const settle = () => new Promise<void>(resolve => setImmediate(resolve))
 
 function mountSetup({
   query = {} as Record<string, string>,
-  correctionDocuments = async (_kb: string, _filters: { state: CorrectionState }) => cursors,
+  readerReturn = undefined as CorrectionReaderState | undefined,
+  correctionDocuments = async (_kb: string, _filters: { state: CorrectionState }, _page: number) => cursors,
   correctionDocument = async (_kb: string, _document: string, _version: string, _state: CorrectionState): Promise<CorrectionDocument> => {
     throw new Error('unexpected detail read')
   },
@@ -27,8 +29,9 @@ function mountSetup({
 } = {}) {
   const scope = vue.effectScope()
   const focused: string[] = []
+  const events: unknown[][] = []
   const route = vue.reactive({ query })
-  const props = vue.reactive({ scope: 'kb-a', knowledgeBases: [{ id: 'kb-a', name: 'A' }, { id: 'kb-b', name: 'B' }] })
+  const props = vue.reactive({ scope: 'kb-a', readerReturn, knowledgeBases: [{ id: 'kb-a', name: 'A' }, { id: 'kb-b', name: 'B' }] })
   const modules: Record<string, unknown> = {
     vue: { ...vue, onBeforeUnmount: vue.onScopeDispose },
     'vue-i18n': { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } }) },
@@ -41,11 +44,11 @@ function mountSetup({
     '../lifecycle/model': { requestFence },
     './model': model,
   }
-  const setup = new Function('require', 'defineProps', 'defineEmits', 'exports', code + '\nreturn { scopeMode, draft, applyFilters, detail, detailError, download, selectedItem, detailHeading, itemHeading };')
-  const state = scope.run(() => setup((id: string) => modules[id], () => props, () => () => {}, {}))
+  const setup = new Function('require', 'defineProps', 'defineEmits', 'defineExpose', 'exports', code + '\nreturn { scopeMode, draft, applyFilters, detail, detailError, download, selectedItem, detailHeading, itemHeading, compare, readerState };')
+  const state = scope.run(() => setup((id: string) => modules[id], () => props, () => (...args: unknown[]) => events.push(args), () => {}, {}))
   state.detailHeading.value = { focus: () => focused.push('document') }
   state.itemHeading.value = { focus: () => focused.push('item') }
-  return { state, route, props, focused, stop: () => scope.stop() }
+  return { state, route, props, focused, events, stop: () => scope.stop() }
 }
 
 function projectedDocument(state: CorrectionDocument['items'][number]['state'] = 'active'): CorrectionDocument {
@@ -58,6 +61,30 @@ function projectedDocument(state: CorrectionDocument['items'][number]['state'] =
 }
 
 const query = { kb: 'kb-a', document_id: 'doc', version_id: 'v1', correctionKB: 'kb-b', correction: 'item', correctionRevision: '2' }
+
+test('return reloads the saved number of correction pages and compares the located revision', async () => {
+  const calls: unknown[] = []
+  const readerReturn: CorrectionReaderState = {
+    scopeMode: 'all', advancedOpen: true, draft: { documentId: '', keyword: 'unapplied', state: 'active', from: '', to: '' },
+    filters: { state: 'active', query: 'applied' }, loadedPages: { 'kb-a': 1, 'kb-b': 3, stale: 4 }, scroll: 45, detailScroll: 30,
+  }
+  const view = mountSetup({ query, readerReturn,
+    correctionDocuments: async (kb, filters, page) => { calls.push([kb, filters, page]); return { ...cursors, page, total: 80 } },
+    correctionDocument: async () => projectedDocument(),
+  })
+  try {
+    await settle()
+    assert.deepEqual(calls, [
+      ['kb-a', readerReturn.filters, 1], ['kb-b', readerReturn.filters, 1], ['kb-b', readerReturn.filters, 2], ['kb-b', readerReturn.filters, 3],
+    ])
+    assert.equal(view.state.readerState().draft.keyword, 'unapplied')
+    view.state.compare()
+    assert.deepEqual(view.events.at(-1), ['read', {
+      left: { kb: 'kb-b', id: 'doc', version: 'v1' }, right: { kb: 'kb-b', id: 'doc', version: 'v1', kind: 'correction' },
+      source: { kind: 'correction', record: 'item', revision: '2' },
+    }])
+  } finally { view.stop() }
+})
 
 test('all authorized scopes fan out per KB and history only queries writable KBs', async () => {
   const calls: unknown[] = []

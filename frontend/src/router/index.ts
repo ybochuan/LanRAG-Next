@@ -99,6 +99,7 @@ const router = createRouter({
       meta: { requiresInit: true, requiresAuth: true },
       children: [
         { path: "documents", name: "documents", component: () => import("../views/lifecycle/LifecycleView.vue"), meta: { requiresInit: true, requiresAuth: true } },
+        { path: 'reader', name: 'document-reader', component: () => import('../views/document-reader/DocumentReaderView.vue'), meta: { requiresInit: true, requiresAuth: true } },
         { path: "lifecycle", name: "lifecycle", redirect: to => ({ name: 'documents', query: to.query }) },
         { path: 'feedback-materials', name: 'feedback-materials', redirect: to => ({ name: 'documents', query: { ...to.query, view: 'feedback-materials' }, hash: to.hash }) },
         { path: 'feedback-governance', name: 'feedback-governance', redirect: to => ({ name: 'documents', query: { ...to.query, view: 'feedback-materials', feedbackTab: 'review' }, hash: to.hash }) },

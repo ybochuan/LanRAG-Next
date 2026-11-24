@@ -6,10 +6,11 @@
         <span v-else>{{ $t('workbench.correction.detail') }}</span>
       </template>
       <template #header-actions>
+        <t-button v-if="detail && target?.state === 'active' && detail.items.length" variant="outline" size="small" @click="compare">{{ $t('reader.compare') }}</t-button>
         <t-button v-if="detail" variant="outline" size="small" @click="emit('open', detail.document_id, detail.document_title, detail.knowledge_base_id)">{{ $t('workbench.correction.openOriginal') }}</t-button>
         <t-button v-if="detail" variant="outline" size="small" :loading="downloading" @click="download">{{ $t('workbench.correction.downloadMarkdown') }}</t-button>
       </template>
-      <div class="correction-detail-body">
+      <div ref="detailBody" class="correction-detail-body">
         <p v-if="detailBusy" role="status">{{ $t('workbench.correction.reading') }}</p>
         <t-alert v-if="detailError" theme="error" role="alert">
           {{ detailError }} <t-button variant="text" size="small" @click="loadDetail">{{ $t('workbench.correction.reload') }}</t-button>
@@ -67,7 +68,7 @@
       </t-alert>
       <p v-if="historyUnavailable" role="status" class="metadata">{{ $t('workbench.correction.historyUnavailable') }}</p>
       <p v-if="listBusy" role="status">{{ $t('workbench.correction.loading') }}</p>
-      <div v-if="rows.length" class="workspace-list-scroll">
+      <div v-if="rows.length" ref="listScroller" class="workspace-list-scroll">
         <div class="workspace-list-table" role="table" :aria-label="$t('workbench.correction.listAria')">
           <div class="workspace-list-head" role="row">
             <span role="columnheader">{{ $t('workbench.correction.colSource') }}</span>
@@ -116,25 +117,30 @@ import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown'
 import { requestFence } from '../lifecycle/model'
 import { approvalBound, browseCorrectionState, correctionItemId, correctionRoute, correctionRowId, correctionStateKeys, markdownFileName } from './model'
 import { saveBusinessDownload } from '@/utils/desktopDownload'
+import type { CorrectionReaderState, WorkbenchReaderRequest } from '@/stores/documentReader'
 
-const props = defineProps<{ scope: string; knowledgeBases: { id: string; name: string }[] }>()
-const emit = defineEmits<{ open: [id: string, title: string, kb: string] }>()
+const props = defineProps<{ scope: string; knowledgeBases: { id: string; name: string }[]; readerReturn?: CorrectionReaderState }>()
+const emit = defineEmits<{ open: [id: string, title: string, kb: string]; read: [request: WorkbenchReaderRequest] }>()
 const route = useRoute(), router = useRouter()
 const { t, locale } = useI18n()
 const routeText = (key: string) => typeof route.query[key] === 'string' ? route.query[key] : ''
 const kbName = (kb: string) => props.knowledgeBases.find(row => row.id === kb)?.name || kb
 const formatDate = (value: string) => value ? new Date(value).toLocaleString(locale.value) : '—'
-const scopeMode = ref<'current' | 'all'>('current')
+const scopeMode = ref<'current' | 'all'>(props.readerReturn?.scopeMode || 'current')
 const scopeOptions = computed(() => [
   { value: 'current', label: kbName(props.scope) }, { value: 'all', label: t('workbench.correction.allKbs') },
 ])
 const stateOptions = computed(() => (Object.keys(correctionStateKeys) as CorrectionState[]).map(value => ({ value, label: t(correctionStateKeys[value]) })))
-const advancedOpen = ref(false)
-const draft = reactive({ documentId: routeText('sourceDocument'), keyword: '', state: 'active' as CorrectionState, from: '', to: '' })
-const filters = ref<CorrectionFilters>({ state: 'active', document_id: draft.documentId })
+const advancedOpen = ref(props.readerReturn?.advancedOpen || false)
+const draft = reactive(props.readerReturn ? { ...props.readerReturn.draft } : { documentId: routeText('sourceDocument'), keyword: '', state: 'active' as CorrectionState, from: '', to: '' })
+const filters = ref<CorrectionFilters>(props.readerReturn ? { ...props.readerReturn.filters } : { state: 'active', document_id: draft.documentId })
 const listFence = requestFence(), detailFence = requestFence(), downloadFence = requestFence()
 const listBusy = ref(false), filterError = ref(''), historyUnavailable = ref(false)
 const pages = ref<Record<string, number>>({}), failedScopes = ref<string[]>([])
+const loadedPages = ref<Record<string, number>>({})
+let listReturn = props.readerReturn
+let detailReturn = props.readerReturn
+let listGeneration = 0
 const records = ref<CorrectionDocumentSummary[]>([])
 const scopes = computed(() => props.knowledgeBases.map(kb => kb.id).filter(kb => scopeMode.value==='all' || kb===props.scope))
 const nextScopes = computed(() => scopes.value.filter(kb => pages.value[kb] && !failedScopes.value.includes(kb)))
@@ -151,20 +157,50 @@ const targetAuthorized = computed(() => props.knowledgeBases.some(kb => kb.id ==
 const detail = ref<CorrectionDocument>(), detailBusy = ref(false), detailError = ref(''), canWriteDetail = ref(false)
 const downloading = ref(false)
 const listHeading = ref<HTMLElement>(), detailHeading = ref<HTMLElement>(), itemHeading = ref<HTMLElement>()
+const listScroller = ref<HTMLElement>(), detailBody = ref<HTMLElement>()
+function readerState(): CorrectionReaderState {
+  return {
+    scopeMode:scopeMode.value, advancedOpen:advancedOpen.value, draft:{...draft}, filters:{...filters.value}, loadedPages:{...loadedPages.value},
+    scroll:listScroller.value?.scrollTop || 0, detailScroll:detailBody.value?.closest('.t-drawer__body')?.scrollTop || 0,
+  }
+}
+defineExpose({readerState})
+
+function compare() {
+  const current = detail.value
+  if (!current || target.value?.state !== 'active' || !current.items.length) return
+  const left = { kb: current.knowledge_base_id, id: current.document_id, version: current.version_id }
+  const item = selectedItem.value
+  emit('read', { left, right: { ...left, kind:'correction' }, source:{ kind:'correction', record:item?.id, revision:item && String(item.revision) } })
+}
 const selectedItem = computed(() => detail.value?.items.find(item => item.id === target.value?.item && String(item.revision) === target.value.revision))
 const preview = computed(() => detail.value ? renderDocumentPreviewMarkdown(detail.value.markdown, html => DOMPurify.sanitize(html, {
   ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'strong', 'em', 'del', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
   ALLOWED_ATTR: [], ALLOW_ARIA_ATTR: false, ALLOW_DATA_ATTR: false,
 })) : '')
 
-function restartList() {
+async function restartList() {
+  const generation = ++listGeneration
   listFence.invalidate()
   records.value = []
   pages.value = Object.fromEntries(scopes.value.map(kb => [kb, 1]))
+  loadedPages.value = {}
   failedScopes.value = []
   historyUnavailable.value = false
   listBusy.value = false
-  if (scopes.value.length) void loadPages(scopes.value)
+  if (!scopes.value.length) return
+  const saved = listReturn
+  listReturn = undefined
+  await loadPages(scopes.value)
+  if (!saved || generation !== listGeneration) return
+  // Re-fetch only pages that had loaded, under the live scope and current permissions.
+  let pending = nextScopes.value.filter(kb => pages.value[kb]! <= (saved.loadedPages[kb] || 0))
+  while (pending.length && generation === listGeneration) {
+    await loadPages(pending)
+    pending = nextScopes.value.filter(kb => pages.value[kb]! <= (saved.loadedPages[kb] || 0))
+  }
+  await nextTick()
+  if (generation === listGeneration && listScroller.value) listScroller.value.scrollTop = saved.scroll
 }
 
 async function loadPages(requested: string[]) {
@@ -190,6 +226,7 @@ async function loadPages(requested: string[]) {
     }
     failed.delete(kb)
     const response = result.value
+    if (response) loadedPages.value[kb] = response.page
     pages.value[kb] = response && response.page * response.page_size < response.total ? response.page + 1 : 0
     for (const row of response?.items ?? []) {
       if (row.knowledge_base_id === kb) byIdentity.set(correctionRowId(row), row)
@@ -264,7 +301,13 @@ async function loadDetail() {
     if (!matchesTarget(result, current)) throw new Error('correction_scope_unavailable')
     detail.value = result
     await nextTick()
-    if (detailFence.current(token)) itemHeading.value?.focus()
+    if (detailFence.current(token)) {
+      const saved = detailReturn
+      detailReturn = undefined
+      const scroller = detailBody.value?.closest('.t-drawer__body')
+      if (saved && scroller) scroller.scrollTop = saved.detailScroll
+      itemHeading.value?.focus({ preventScroll: !!saved })
+    }
     const canWrite = await permission
     if (detailFence.current(token)) canWriteDetail.value = canWrite
   } catch {
@@ -316,7 +359,7 @@ watch(() => routeText('sourceDocument'), source => {
   applyFilters()
 })
 watch([target, targetAuthorized], loadDetail, { immediate: true, flush: 'sync' })
-onBeforeUnmount(() => { listFence.invalidate(); detailFence.invalidate(); downloadFence.invalidate() })
+onBeforeUnmount(() => { listGeneration++; listFence.invalidate(); detailFence.invalidate(); downloadFence.invalidate() })
 </script>
 
 <style scoped>

@@ -7,6 +7,9 @@
         <p v-if="statusText" class="reference-source__status" :class="`is-${status}`">{{ statusText }}</p>
       </div>
       <div ref="toolbarSlot" class="reference-source__toolbar" />
+      <t-button v-if="mode === 'file' && target.knowledgeBaseId && target.knowledgeId" variant="text" size="small" @click="openReader">
+        {{ t('reader.readOriginal') }}
+      </t-button>
       <t-button
         v-if="mode === 'file' && locate"
         theme="default" variant="text" size="small" shape="square"
@@ -63,6 +66,7 @@ import { buildProtectedFileRequest, resolveProtectedFileAccess } from '@/utils/p
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { readerRoute } from '@/views/document-reader/model'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 import { getChunkByIdOnly, getKnowledgeDetails } from '@/api/knowledge-base/index'
@@ -93,6 +97,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const router = useRouter()
+
+function openReader() {
+  const { knowledgeBaseId, knowledgeId } = props.target
+  if (knowledgeBaseId && knowledgeId) void router.push({ ...readerRoute({ kb: knowledgeBaseId, id: knowledgeId }), state: { readerSource: true } })
+}
 
 type Mode = 'loading' | 'file' | 'web' | 'none'
 type Status = 'idle' | 'locating' | 'found' | 'page' | 'block' | 'ambiguous' | 'stale' | 'missing' | 'partial'

@@ -57,6 +57,7 @@
         <div class="detail-actions"><t-button variant="outline" @click="expandNode('provenance')">{{ $t('workbench.lineage.provenance') }}</t-button><t-button variant="outline" @click="expandNode('version-ancestry')">{{ $t('workbench.lineage.history') }}</t-button>
           <t-button v-if="selected.type==='document_version' && selected.document_id" variant="outline" @click="$emit('correction',selected.knowledge_base_id || kb,selected.document_id,selected.id, !selected.current || (!!selected.state && selected.state!=='active'))">{{ $t('workbench.lineage.feedbackDocument') }}</t-button>
           <t-button v-if="selected.document_id" theme="primary" @click="$emit('open',selected.document_id,nodeTitle(selected, t),selected.knowledge_base_id)">{{ $t('workbench.lineage.openDocument') }}</t-button>
+          <t-button v-if="selected.document_id" variant="outline" @click="openReaderRecord(selected)">{{ $t('reader.title') }}</t-button>
         </div>
       </section>
     </template>
@@ -71,7 +72,8 @@ import { associationQueryKeys } from '../business/model'
 import { moveTabFocus } from '../lifecycle/model'
 import { useAuthStore } from '@/stores/auth'
 import { listKnowledgeBases } from '@/api/knowledge-base'
-import { loadLineageGraph, type GraphMode, type LineageGraph } from '@/api/lineage'
+import { loadLineageGraph, type GraphMode, type LineageGraph, type LineageNode } from '@/api/lineage'
+import { readerRoute } from '../document-reader/model'
 import { requestFence } from '../lifecycle/model'
 import { graphError, layoutGraph, modeDescriptionKeys, modeLabelKeys, modes, nodeTitle, typeLabelKeys, typeLabels } from './model'
 import LineageCanvas from './LineageCanvas.vue'
@@ -101,6 +103,11 @@ const data = ref<LineageGraph>(), busy = ref(false), catalogLoading = ref(true),
 const canvas = ref<InstanceType<typeof LineageCanvas>>()
 const graphFence = requestFence(), catalogFence = requestFence()
 const selected = computed(() => data.value?.nodes.find(node => node.id === selectedID.value))
+function openReaderRecord(node: LineageNode) {
+  const version = node.type === 'document_version' ? node.id : undefined
+  void router.push(readerRoute({ kb: node.knowledge_base_id || kb.value, id: node.document_id, version }, undefined,
+    mode.value === 'provenance' || mode.value === 'renditions' ? 'sources' : 'history'))
+}
 const graphMode = computed<GraphMode>(() => mode.value === 'relations' && includeCross.value ? 'relations-cross' : mode.value)
 const modeDescription = computed(() => mode.value === 'relations' && includeCross.value
   ? t('workbench.lineage.crossDescription')

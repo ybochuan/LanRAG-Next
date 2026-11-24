@@ -7,15 +7,28 @@ import * as vue from 'vue'
 import { translate } from '../../test-utils/i18n'
 import * as model from './model'
 import { httpStatus } from '../business/model'
+import { readerRoute } from '../document-reader/model'
+import type { WorkbenchReturn } from '@/stores/documentReader'
 
 function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, string> = {}) {
   const scope = vue.effectScope()
-  const route = vue.reactive({ query: routeQuery })
+  const route = vue.reactive({ query: routeQuery, hash: '#panel', fullPath: '/platform/documents?kb=kb#panel' })
+  const captured: WorkbenchReturn[] = []
+  const pushes: unknown[] = []
+  const marks: unknown[][] = []
+  const warnings: string[] = []
+  const guards: ((to: { name: string }) => boolean)[] = []
+  const router = {
+    options: { history: { state: {}, replace: (...args: unknown[]) => marks.push(args) } },
+    push: async (to: unknown) => { pushes.push(to) },
+    resolve: () => ({ fullPath: route.fullPath }),
+  }
   const source = parse(readFileSync(new URL('./LifecycleView.vue', import.meta.url), 'utf8')).descriptor.scriptSetup!.content
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const modules: Record<string, unknown> = {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
-    'vue-router': { useRoute:()=>route, useRouter:()=>({}), onBeforeRouteLeave(){}, onBeforeRouteUpdate(){} },
+    'vue-router': { useRoute:()=>route, useRouter:()=>router, onBeforeRouteLeave: (guard: typeof guards[number]) => guards.push(guard), onBeforeRouteUpdate(){} },
+    'tdesign-vue-next': { MessagePlugin: { warning: (value: string) => warnings.push(value) } },
     '@/api/business': {},
     '@/api/lineage': {},
     '../feedback/model': {},
@@ -39,14 +52,48 @@ function mountSetup(api: Record<string, unknown>, routeQuery: Record<string, str
       }),
     },
     '@/stores/auth': { useAuthStore: () => ({ effectiveTenantId: 7 }) },
+    '@/stores/documentReader': {
+      useDocumentReaderStore: () => ({ captureWorkbench: (snapshot: WorkbenchReturn) => { captured.push(snapshot); return 'return-id' } }),
+      workbenchTarget: (query: object, hash: string) => ({ name:'documents', query, hash }),
+    },
+    '../document-reader/model': { readerRoute },
     'vue-i18n': { useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => translate(key, params), locale: { value: 'zh-CN' } }) },
     './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,attachmentTaskList,attachmentTaskError,attachmentTaskDocuments,taskReasonLabel,collapsedTaskSections,isTaskSectionCollapsed,toggleTaskSection,openPendingAttachment,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup,cleanupPage,cleanupTotal,cleanupFilter,cleanupActionCount,cleanupSelected,cleanupSelectionCount,cleanupSelectable,cleanupPageAllSelected,cleanupPageIndeterminate,toggleCleanupSelection,toggleCleanupPageSelection,clearCleanupSelection,cleanupTask,batchCleanup,allDocuments,loadMoreDocuments,documentPageError,nextDocumentPage,documentGroups,mainDocumentCount,attachmentCount,isDocumentExpanded,toggleDocument,attachmentMatchesQuery,ruleForm,ruleDirty,ruleOutdated,resetRuleForm,submitRules};`)(
+  const state = scope.run(() => new Function('require', 'defineProps', 'setInterval', 'clearInterval', 'window', 'document', 'exports', `${code}\nreturn {kb,tab,data,busy,error,reviewItems,reviewError,reviewBusy,reviewsLoaded,attachmentTaskList,attachmentTaskError,attachmentTaskDocuments,taskReasonLabel,collapsedTaskSections,isTaskSectionCollapsed,toggleTaskSection,openPendingAttachment,loadOverview,loadReviews,loadAll,loadKnowledgeBases,filter,titleQuery,openDocument,submitDocument,reloadDocument,applyDateConflictDraft,dateForm,dateConflictDraft,documentConflict,cleanupItems,loadCleanup,confirmCleanup,cleanupPage,cleanupTotal,cleanupFilter,cleanupActionCount,cleanupSelected,cleanupSelectionCount,cleanupSelectable,cleanupPageAllSelected,cleanupPageIndeterminate,toggleCleanupSelection,toggleCleanupPageSelection,clearCleanupSelection,cleanupTask,batchCleanup,allDocuments,loadMoreDocuments,documentPageError,nextDocumentPage,documentGroups,mainDocumentCount,attachmentCount,isDocumentExpanded,toggleDocument,attachmentMatchesQuery,ruleForm,ruleDirty,ruleOutdated,resetRuleForm,submitRules,navigateReader,detailTab,selectedID,selectedKB,viewLocked,supplementBusy};`)(
     (id: string) => modules[id], () => ({}), () => 0, () => {}, {}, { activeElement: null, querySelector: () => null }, {},
   ))
-  return { state, route, stop: () => scope.stop() }
+  return { state, route, captured, pushes, marks, warnings, guards, stop: () => scope.stop() }
 }
+
+test('reader captures the origin route and the supplied comparison, then honors dirty and lock state', async () => {
+  const view = mountSetup({}, { kb: 'kb', view: 'families' })
+  try {
+    view.state.kb.value = 'kb'; await vue.nextTick()
+    view.state.selectedID.value = 'unrelated-drawer'; view.state.selectedKB.value = 'kb'; view.state.detailTab.value = 'audit'
+    const request = { left: { kb: 'kb', id: 'old' }, right: { kb: 'elsewhere', id: 'new' }, source: { kind: 'family', family: 'family', record: 'replacement' } } as const
+    view.state.viewLocked.value = true
+    assert.equal(view.guards[0]!({ name: 'document-reader' }), false)
+    await view.state.navigateReader(request, 'main')
+    view.state.viewLocked.value = false
+    view.state.dateConflictDraft.value = { effective_until: '2026-11-25T15:00' }
+    await view.state.navigateReader(request, 'main')
+    assert.equal(view.captured.length, 0)
+    assert.equal(view.warnings.length, 1)
+    assert.equal(view.state.dateConflictDraft.value.effective_until, '2026-11-25T15:00')
+    view.state.dateConflictDraft.value = undefined
+    await view.state.navigateReader(request, 'main')
+    assert.equal(view.captured.length, 1)
+    const capture = view.captured[0]!
+    assert.deepEqual(capture.left, request.left)
+    assert.deepEqual(capture.right, request.right)
+    assert.equal(capture.area, 'main')
+    assert.deepEqual(capture.document, { id: 'unrelated-drawer', kb: 'kb', tab: 'audit', scroll: 0, activityPage: 1 })
+    assert.deepEqual(capture.target, { name: 'documents', query: view.route.query, hash: '#panel' })
+    assert.deepEqual(view.marks, [[view.route.fullPath, { readerReturn: 'return-id' }]])
+    assert.deepEqual(view.pushes, [{ ...readerRoute(request.left, request.right), state: { readerOrigin: 'return-id' } }])
+  } finally { view.stop() }
+})
 
 test('late overview response from previous KB cannot replace current data', async () => {
   let releaseOld!: (value: unknown) => void

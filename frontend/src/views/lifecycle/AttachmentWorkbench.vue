@@ -1,5 +1,5 @@
 <template>
-  <section class="attachment-workbench" aria-labelledby="attachment-workbench-title">
+  <section ref="workspace" class="attachment-workbench" aria-labelledby="attachment-workbench-title">
     <header class="attachment-header">
       <h3 id="attachment-workbench-title">{{ $t('workbench.attachmentWorkbench.title') }}</h3>
       <t-space v-if="canWrite && view" size="small" break-line>
@@ -38,6 +38,7 @@
         <div v-if="item.parse_status && item.parse_status !== 'completed'" class="attachment-meta">{{ parseLabels[item.parse_status] || item.parse_status }}</div>
         <div v-if="item.reclaim_error" class="attachment-meta" role="status">{{ reclaimErrors[item.reclaim_error] || reclaimErrors.storage_unavailable }}</div>
         <t-space size="small" break-line>
+          <t-button v-if="item.state === 'current' && view?.parent_version" :data-reader-attachment="item.relation_id || item.id" variant="text" size="small" :disabled="busy" @click="compare(item)">{{ $t('reader.compare') }}</t-button>
           <t-button v-if="canWrite && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="download(item)">{{ $t('workbench.attachmentWorkbench.actions.download') }}</t-button>
           <t-button v-if="canWrite && (item.managed || item.relation_type === 'template_for') && item.state === 'current'" variant="text" size="small" :disabled="busy" @click="edit(item)">{{ $t('workbench.attachmentWorkbench.actions.edit') }}</t-button>
           <t-button v-if="canWrite && item.managed && item.state === 'detached'" variant="text" size="small" :disabled="busy" @click="change(item, 'restore')">{{ $t('workbench.attachmentWorkbench.actions.restore') }}</t-button>
@@ -134,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { UploadFile } from 'tdesign-vue-next'
@@ -143,9 +144,10 @@ import { write as writeRelation } from '@/api/business'
 import { downloadRelatedAttachment } from '@/api/relatedAttachments'
 import { attachmentWorkbench, updateAttachment, uploadWorkbenchAttachment, type AttachmentItem, type AttachmentPreview, type AttachmentImportOutcome, type AttachmentExtractionIssue, type AttachmentWorkbench } from '@/api/attachmentWorkbench'
 import { httpStatus } from '../business/model'
+import type { ReaderSource, WorkbenchReaderRequest } from '@/stores/documentReader'
 
-const props = defineProps<{ kb: string; documentId: string; canWrite: boolean; parentState?: string }>()
-const emit = defineEmits<{ (event: 'locked', value: boolean): void; (event: 'changed'): void }>()
+const props = defineProps<{ kb: string; documentId: string; canWrite: boolean; parentState?: string; readerSource?: ReaderSource }>()
+const emit = defineEmits<{ locked: [value: boolean]; changed: []; read: [request: WorkbenchReaderRequest] }>()
 const router = useRouter()
 const { t } = useI18n()
 const view = ref<AttachmentWorkbench>()
@@ -180,6 +182,29 @@ const deletionDeadlines = new Map<string, number>()
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 const operationID = () => crypto.randomUUID()
+const workspace = ref<HTMLElement>()
+let readerSource = props.readerSource
+function readerDirty() {
+  return showPreview.value || showUpload.value || showPicker.value || showArchive.value || showEdit.value || !!pendingAction.value
+}
+defineExpose({readerDirty})
+function compare(item: AttachmentItem) {
+  const parent = view.value
+  if (busy.value || !parent?.parent_version || parent.parent_id !== props.documentId || item.state !== 'current') return
+  emit('read', {
+    left: { kb: props.kb, id: parent.parent_id }, right: { kb: props.kb, id: item.id },
+    source: { kind: 'attachment', record: item.id, relation: item.relation_id, parentVersion: parent.parent_version, reference: { ...item.reference } },
+  })
+}
+async function restoreReaderFocus() {
+  const source = readerSource
+  readerSource = undefined
+  if (source?.kind !== 'attachment') return
+  await nextTick()
+  if (disposed) return
+  const buttons = workspace.value?.querySelectorAll<HTMLElement>('[data-reader-attachment]') || []
+  Array.from(buttons).find(button => button.dataset.readerAttachment === (source.relation || source.record))?.focus({ preventScroll: true })
+}
 const mappings = computed<Record<string, string>>(() => ({
   confirmed: t('workbench.attachmentWorkbench.mappings.confirmed'),
   candidate: t('workbench.attachmentWorkbench.mappings.candidate'),
@@ -307,7 +332,10 @@ async function load() {
   error.value = ''
   try {
     const result = await attachmentWorkbench(props.kb, props.documentId)
-    if (token === revisionToken) view.value = result
+    if (token === revisionToken) {
+      view.value = result
+      void restoreReaderFocus()
+    }
   } catch (err) { if (token === revisionToken) fail(err) }
   finally { if (token === revisionToken) { busy.value = false; scheduleRefresh() } }
 }

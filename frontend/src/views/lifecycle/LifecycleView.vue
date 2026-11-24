@@ -1,5 +1,5 @@
 <template>
- <main class="lifecycle-page" :class="{'lifecycle-page--documents':tab==='documents'&&!workspaceView, 'lifecycle-page--cleanup':tab==='cleanup'&&!workspaceView, 'lifecycle-page--workspace':!!workspaceView}" aria-labelledby="lifecycle-title">
+ <main ref="workspaceScroller" class="lifecycle-page" :class="{'lifecycle-page--documents':tab==='documents'&&!workspaceView, 'lifecycle-page--cleanup':tab==='cleanup'&&!workspaceView, 'lifecycle-page--workspace':!!workspaceView}" aria-labelledby="lifecycle-title">
   <header class="page-heading">
    <h1 id="lifecycle-title"><ResourceIcon type="document" :size="20" class="page-icon" />{{ $t('workbench.title') }}</h1>
    <div class="scope-bar">
@@ -21,7 +21,7 @@
     <t-button v-for="item in workspaceTabs.filter(tab => kb || tab.key==='feedback-materials')" variant="text" aria-controls="panel-workspace" :tabindex="workspaceView===item.key ? 0 : -1" :id="`tab-workspace-${item.key}`" :key="item.key" role="tab" :aria-selected="workspaceView===item.key" :class="{selected:workspaceView===item.key}" :disabled="viewLocked" @click="showWorkspace(item.key)">{{ $t(item.labelKey) }}</t-button>
    </div>
    <section v-if="workspaceView" id="panel-workspace" role="tabpanel" :aria-labelledby="'tab-workspace-'+workspaceView">
-    <FamilyWorkspace v-if="workspaceView==='families'" :key="kb" :scope="kb" :can-write="data?.can_write" @changed="loadAll" @locked="viewLocked=$event" />
+    <FamilyWorkspace v-if="workspaceView==='families'" ref="mainFamily" :key="kb" :scope="kb" :can-write="data?.can_write" :reader-return="mainReturn?.mainFamily" :reader-source="mainSource" @changed="loadAll" @locked="viewLocked=$event" @read="navigateReader($event,'main')" />
     <LineageView v-else-if="workspaceView==='lineage'" :key="kb+String(route.query.mode)+String(route.query.node||route.query.id)" :scope="kb" @open="openWorkspaceDocument" @correction="openVersionCorrections" />
     <template v-else-if="workspaceView==='feedback-materials'">
      <div class="feedback-tabs" role="tablist" :aria-label="$t('workbench.workspace.feedbackMaterials')" @keydown="moveTabFocus">
@@ -29,14 +29,14 @@
       <t-button id="tab-feedback-review" role="tab" aria-controls="panel-feedback-review" variant="text" :aria-selected="feedbackReview" :tabindex="feedbackReview ? 0 : -1" :class="{selected:feedbackReview}" :disabled="viewLocked" @click="showFeedbackReview">{{ $t('workbench.workspace.feedbackGovernance') }}</t-button>
      </div>
      <section v-if="feedbackReview" id="panel-feedback-review" role="tabpanel" aria-labelledby="tab-feedback-review">
-      <BusinessView :key="kb+String(feedbackInboxOnly)" section="feedback-governance" :scope="kb || undefined" :can-write="data?.can_write" :inbox-only="feedbackInboxOnly" @locked="viewLocked=$event" @open="openBusinessDocument" />
+      <BusinessView ref="mainBusiness" :key="kb+String(feedbackInboxOnly)" section="feedback-governance" :scope="kb || undefined" :can-write="data?.can_write" :inbox-only="feedbackInboxOnly" :reader-return="mainReturn?.mainBusiness" :reader-source="mainSource" @locked="viewLocked=$event" @open="openBusinessDocument" @read="navigateReader($event,'main')" />
      </section>
      <section v-else id="panel-correction-documents" role="tabpanel" aria-labelledby="tab-correction-documents">
-      <CorrectionWorkspace v-if="kb" :scope="kb" :knowledge-bases="knowledgeBases" @open="openWorkspaceDocument" />
+      <CorrectionWorkspace v-if="kb" ref="correctionWorkspace" :scope="kb" :knowledge-bases="knowledgeBases" :reader-return="mainReturn?.correction" @open="openWorkspaceDocument" @read="navigateReader($event,'main')" />
       <t-empty v-else :description="$t('workbench.lifecycle.noAccessibleKB')" />
      </section>
     </template>
-    <BusinessView v-else-if="workspaceView==='associations'||workspaceView==='revisions'" :key="kb+workspaceView" :section="workspaceView" :scope="kb" :can-write="data?.can_write" @locked="viewLocked=$event" @open="openBusinessDocument" />
+    <BusinessView v-else-if="workspaceView==='associations'||workspaceView==='revisions'" ref="mainBusiness" :key="kb+workspaceView" :section="workspaceView" :scope="kb" :can-write="data?.can_write" :reader-return="mainReturn?.mainBusiness" :reader-source="mainSource" @locked="viewLocked=$event" @open="openBusinessDocument" @read="navigateReader($event,'main')" />
    </section>
    <template v-else>
    <div v-if="tab==='documents'" class="document-filters">
@@ -220,7 +220,7 @@
         <template v-if="reviewItems.length">
          <div class="review-sort"><span>{{ $t('workbench.reviews.sortLabel') }}</span><t-radio-group v-model="reviewSort" variant="default" size="small"><t-radio-button value="asc">{{ $t('workbench.reviews.asc') }}</t-radio-button><t-radio-button value="desc">{{ $t('workbench.reviews.desc2') }}</t-radio-button></t-radio-group></div>
          <div class="review-list">
-          <t-button v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" variant="text" @click="openDocument(alert.document_id,alert.title,'life',kb,$event)">
+          <t-button v-for="alert in sortedReviewItems" :key="alert.alert_id" class="review-item" variant="text" :data-reader-review="alert.alert_id" @click="openDocument(alert.document_id,alert.title,'life',kb,$event)">
            <span><strong>{{ alert.title || alert.document_id }}</strong><small>{{ $t('workbench.reviews.due', { date: date(alert.review_due) }) }}</small><small v-if="alert.delivered_at">{{ $t('workbench.reviews.delivered', { date: date(alert.delivered_at) }) }}</small></span>
            <t-tag variant="light" size="small" :theme="alert.delivery_state==='delivered'?'success':'default'">{{ reviewDeliveryLabel(alert.delivery_state, t) }}</t-tag>
           </t-button>
@@ -246,6 +246,7 @@
     <span v-else>{{ $t('workbench.lifecycle.documentDetails') }}</span>
    </template>
    <template #header-actions>
+     <t-button v-if="detail" size="small" variant="outline" :disabled="detailLocked || viewLocked" data-reader-origin="document" @click="openReader">{{ $t('reader.readOriginal') }}</t-button>
     <t-button v-if="detail" variant="outline" size="small" :disabled="detailLocked" :loading="openingCorrections" @click="openCurrentVersionCorrections">{{ $t('workbench.lifecycle.feedbackDocument') }}</t-button>
     <t-button variant="text" shape="square" :aria-label="$t('workbench.lifecycle.closeDocumentDetails')" :disabled="detailLocked" @click="closeDocument"><t-icon name="close" /></t-button>
    </template>
@@ -257,7 +258,7 @@
      </template>
     </nav>
    </template>
-   <div class="detail-drawer-body">
+   <div ref="drawerBody" class="detail-drawer-body">
      <div v-if="detailBusy && !detail" role="status" class="wb-loading"><t-loading size="small" :loading="true" /> <span>{{ $t('workbench.lifecycle.loadingDocument') }}</span></div>
      <t-alert v-if="detailError" theme="error" role="alert">{{ detailError }} <t-button variant="text" size="small" :disabled="detailLocked" @click="reloadDocument">{{ $t('workbench.common.reload') }}</t-button></t-alert>
      <template v-if="detail">
@@ -279,13 +280,14 @@
          <t-button v-if="detailCanWrite && !detail.snapshot.attachment_parent_document_id" theme="primary" type="submit" :loading="savingDocument" :disabled="dateEditingLocked">{{ savingDocument ? $t('workbench.lifecycle.saving') : $t('workbench.lifecycle.saveDates') }}</t-button>
        </form>
       </template>
-      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
+      <FamilyWorkspace v-else-if="detailTab==='family'||detailTab==='suggestions'" ref="drawerFamily" :key="selectedKB+':'+selectedID+detailTab" :scope="selectedKB" :document-id="selectedID"
        :current-family="detail.business_family?.id" :initial-view="detailTab==='suggestions'?'suggestions':'members'" :can-write="detailCanWrite"
-       @open="openWorkspaceDocument" @changed="refreshDocumentMembership" @locked="childLocked=$event" />
-      <AttachmentWorkbench v-else-if="detailTab==='attachments'" :key="selectedKB+':'+selectedID" :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" :parent-state="detail.snapshot.effective_state || detail.snapshot.current.state" @locked="childLocked=$event" @changed="loadOverview" />
+       :reader-return="drawerReturn?.drawerFamily" :reader-source="drawerSource"
+       @open="openWorkspaceDocument" @changed="refreshDocumentMembership" @locked="childLocked=$event" @read="navigateReader($event,'drawer')" />
+      <AttachmentWorkbench v-else-if="detailTab==='attachments'" ref="attachmentWorkspace" :key="selectedKB+':'+selectedID" :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" :parent-state="detail.snapshot.effective_state || detail.snapshot.current.state" :reader-source="drawerSource" @locked="childLocked=$event" @changed="loadOverview" @read="navigateReader($event,'drawer')" />
       <template v-else-if="detailTab==='relations'">
-       <BusinessView :key="selectedKB+':'+selectedID+':'+supplementRevision" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="associations" @open="openRelatedDocument" @locked="childLocked=$event" />
-       <SupplementEditor :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" :parent-busy="childLocked" :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="supplementSaved" />
+       <BusinessView ref="drawerBusiness" :key="selectedKB+':'+selectedID+':'+supplementRevision" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="associations" :reader-return="drawerReturn?.drawerBusiness" :reader-source="drawerSource" @open="openRelatedDocument" @locked="childLocked=$event" @read="navigateReader($event,'drawer')" />
+       <SupplementEditor ref="supplementEditor" :kb="selectedKB" :document-id="selectedID" :can-write="detailCanWrite" :parent-busy="childLocked" :knowledge-bases="knowledgeBases" @busy="supplementBusy=$event" @saved="supplementSaved" />
       </template>
       <LineageView v-else-if="detailTab==='graph'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document-id="selectedID" @open="openGraphDocument" @correction="openVersionCorrections" />
       <template v-else-if="detailTab==='audit'">
@@ -307,7 +309,7 @@
       </div>
        <t-button variant="outline" @click="closeDocument(); showFeedbackReview()">{{ $t('workbench.lifecycle.viewFeedbackReview') }}</t-button>
       </template>
-      <BusinessView v-else-if="detailTab==='revisions'" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="revisions" @locked="childLocked=$event" />
+      <BusinessView v-else-if="detailTab==='revisions'" ref="drawerBusiness" :key="selectedKB+':'+selectedID" :scope="selectedKB" :document="{id:selectedID,title:selectedTitle||selectedID}" :can-write="detailCanWrite" section="revisions" :reader-return="drawerReturn?.drawerBusiness" :reader-source="drawerSource" @locked="childLocked=$event" @read="navigateReader($event,'drawer')" />
      </template>
    </div>
   </SettingDrawer>
@@ -315,7 +317,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { documentActivity, documentTitle, type BusinessAction } from '@/api/business'
@@ -332,6 +335,8 @@ import SupplementEditor from './SupplementEditor.vue'
 import AttachmentWorkbench from './AttachmentWorkbench.vue'
 import { attachmentTasks, type AttachmentTaskList } from '@/api/attachmentWorkbench'
 import { useAuthStore } from '@/stores/auth'
+import { useDocumentReaderStore, workbenchTarget, type BusinessReaderState, type CorrectionReaderState, type FamilyReaderState, type WorkbenchReaderRequest, type WorkbenchReturn } from '@/stores/documentReader'
+import { readerRoute } from '../document-reader/model'
 import { annotationsForSave, errorMessage, moveTabFocus, requestFence, reviewDeliveryLabel, ruleSourceLabel, stateLabel, states, toLocalInput, validRules } from './model'
 // TDesign select options; the workbench renders WeKnora-native selects, so the
 // option arrays live here instead of hand-written <option> children.
@@ -356,6 +361,7 @@ const detailGroups=[
 ] as const
 type DetailTab=(typeof detailGroups)[number]['tabs'][number]['key']
 const route=useRoute(), router=useRouter()
+const readerSession=useDocumentReaderStore()
 const { t, locale }=useI18n()
 const workspaceView=computed(()=>{
  const view=route.query.view
@@ -540,6 +546,19 @@ const supplementRevision=ref(0)
 const detailLocked=computed(()=>savingDocument.value||supplementBusy.value||childLocked.value)
 const detailCanWrite=computed(()=>detail.value?.can_write ?? (selectedKB.value===kb.value ? !!data.value?.can_write : false))
 const detailTab=ref<DetailTab>('life')
+const workspaceScroller=ref<HTMLElement>(),drawerBody=ref<HTMLElement>()
+const detailScroller=()=>drawerBody.value?.closest<HTMLElement>('.t-drawer__body')
+type ReaderChild<State> = { readerState: () => State; readerDirty?: () => boolean }
+const mainFamily=ref<ReaderChild<FamilyReaderState>>(),drawerFamily=ref<ReaderChild<FamilyReaderState>>()
+const mainBusiness=ref<ReaderChild<BusinessReaderState>>(),drawerBusiness=ref<ReaderChild<BusinessReaderState>>()
+const correctionWorkspace=ref<ReaderChild<CorrectionReaderState>>()
+const attachmentWorkspace=ref<{readerDirty:()=>boolean}>(),supplementEditor=ref<{readerDirty:()=>boolean}>()
+const readerRestore=shallowRef<WorkbenchReturn>()
+const mainReturn=computed(()=>readerRestore.value?.kb===kb.value ? readerRestore.value : undefined)
+const drawerReturn=computed(()=>mainReturn.value?.document?.id===selectedID.value && mainReturn.value?.document?.kb===selectedKB.value && mainReturn.value?.document?.tab===detailTab.value ? mainReturn.value : undefined)
+const mainSource=computed(()=>mainReturn.value?.area==='main' ? mainReturn.value.source : undefined)
+const drawerSource=computed(()=>drawerReturn.value?.area==='drawer' ? drawerReturn.value.source : undefined)
+let readerOpening=false
 const activity=ref<FamilyActivity[]>([]), activityBusy=ref(false), activityError=ref(''), activityPage=ref(1)
 const activityFence=requestFence()
 const governanceActions:Record<string,string>={family_member_add:'workbench.governance.familyMemberAdd',family_member_remove:'workbench.governance.familyMemberRemove',
@@ -780,6 +799,40 @@ async function openVersionCorrections(scope:string,id:string,version:string,hist
  void router.push(to)
 }
 function openWorkspaceDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'life',kbOverride)}
+function openReader(){
+ if(!detail.value||!selectedKB.value||!selectedID.value)return
+ const left={kb:selectedKB.value,id:selectedID.value}
+ return navigateReader({left,source:{kind:'document',record:previousFocus?.dataset.readerReview}},'drawer')
+}
+function allowReaderNavigation(){
+ if(!allowNavigation())return false
+ const drafts=[mainFamily.value,drawerFamily.value,mainBusiness.value,drawerBusiness.value,attachmentWorkspace.value,supplementEditor.value]
+ if(!hasDateDraft.value && !ruleDirty.value && !drafts.some(child=>child?.readerDirty?.()))return true
+ MessagePlugin.warning(t('reader.pendingDraft'))
+ return false
+}
+async function navigateReader(request:WorkbenchReaderRequest,area:WorkbenchReturn['area']){
+ if(readerOpening || !allowReaderNavigation())return
+ const path=route.fullPath,target=workbenchTarget(route.query,route.hash)
+ const id=readerSession.captureWorkbench({
+  ...request,path,target,targetPath:router.resolve(target).fullPath,kb:kb.value,area,
+  document:selectedID.value ? {id:selectedID.value,tab:detailTab.value,kb:selectedKB.value,scroll:detailScroller()?.scrollTop || 0,activityPage:activityPage.value} : undefined,
+  scroll:workspaceScroller.value?.scrollTop || 0,documentScroll:documentScroller.value?.scrollTop || 0,pages:Math.ceil(allDocuments.value.length/documentPageSize),
+  sort:{key:sortKey.value,direction:sortDirection.value},expanded:[...expandedDocumentIDs.value],reviewSort:reviewSort.value,collapsedTaskSections:[...collapsedTaskSections.value],
+  mainFamily:mainFamily.value?.readerState(),drawerFamily:drawerFamily.value?.readerState(),correction:correctionWorkspace.value?.readerState(),
+  mainBusiness:mainBusiness.value?.readerState(),drawerBusiness:drawerBusiness.value?.readerState(),
+ })
+ readerOpening=true
+ try{
+  // Put the return token on the originating entry so native Back restores the same snapshot.
+  router.options.history.replace(path,{readerReturn:id})
+  const failure=await router.push({...readerRoute(request.left,request.right,request.view),state:{readerOrigin:id}})
+  if(failure)readerSession.discardWorkbench(id)
+ }catch{
+  readerSession.discardWorkbench(id)
+  MessagePlugin.warning(t('reader.relationStatus.unavailable'))
+ }finally{readerOpening=false}
+}
 function openGraphDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'graph',kbOverride)}
 function openRelatedDocument(id:string,title:string,kbOverride?:string){void openDocument(id,title,'relations',kbOverride)}
 function openBusinessDocument(id:string,title:string,kbOverride?:string){
@@ -891,10 +944,57 @@ watch(()=>route.query,query=>{
  if(query.attachment==='1'&&tab.value==='reviews'&&kb.value&&!selectedID.value)void loadReviews().then(openPendingAttachment)
 })
 watch([workspaceView,feedbackReview,standaloneFeedback],()=>{viewLocked.value=false})
-function allowNavigation(){return !detailLocked.value && !viewLocked.value}
-onBeforeRouteLeave(allowNavigation)
+function allowNavigation(){return !detailLocked.value && !viewLocked.value && !savingRules.value && !cleanupChanging.value}
+onBeforeRouteLeave(to=>to.name==='document-reader' ? allowReaderNavigation() : allowNavigation())
 onBeforeRouteUpdate(allowNavigation)
-onMounted(loadKnowledgeBases)
+watch(()=>route.fullPath,()=>{readerRestore.value=undefined})
+watch(()=>auth.effectiveTenantId,()=>{readerRestore.value=undefined})
+onMounted(async()=>{
+ const path=route.fullPath
+ const snapshot=readerSession.takeWorkbench(path,router.options.history.state.readerReturn)
+ const scope=readerSession.scope
+ readerRestore.value=snapshot
+ await loadKnowledgeBases()
+ if(!snapshot)return
+ const matches=()=>scope===readerSession.scope&&route.fullPath===path&&kb.value===snapshot.kb
+ if(!matches()){readerRestore.value=undefined;return}
+ const column=documentColumns.find(item=>item.key===snapshot.sort.key)
+ if(column)sortKey.value=column.key
+ sortDirection.value=snapshot.sort.direction===-1?-1:1
+ expandedDocumentIDs.value=new Set(snapshot.expanded)
+ reviewSort.value=snapshot.reviewSort
+ collapsedTaskSections.value=new Set(snapshot.collapsedTaskSections)
+ const restoreListScroll=async()=>{
+  if(tab.value==='documents'&&!workspaceView.value){
+   for(let page=1;matches()&&page<snapshot.pages&&nextDocumentPage.value&&!documentPageError.value;page++)await loadMoreDocuments()
+  }
+  await nextTick()
+  if(!matches())return
+  if(documentScroller.value)documentScroller.value.scrollTop=snapshot.documentScroll
+  if(workspaceScroller.value)workspaceScroller.value.scrollTop=snapshot.scroll
+  if(snapshot.source.kind==='document' && snapshot.source.record){
+   const record=snapshot.source.record
+   const buttons=workspaceScroller.value?.querySelectorAll<HTMLElement>('[data-reader-review]') || []
+   previousFocus=Array.from(buttons).find(button=>button.dataset.readerReview===record) || null
+  }
+ }
+ if(busy.value || reviewBusy.value){
+  const stop=watch([busy,reviewBusy],([loading,reviewsLoading])=>{if(!loading&&!reviewsLoading){stop();void restoreListScroll()}},{flush:'post'})
+ }else void restoreListScroll()
+ const requested=snapshot.document
+ if(requested&&knowledgeBases.value.some(item=>item.id===requested.kb)){
+  const tab=detailGroups.flatMap(group=>[...group.tabs]).find(item=>item.key===requested.tab)?.key||'life'
+  const loading=openDocument(requested.id,undefined,tab,requested.kb)
+  await nextTick()
+  if(matches() && tab==='audit')activityPage.value=requested.activityPage
+  await loading
+  await nextTick()
+  if(!matches() || selectedID.value!==requested.id || selectedKB.value!==requested.kb || detailTab.value!==tab)return
+  const scroller=detailScroller()
+  if(scroller)scroller.scrollTop=requested.scroll
+  if(snapshot.source.kind==='document')scroller?.closest('.t-drawer')?.querySelector<HTMLElement>('[data-reader-origin="document"]')?.focus({preventScroll:true})
+ }
+})
 onBeforeUnmount(()=>{clearTimeout(searchTimer);kbFence.invalidate();listFence.invalidate();detailFence.invalidate();reviewFence.invalidate();cleanupFence.invalidate();cleanupMutationFence.invalidate();ruleFence.invalidate()})
 </script>
 

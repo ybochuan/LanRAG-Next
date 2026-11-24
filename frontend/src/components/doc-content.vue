@@ -22,6 +22,8 @@ import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTil
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
+import { readerRoute } from '@/views/document-reader/model';
 import { useAuthStore } from '@/stores/auth';
 import { useAssistantStore } from '@/stores/assistant';
 import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
@@ -33,6 +35,7 @@ import { saveBusinessDownload } from '@/utils/desktopDownload';
 import { isKnownPreviewableExt, resolveFilePreviewExt } from '@/utils/filePreview';
 
 const { t } = useI18n();
+const router = useRouter();
 const authStore = useAuthStore();
 
 // canDeleteGeneratedQuestion 对应后端 DELETE /chunks/by-id/:id/questions
@@ -244,6 +247,9 @@ mermaid.initialize({
   }
 });
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
+function openReader() {
+  if (props.kbId && props.details?.id) void router.push({ ...readerRoute({ kb: props.kbId, id: props.details.id }), state: { readerSource: true } });
+}
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange", "titleChange"]);
 const titleDialog = ref(false);
 const titleDraft = ref('');
@@ -1875,6 +1881,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
               </span>
             </div>
             <div class="view-mode-buttons">
+              <t-button v-if="kbId && details.id && canPreview()" size="small" variant="text" @click="openReader">{{ $t('reader.readOriginal') }}</t-button>
               <t-button v-if="canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
                 :theme="viewMode === 'preview' ? 'primary' : 'default'" @click="viewMode = 'preview'"
                 class="view-mode-btn">

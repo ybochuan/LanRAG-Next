@@ -61,6 +61,8 @@ const props = defineProps<{
   active: boolean;
   /** Leave focus with the host when an inline preview loads. */
   disableAutoFocus?: boolean;
+  /** Allow this host pane to enter fullscreen while keeping its preview loaded. */
+  fullscreenEnabled?: boolean;
   fillHeight?: boolean;
   /** Place preview actions beside the host header's download button. */
   toolbarTarget?: HTMLElement | null;
@@ -146,7 +148,7 @@ watch(
   { flush: 'post' },
 );
 
-watch(isFullscreen, focusPreviewAfterUpdate, { flush: 'post' });
+watch(isFullscreen, () => focusPreviewAfterUpdate(), { flush: 'post' });
 
 watch(
   () => [previewContent.value, docxContainer.value],
@@ -173,23 +175,52 @@ function toggleHtmlViewMode() {
 function toggleFullscreen() {
   if (isFullscreen.value) {
     void exitPreviewFullscreen();
-  } else {
+  } else if (canEnterFullscreen()) {
     void enterPreviewFullscreen();
   }
 }
 
+function onFullscreenButtonClick(event: MouseEvent) {
+  if (!isFullscreen.value && props.fullscreenEnabled && event.currentTarget instanceof HTMLElement) {
+    fullscreenTrigger = event.currentTarget;
+  }
+  toggleFullscreen();
+}
+
 let fallbackOverflow: string | null = null;
 let fullscreenDisposed = false;
+let fullscreenTrigger: HTMLElement | null = null;
+
+watch(isFullscreen, async (open) => {
+  if (open || !fullscreenTrigger) return;
+  const trigger = fullscreenTrigger;
+  fullscreenTrigger = null;
+  await nextTick();
+  if (trigger.isConnected && props.fullscreenEnabled && !isFullscreen.value) {
+    trigger.focus({ preventScroll: true });
+  }
+}, { flush: 'post' });
+
+function canEnterFullscreen() {
+  return props.active && props.fullscreenEnabled !== false && !fullscreenDisposed;
+}
+
+function containFallbackFocus(event: FocusEvent) {
+  if (fallbackOverflow !== null && props.fullscreenEnabled &&
+    event.target instanceof Node && !previewRoot.value?.contains(event.target)) {
+    focusPreviewContent();
+  }
+}
 
 async function enterPreviewFullscreen() {
   const root = previewRoot.value;
-  if (!props.active || !root?.isConnected) return;
+  if (!canEnterFullscreen() || !root?.isConnected) return;
   // Native fullscreen also handles Escape when focus is inside a PDF viewer
   // or a sandboxed HTML iframe, whose keyboard events cannot bubble here.
   if (root.requestFullscreen) {
     try {
       await root.requestFullscreen();
-      if (fullscreenDisposed || !props.active) {
+      if (!canEnterFullscreen()) {
         if (document.fullscreenElement === root) await document.exitFullscreen();
       } else {
         syncFullscreen();
@@ -200,7 +231,7 @@ async function enterPreviewFullscreen() {
       // available there, with Escape handled in the parent document.
     }
   }
-  if (fullscreenDisposed || !props.active || !root.isConnected) return;
+  if (!canEnterFullscreen() || !root.isConnected) return;
   if (fallbackOverflow === null) fallbackOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
   isFullscreen.value = true;
@@ -241,19 +272,21 @@ function onFullscreenEscape(event: KeyboardEvent) {
   void exitPreviewFullscreen();
 }
 
-watch(() => props.active, (active) => {
-  if (!active) void exitPreviewFullscreen();
+watch([() => props.active, () => props.fullscreenEnabled], () => {
+  if (!canEnterFullscreen()) void exitPreviewFullscreen();
 });
 
 onMounted(() => {
   document.addEventListener('fullscreenchange', syncFullscreen);
   window.addEventListener('keydown', onFullscreenEscape, true);
+  if (props.fullscreenEnabled !== undefined) document.addEventListener('focusin', containFallbackFocus);
 });
 
 onUnmounted(() => {
   fullscreenDisposed = true;
   document.removeEventListener('fullscreenchange', syncFullscreen);
   window.removeEventListener('keydown', onFullscreenEscape, true);
+  document.removeEventListener('focusin', containFallbackFocus);
   void exitPreviewFullscreen();
   clearFallbackFullscreen();
 });
@@ -902,10 +935,10 @@ onUnmounted(() => {
           >
             <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
           </t-button>
-          <t-button theme="default" variant="text" size="small" shape="square" :aria-pressed="isFullscreen"
+          <t-button v-if="fullscreenEnabled !== false || isFullscreen" theme="default" variant="text" size="small" shape="square" :aria-pressed="isFullscreen"
             :title="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
             :aria-label="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
-            @click="toggleFullscreen">
+            @click="onFullscreenButtonClick">
             <template #icon><t-icon :name="isFullscreen ? 'fullscreen-exit' : 'fullscreen'" /></template>
           </t-button>
         </div>

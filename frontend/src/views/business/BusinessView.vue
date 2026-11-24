@@ -145,13 +145,20 @@
           <template #header-actions>
             <t-button variant="outline" size="small" :disabled="writeLocked" @click="closeRecord">{{ openedFeedbackId ? $t('workbench.businessView.backList') : $t('workbench.businessView.closeDetail') }}</t-button>
           </template>
-          <div class="record-detail-body">
+          <div ref="recordBody" class="record-detail-body">
           <p v-if="detailLoading" role="status">{{ $t('workbench.businessView.loadingRecord') }}</p>
           <template v-else-if="detail">
           <t-tag variant="light" :theme="statusTagTheme(detail.status)">{{ stateLabel(detail) }}</t-tag><dl><dt>{{ $t('workbench.businessView.recordId') }}</dt><dd><code>{{ detail.id }}</code></dd><dt>{{ $t('workbench.businessView.currentVersion') }}</dt><dd>{{ detail.revision }}</dd><template v-if="kind==='feedback' && detail.submitted_at"><dt>{{ $t('workbench.businessView.submittedAtLabel') }}</dt><dd>{{ dateText(detail.submitted_at) }}</dd></template><template v-if="detail.topic && !inbox && !feedbackRestricted(detail)"><dt>{{ $t('workbench.businessView.topic') }}</dt><dd>{{ detail.topic }}</dd></template><template v-if="detail.risk"><dt>{{ $t('workbench.businessView.riskLabel') }}</dt><dd>{{ riskLabels[detail.risk]||detail.risk }}</dd><dt>{{ $t('workbench.businessView.colCoolingUntil') }}</dt><dd>{{ dateText(detail.ready_at) }}</dd></template><template v-if="(detail.document_id||detail.source_document_id) && !inbox && !feedbackRestricted(detail)"><dt>{{ $t('workbench.businessView.sourceDocument') }}</dt><dd>{{ docName(detail.document_id||detail.source_document_id, detail.knowledge_base_id || kb) }}</dd></template><template v-if="detail.target_document_id && !inbox && !feedbackRestricted(detail)"><dt>{{ kind==='revision'?$t('workbench.businessView.targetNewDocument'):$t('workbench.businessView.targetRelatedDocument') }}</dt><dd>{{ docName(detail.target_document_id, detail.target_knowledge_base_id || kb) }}</dd></template><template v-if="detail.confidence!==undefined"><dt>{{ $t('workbench.businessView.scoreField') }}</dt><dd>{{ detail.confidence.toFixed(2) }}</dd></template><template v-if="detail.edge_type==='attachment_of'&&(detail.effective_from||detail.effective_until)"><dt>{{ $t('workbench.businessView.attachmentEffectiveDate') }}</dt><dd>{{ dateText(detail.effective_from) }}<template v-if="detail.effective_until"> {{ $t('workbench.businessView.effectiveUntil',{date:dateText(detail.effective_until)}) }}</template></dd></template></dl>
           <t-alert v-if="detail.review_reason" theme="warning">{{ reviewReason(detail.review_reason) }}</t-alert>
           <t-alert v-if="detail.publish_error" theme="info" role="status">{{ publicationError(detail.publish_error) }}</t-alert>
-          <FeedbackDetail v-if="modernFeedback" :key="detail.id+':'+detail.revision" :record="detail" :kb="inbox?'':kb" :can-write="canReview" :locked="writeLocked" :document-name="docName" @approve="beginWrite('feedback_approve',$event,detail)" />
+          <div v-if="modernFeedback" @input.capture="feedbackDraftEdited = true" @change.capture="feedbackDraftEdited = true">
+            <FeedbackDetail :key="detail.id+':'+detail.revision" :record="detail" :kb="inbox?'':kb" :can-write="canReview" :locked="writeLocked" :document-name="docName" @approve="beginWrite('feedback_approve',$event,detail)" />
+          </div>
+          <div v-if="recordReaderEntries.length" class="actions">
+            <t-button v-for="entry in recordReaderEntries" :key="entry.key" :data-reader-evidence="entry.key" variant="outline" size="small" :disabled="writeLocked" @click="readRecord(entry)">
+              {{ $t(entry.right ? 'reader.compare' : 'reader.readOriginal') }}<template v-if="recordReaderEntries.length > 1"> · {{ docName(entry.left.id, entry.left.kb) }}</template>
+            </t-button>
+          </div>
           <template v-if="kind==='feedback' && !modernFeedback && detail.source==='qa'">
             <section v-if="detail.feedback_context" class="feedback-excerpt">
               <h3>{{ $t('workbench.businessView.qaExcerpt') }}</h3>
@@ -290,18 +297,20 @@ import BinaryRevisionPanel from './BinaryRevisionPanel.vue'
 import DocumentPicker from './DocumentPicker.vue'
 import ReadingRelationPreview from './ReadingRelationPreview.vue'
 import { moveTabFocus, requestFence } from '../lifecycle/model'
+import type { BusinessReaderState, ReaderSource, WorkbenchReaderRequest } from '@/stores/documentReader'
+import type { ReaderDocument } from '../document-reader/model'
 import { useI18n } from 'vue-i18n'
 import { actionLabel, actionsFor, associationQueryKeys, buildIntent, businessError, canActivate, clauseDecisionLabel, clauseDecisions, clauseRelation, date, edgeLabel, edgeLabels, feedbackRating, feedbackRatingLabel, feedbackRestricted, feedbackTriageActions, httpStatus, isAnswerFeedback, isInboxAction, readingRelation, relationReviewLabel, relationSentence, sampleReviewPending, shortID, statusLabel, type WriteIntent } from './model'
 
-const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean;inboxOnly?:boolean}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
+const props=defineProps<{section:api.BusinessSection;scope?:string;document?:{id:string;title:string};canWrite?:boolean;inboxOnly?:boolean;readerReturn?:BusinessReaderState;readerSource?:ReaderSource}>(),route=useRoute(),router=useRouter(),auth=useAuthStore()
 const { t, locale }=useI18n()
-const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string]}>()
+const emit=defineEmits<{locked:[value:boolean];changed:[];open:[id:string,title:string,knowledgeBaseID?:string];read:[request:WorkbenchReaderRequest]}>()
 const sections=[{key:'associations',labelKey:'workbench.business.associations'},{key:'feedback-governance',labelKey:'workbench.business.feedback'},{key:'revisions',labelKey:'workbench.business.revisions'}]
 const riskLabels=computed<Record<string,string>>(()=>({low:t('workbench.businessView.riskLow'),medium:t('workbench.businessView.riskMedium'),high:t('workbench.businessView.riskHigh')}))
 const heading=computed(()=>{const hit=sections.find(v=>v.key===props.section);return hit?t(hit.labelKey):t('workbench.business.fallback')})
 const subtitle=computed(()=>props.section==='associations'?t('workbench.business.subAssociations'):props.section==='revisions'?t('workbench.business.subRevisions'):t('workbench.business.subFeedback'))
 const feedbackTabsId=useId()
-const feedbackTab=ref<'feedback'|'guidance'|'inbox'>(props.inboxOnly?'inbox':'feedback')
+const feedbackTab=ref<'feedback'|'guidance'|'inbox'>(props.inboxOnly?'inbox':props.readerReturn?.feedbackTab || 'feedback')
 const inboxDenied=ref(false)
 const showInboxTab=computed(()=>props.section==='feedback-governance' && auth.isLoggedIn && auth.hasRole('admin') && !inboxDenied.value)
 const inbox=computed(()=>showInboxTab.value && feedbackTab.value==='inbox')
@@ -346,7 +355,75 @@ const knowledgeBases=ref<{id:string;name:string}[]>([]),kb=ref(''),loadingKB=ref
 const records=ref<api.BusinessRecord[]>([]),detail=ref<api.BusinessRecord>(),detailLoading=ref(false),page=ref(1),loading=ref(false),running=ref(false),error=ref(''),authorityError=ref(''),success=ref(''),formVersion=ref(0)
 const openedFeedbackId=ref('')
 const showFeedbackTabs=computed(()=>props.section==='feedback-governance' && !props.inboxOnly && !openedFeedbackId.value)
-const recordList=ref<HTMLElement>(),recordListHeading=ref<HTMLElement>()
+const recordList=ref<HTMLElement>(),recordListHeading=ref<HTMLElement>(),recordBody=ref<HTMLElement>()
+const feedbackDraftEdited=ref(false)
+let readerReturn=props.readerReturn
+const recordScroller=()=>recordList.value?.querySelector<HTMLElement>('.workspace-list-scroll')
+const detailScroller=()=>recordBody.value?.closest<HTMLElement>('.t-drawer__body')
+function readerState():BusinessReaderState {
+  return {
+    kb:kb.value, feedbackTab:feedbackTab.value, feedbackStatus:feedbackStatus.value, relationFilters:{...relationFilters.value}, page:page.value,
+    record:detail.value?.id || openedFeedbackId.value || undefined, queryDocument:queryDocument.value, queryScope:queryScope.value,
+    expandedRelation:expandedRelation.value, scroll:recordScroller()?.scrollTop || 0, detailScroll:detailScroller()?.scrollTop || 0,
+  }
+}
+function readerDirty() {
+  return createOpen.value || feedbackDraftEdited.value || !!clauseDecision.value || !!clauseDecisionNote.value
+    || !!sampleNote.value || sampleDecision.value==='failed'
+    || reviewedGuidance.value!==(detail.value?.reviewed_guidance || '')
+}
+defineExpose({readerState, readerDirty})
+
+type ReaderEntry = { key:string; left:ReaderDocument; right?:ReaderDocument }
+const recordReaderEntries=computed<ReaderEntry[]>(()=>{
+  const record=detail.value
+  if (!record || inbox.value || !kb.value || feedbackRestricted(record)) return []
+  const scope=record.knowledge_base_id || kb.value
+  if (kind.value==='feedback') {
+    const entries=new Map<string,ReaderEntry>()
+    for (const item of record.citation_chunks || []) {
+      const key=JSON.stringify([item.document_id,item.version_id])
+      if (item.document_id && item.version_id) entries.set(key,{key,left:{kb:scope,id:item.document_id,version:item.version_id}})
+    }
+    if (!entries.size) for (const id of record.citation_document_ids || []) {
+      if (id) entries.set(id,{key:id,left:{kb:scope,id}})
+    }
+    return [...entries.values()]
+  }
+  const source=record.source_document_id || record.document_id
+  if (!source || (kind.value!=='relation' && kind.value!=='revision')) return []
+  const left={kb:scope,id:source,version:record.source_version_id || undefined}
+  const right=record.target_document_id ? {kb:record.target_knowledge_base_id || scope,id:record.target_document_id,version:record.target_version_id || undefined} : undefined
+  return [{key:record.id,left,right}]
+})
+function readRecord(entry:ReaderEntry) {
+  if (writeLocked.value || !detail.value || !recordReaderEntries.value.includes(entry)) return
+  emit('read', {left:entry.left,right:entry.right,source:{kind:'business',section:props.section,record:detail.value.id,evidence:entry.key}})
+}
+async function restoreReaderState(saved:BusinessReaderState) {
+  const version=generation
+  feedbackStatus.value=feedbackStatusOptions.value.some(option=>option.value===saved.feedbackStatus) ? saved.feedbackStatus : ''
+  await nextTick()
+  if (version!==generation) return
+  relationFilters.value={...saved.relationFilters}
+  page.value=saved.page
+  queryScope.value=saved.queryScope
+  queryDocument.value=saved.queryDocument
+  await Promise.all([loadRecords(),queryRelated()])
+  if (version!==generation) return
+  if (visibleQueryRows.value.some((row,index)=>resultKey(row,index)===saved.expandedRelation)) expandedRelation.value=saved.expandedRelation
+  if (saved.record) await openRecord({id:saved.record})
+  await nextTick()
+  if (version!==generation) return
+  const list=recordScroller(), body=detailScroller()
+  if (list) list.scrollTop=saved.scroll
+  if (body) body.scrollTop=saved.detailScroll
+  const source=props.readerSource
+  if (source?.kind==='business' && source.record===detail.value?.id && source.section===props.section) {
+    const buttons=recordBody.value?.querySelectorAll<HTMLElement>('[data-reader-evidence]') || []
+    Array.from(buttons).find(button=>button.dataset.readerEvidence===source.evidence)?.focus({preventScroll:true})
+  }
+}
 const canReview=computed(()=>inbox.value || (!props.inboxOnly && feedbackTab.value!=='inbox' && canWrite.value))
 const modernFeedback=computed(()=>kind.value==='feedback' && !!detail.value && (inbox.value || feedbackRestricted(detail.value) || isAnswerFeedback(detail.value)))
 const recordActions=computed(()=>{
@@ -705,7 +782,10 @@ async function loadKBs(){
 function loadScope(){
   if(!kb.value&&!inbox.value)return
   if(kb.value&&!inbox.value)void loadAuthority()
-  if(kind.value==='relation')void restoreAssociation()
+  const saved=readerReturn
+  readerReturn=undefined
+  if(saved && saved.kb===kb.value && !inbox.value)void restoreReaderState(saved)
+  else if(kind.value==='relation')void restoreAssociation()
   else void loadRecords()
 }
 watch(kb,()=>{resetScope();loadScope()})
@@ -732,7 +812,7 @@ watch(showInboxTab,allowed=>{
   }
 },{flush:'sync'})
 watch(queryDocument,clearRelatedResult,{flush:'sync'})
-watch([()=>detail.value?.id,()=>detail.value?.revision],()=>{clauseDecision.value='';clauseDecisionNote.value='';reviewedGuidance.value=detail.value?.reviewed_guidance || ''})
+watch([()=>detail.value?.id,()=>detail.value?.revision],()=>{clauseDecision.value='';clauseDecisionNote.value='';reviewedGuidance.value=detail.value?.reviewed_guidance || '';sampleDecision.value='passed';sampleNote.value='';feedbackDraftEdited.value=false})
 watch(()=>auth.effectiveTenantId,()=>{
   if(!props.inboxOnly)feedbackTab.value='feedback'
   inboxDenied.value=false

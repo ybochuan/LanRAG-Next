@@ -4,17 +4,18 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档状态 | 最终设计稿（待代码实施与验收；不构成核心改动授权） |
+| 文档状态 | 实施中设计稿（P1 隔离浏览器验收完成；Windows Lite 桌面已部署并完成真实 DOCX 与附件面板验收；不构成核心改动授权） |
 | 日期 | 2026-11-24 |
 | 项目 | LanRAG-Next / LanRAG Lite（基于 WeKnora Lite） |
 | 审查分支 | `codex/m1-parser-routing` |
+| 实现提交 | `d6057e41`（`batch6-1-gd6057e41`；阅读中心源码仍在工作区，未提交） |
 | 冻结上游基线 | `Tencent/WeKnora` v0.9.0，`f17ee8a`（已核对 `BASELINE.txt`） |
 | 架构约束 | Frozen Architecture、Core + Extension Host、Bridge v1、`AGENTS.md`、`PATCHES.md` |
 | 建设方式 | 独立自研阅读中心 + 双文档对照 + 工作台联动 + 原生能力复用 |
 | 建议任务编号 | `DOC-STUDIO`（与原 M6 展示任务衔接，编号待维护者确认） |
 | 建议归档位置 | `docs/design/文档阅读中心与关联研读系统-v1.1.md` |
 
-> 本方案基于已读取的项目文档、当前分支相关源码和 WeKnora v0.9.0 原生预览实现进行静态设计。尚未运行项目、修改代码、执行迁移或部署。实施前须以本地工作区实际 HEAD、未提交变更、当前服务能力及真实 API 测试重新确认。本文不修改冻结架构，不自动授权核心受控区改动。v1.1 在本轮读取的 v1.0 完整文档与用户上传 AGENTS.md 基础上修订，复用此前静态源码审查和本轮主题/动效源码核对；未重新验证所有 API 或运行项目。
+> 本方案基于已读取的项目文档、当前分支相关源码和 WeKnora v0.9.0 原生预览实现进行静态设计。v1.1 定稿时尚未运行项目、修改代码、执行迁移或部署。截至 2026-11-24，工作区已按本方案完成 P1 主干与 P2/P3 部分实现，阅读中心 P1 已在隔离浏览器夹具中通过；实际源码映射、预览与权限矩阵、双实例验证见 [document-studio-source-mapping-2026-11-24](../evidence/document-studio-source-mapping-2026-11-24.md)。Windows Lite 安装版前端已切换至最终构建（2026-11-25 00:30，入口 SHA-256 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`），已用真实测试库完成 DOCX 单窗预览与附件面板验收；PDF／XLSX／图片格式矩阵、真实权限负向与既有业务链路仍待补测。本文不修改冻结架构，不自动授权核心受控区改动。
 
 ## 0. 执行摘要与核心裁决
 
@@ -362,7 +363,7 @@ frontend/src/
 │       │   └── relationLabels.ts
 │       └── tests/                # 按仓库现行测试目录惯例最终确定
 ├── components/
-│   ├── document-preview.vue      # 原生预览，保持不变
+│   ├── document-preview.vue      # 原生预览，增加可选 fullscreenEnabled 开关
 │   └── source-preview/           # 原生来源定位，保持不变
 ├── stores/
 │   └── documentReader.ts         # 自研阅读会话状态（Pinia）
@@ -438,7 +439,7 @@ sequenceDiagram
 
 - 只使用经过审计的公开 Props/Events 及原生工具函数，不通过内部 DOM、私有 ref 或 CSS hack 获取阅读状态。
 - 复用 `knowledgeId`、`fileName`、`fileType`、`active`、`fillHeight`、`toolbarTarget`、`sourceMode`、`locate`、`located`；`disableAutoFocus` 是当前 fork 能力，需进行上游接口差异测试。
-- 为每个窗格分配独立工具栏容器、唯一 key 与焦点边界；全屏使用单一活动窗格策略，保证 Esc、Teleport 与 body overflow 恢复。
+- 为每个窗格分配独立工具栏容器、唯一 key 与焦点边界；全屏使用单一活动窗格策略，保证 Esc、Teleport 与 body overflow 恢复。2026-11-24 实现：`DocumentReaderView.vue` 以 A/B 活动窗格决定 `fullscreenOwner`，`ReaderPane.vue` 传入独立 `toolbarTarget` 与 `fullscreenEnabled`；`document-preview.vue` 仅在 `active && fullscreenEnabled !== false` 时允许进入全屏，退出后恢复触发按钮焦点，fallback 全屏期间将焦点限制在预览根内，并保存/恢复 `document.body.style.overflow`。
 - `sourceBlob` 只接收已通过现有授权和版本证明的资源，不作为绕过原生预览/附件许可的手段。临时显示已授权勘误文本时走受控 Markdown 渲染，不伪造文件身份。
 - `ChatReferenceSourceView` 已具备 locator、引用状态和源文档深链接。可借鉴或在适合的受控场景复用其现成组合；不要复制整份组件，也不让它承担双栏编排。
 - 原生组件异常时显示原有错误/不支持格式提示；若适配层失效，原生知识库自身的预览路径仍然可用。
@@ -598,16 +599,16 @@ interface RelationProjectionItem {
 
 ## 11. 上游兼容与工程治理
 
-### 11.1 原生接线白名单（建议）
+### 11.1 原生接线白名单（建议与 2026-11-24 实际）
 
 | 范围 | 首期策略 | 变更风险 |
 | --- | --- | --- |
 | `frontend/src/router/index.ts` | 增加懒加载路由；退役阶段增加旧入口兼容 | 低至中：与上游路由变更可能冲突 |
 | `frontend/src/stores/menu.ts` | 增加一个菜单项，遵循现有图标及 capability 规则 | 低至中 |
 | 原生 i18n 资源 | 仅追加独立命名空间的必要键，按当前语言包约束同步 | 低至中 |
-| `document-preview.vue`、`PdfSourceViewer.vue` | 不修改；仅依赖已验证契约 | 直接合并冲突风险低，接口变动风险仍存在 |
-| `doc-content.vue`、`KnowledgeBase.vue` | 首期不修改 | 保留上游原生体验 |
-| 原生引用组件 | 首期不修改；后续可审议新增单一阅读入口 | 避免扩大改造 |
+| `document-preview.vue`、`PdfSourceViewer.vue` | `document-preview.vue` 仅增加可选 `fullscreenEnabled` prop（默认行为不变）；`PdfSourceViewer.vue` 不修改 | 中：需双实例、全屏、Esc 与焦点回归；已补原生调用方测试 |
+| `doc-content.vue`、`KnowledgeBase.vue` | `doc-content.vue` 增加“阅读原文”入口（`canPreview()` 时）；`KnowledgeBase.vue` 不修改 | 低：仅内部路由跳转 |
+| 原生引用组件 | `ChatReferenceSourceView.vue` 增加“阅读原文”入口（存在 `knowledgeBaseId`/`knowledgeId` 时） | 低：仅内部路由跳转，不改变引用展示 |
 | `internal/`、根 Go 依赖及原生数据库 | 首期零新增改动 | 若现有接口不足，必须另行审批薄转发 |
 | `extensions/` | 先复用已有接口；仅在明确缺口时新增独立只读聚合/适配 | 保持独立 module |
 | `PATCHES.md` | 记录必要接线、语义、测试及上游兼容点 | 防止补丁失控 |
@@ -661,7 +662,7 @@ P1 必须构成真实使用闭环，不是视觉占位原型。最低支持原�
 
 ### 12.2 P0 必要输出（小范围，支持 P1 立即开工）
 
-`docs/evidence/document-studio-source-mapping-YYYY-MM-DD.md`（建议）包含实际 HEAD、上游基线、AGENTS/工作区现状、现有原生/扩展能力与差异、预览与权限测试矩阵、双实例 PoC、旧图调用方清单、P1 文件清单及待批准薄补丁。历史资源和跨库不能证实时标记未核验，暂不开放相关能力；后续 P2 细节补查对应接口。静态审计不自动授权 PoC 写入或部署生产。
+`docs/evidence/document-studio-source-mapping-2026-11-24.md`（已生成）包含实际 HEAD、上游基线、AGENTS/工作区现状、现有原生/扩展能力与差异、预览与权限测试矩阵、双实例 PoC、旧图调用方清单、P1 文件清单及待批准薄补丁。历史资源和跨库不能证实时标记未核验，暂不开放相关能力；后续 P2 细节补查对应接口。静态审计不自动授权 PoC 写入或部署生产。
 
 ### 12.3 不纳入本专项（不安排开发排期）
 
@@ -779,24 +780,24 @@ P1 必须构成真实使用闭环，不是视觉占位原型。最低支持原�
 | 已实现接口尚未生产部署 | 中高 | 区分源码、隔离、生产；运行态能力验证后启用 |
 | 首期范围膨胀到差异计算、AI、原件归档 | 中 | 移出本专项排期，另行评审，不阻塞框架交付 |
 
-待评审确认：
+评审确认与实施状态（2026-11-24 更新）：
 
-- [ ] 批准独立「文档阅读中心」与 C+D 首期建设；原工作台继续专注治理。
-- [ ] 批准原 M6 节点连线式 UI 退役方向，保留底层事实和现有 API 兼容；退役执行在新视图通过后。
-- [ ] 确认首期仅原生前端菜单/路由/i18n 薄接线；不修改原生预览、知识库与 Go 核心。
-- [ ] 确认 P0 必要审计为 P1 对应能力门槛；历史原件不可读仅阻断该历史能力，不阻断普通原文骨架。
-- [ ] 确认同 ID 历史原件无可信获取能力时显示仅历史记录，不为首期擅自引入归档系统。
+- [x] 批准独立「文档阅读中心」与 C+D 首期建设；原工作台继续专注治理（TASK_BACKLOG.md DOC-STUDIO 授权）。
+- [ ] 批准原 M6 节点连线式 UI 退役方向，保留底层事实和现有 API 兼容；退役执行在新视图通过后（待确认）。
+- [x] 首期实际薄接线限定为原生前端菜单/路由/i18n、`doc-content.vue`/`ChatReferenceSourceView.vue` 的“阅读原文”入口及 `document-preview.vue` 可选 `fullscreenEnabled`；Go 核心零改动。
+- [x] P0 必要审计已生成：`docs/evidence/document-studio-source-mapping-2026-11-24.md`；历史原件不可读仅阻断该历史能力，不阻断普通原文骨架。
+- [x] 同 ID 历史原件无可信获取能力时显示仅历史记录，不引入归档系统。
 - [ ] 如实测需要专用聚合 API 或额外原生接线，提交准确文件与 DTO 的专项审批。
 
 ## 16. 依据与源码追溯
 
 ### 16.1 项目规范与设计文档
 
-- [AGENTS.md](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/AGENTS.md)：核心受控区、模块边界、验证与 TDesign/i18n 规范。
-- [BASELINE.txt](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/BASELINE.txt)：WeKnora v0.9.0 / `f17ee8a` 冻结基线。
-- [PROJECT_CONTEXT.md](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/PROJECT_CONTEXT.md)：工作台、业务族、附件、关系、治理与稳定事实。
-- [TASK_BACKLOG.md](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/TASK_BACKLOG.md)：实施/隔离验收/生产状态区分及既有任务。
-- [PATCHES.md](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/PATCHES.md)：原生薄补丁、M6、附件、MCP 等边界。
+- [AGENTS.md](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/AGENTS.md)：核心受控区、模块边界、验证与 TDesign/i18n 规范。
+- [BASELINE.txt](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/BASELINE.txt)：WeKnora v0.9.0 / `f17ee8a` 冻结基线。
+- [PROJECT_CONTEXT.md](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/PROJECT_CONTEXT.md)：工作台、业务族、附件、关系、治理与稳定事实。
+- [TASK_BACKLOG.md](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/TASK_BACKLOG.md)：实施/隔离验收/生产状态区分及既有任务。
+- [PATCHES.md](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/PATCHES.md)：原生薄补丁、M6、附件、MCP 等边界。
 - 项目资料库 `/LanRAGNEXT`：《AgentRAG 技术方案 v1.0 — Frozen Architecture》《文档关联总体改造》《文档工作台重新评估与路线-2026-11-16》《反馈资料设计方案》《Extension-Host-原生部署整合方案-2026-11-21》；具体实施以仓库最新版本为准，不将 11 月 20 日评审稿自动视为生产事实。
 
 ### 16.2 原生与自研关键源码（当前分支）
@@ -804,42 +805,44 @@ P1 必须构成真实使用闭环，不是视觉占位原型。最低支持原�
 | 路径（点击查看） | 主要核对点 |
 | --- | --- |
 | [原生上游 document-preview.vue](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/components/document-preview.vue) | 原生复用契约 |
-| [当前 fork document-preview.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/components/document-preview.vue) | Props/Events、焦点、全屏、Teleport、Blob |
-| [PdfSourceViewer.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/components/source-preview/PdfSourceViewer.vue) | 页面按需渲染与定位 |
-| [sourceLocator.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/utils/sourceLocator.ts) | 多格式来源定位结构 |
-| [ChatReferenceSourceView.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/components/ChatReferenceSourceView.vue) | 引用定位、原生知识库跳转 |
-| [KnowledgeBase.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/knowledge/KnowledgeBase.vue) | `knowledge_id` 自动打开详情 |
-| [doc-content.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/components/doc-content.vue) | 原生文件详情与解析视图 |
-| [LifecycleView.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/lifecycle/LifecycleView.vue) | 治理抽屉、tab、工作台锁及跳转 |
-| [BusinessView.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/business/BusinessView.vue) | 关系、反馈、修订、旧图入口 |
-| [ReadingRelationPreview.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/business/ReadingRelationPreview.vue) | 扩展组合原生预览先例 |
-| [ClauseEvidence.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/business/ClauseEvidence.vue) | 条款证据读取与降级 |
-| [FamilyWorkspaceView.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/families/FamilyWorkspaceView.vue) | 业务族与替代入口 |
-| [LineageView.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/lineage/LineageView.vue) | 待退役图 UI 与历史模式 |
-| [api/business.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/api/business.ts) | 关系、勘误、指纹证据及批量标题 |
-| [api/families.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/api/families.ts) | 业务族与替代时间线 |
-| [api/lifecycle.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/api/lifecycle.ts) | 生命周期详情 |
-| [api/lineage.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/api/lineage.ts) | 有边界图快照契约 |
-| [api/attachmentWorkbench.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/api/attachmentWorkbench.ts) | 附件归属、引用位置、名称映射 |
-| [internal/handler/knowledge.go](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/internal/handler/knowledge.go) | Viewer 预览、Editor 下载、附件许可与按 ID 读取 |
-| [internal/handler/extension_lifecycle.go](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/internal/handler/extension_lifecycle.go) | 原生 JWT 管理转发白名单与 scope |
-| [extensions/business/related.go](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/extensions/business/related.go) | QueryRelated 当前关系、版本核验与候选上限 |
-| [extensions/management/business.go](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/extensions/management/business.go) | 现有业务及勘误读取权限 |
-| [extensions/lineage/graph.go](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/extensions/lineage/graph.go) | 历史/来源/关系的有边界投影 |
-| [extensions/lineage/query.go](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/extensions/lineage/query.go) | 来源与版本历史查询分离、循环保护 |
-| [router/index.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/router/index.ts) / [stores/menu.ts](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/stores/menu.ts) | 原生接线及旧路由兼容 |
+| [当前 fork document-preview.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/components/document-preview.vue) | Props/Events、焦点、全屏、Teleport、Blob |
+| [PdfSourceViewer.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/components/source-preview/PdfSourceViewer.vue) | 页面按需渲染与定位 |
+| [sourceLocator.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/utils/sourceLocator.ts) | 多格式来源定位结构 |
+| [ChatReferenceSourceView.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/components/ChatReferenceSourceView.vue) | 引用定位、原生知识库跳转 |
+| [KnowledgeBase.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/knowledge/KnowledgeBase.vue) | `knowledge_id` 自动打开详情 |
+| [doc-content.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/components/doc-content.vue) | 原生文件详情与解析视图 |
+| [LifecycleView.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/lifecycle/LifecycleView.vue) | 治理抽屉、tab、工作台锁及跳转 |
+| [BusinessView.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/business/BusinessView.vue) | 关系、反馈、修订、旧图入口 |
+| [ReadingRelationPreview.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/business/ReadingRelationPreview.vue) | 扩展组合原生预览先例 |
+| [ClauseEvidence.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/business/ClauseEvidence.vue) | 条款证据读取与降级 |
+| [FamilyWorkspaceView.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/families/FamilyWorkspaceView.vue) | 业务族与替代入口 |
+| [LineageView.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/lineage/LineageView.vue) | 待退役图 UI 与历史模式 |
+| [api/business.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/api/business.ts) | 关系、勘误、指纹证据及批量标题 |
+| [api/families.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/api/families.ts) | 业务族与替代时间线 |
+| [api/lifecycle.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/api/lifecycle.ts) | 生命周期详情 |
+| [api/lineage.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/api/lineage.ts) | 有边界图快照契约 |
+| [api/attachmentWorkbench.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/api/attachmentWorkbench.ts) | 附件归属、引用位置、名称映射 |
+| [internal/handler/knowledge.go](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/internal/handler/knowledge.go) | Viewer 预览、Editor 下载、附件许可与按 ID 读取 |
+| [internal/handler/extension_lifecycle.go](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/internal/handler/extension_lifecycle.go) | 原生 JWT 管理转发白名单与 scope |
+| [extensions/business/related.go](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/extensions/business/related.go) | QueryRelated 当前关系、版本核验与候选上限 |
+| [extensions/management/business.go](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/extensions/management/business.go) | 现有业务及勘误读取权限 |
+| [extensions/lineage/graph.go](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/extensions/lineage/graph.go) | 历史/来源/关系的有边界投影 |
+| [extensions/lineage/query.go](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/extensions/lineage/query.go) | 来源与版本历史查询分离、循环保护 |
+| [router/index.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/router/index.ts) / [stores/menu.ts](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/stores/menu.ts) | 原生接线及旧路由兼容 |
 
 补充本版 UI/动效源文件：
 
 - [原生 theme.css](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/assets/theme/theme.css) / [useTheme.ts](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/composables/useTheme.ts)：灰白背景、绿色品牌、浅/深/系统主题。
 - [原生 ChatTimelineIcon.vue](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/components/ChatTimelineIcon.vue) / [chatTimelineIconMotion.ts](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/utils/chatTimelineIconMotion.ts) / [chat-timeline-loading.less](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/components/css/chat-timeline-loading.less)：状态驱动动画、减少动态效果和文字光影。当前 fork 同路径已有实现。
 - [原生 PanelResizeHandle.vue](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/components/PanelResizeHandle.vue) 的当前 fork 对应文件已核对：pointer/keyboard 拖拽、CSS zoom 处理。
-- [当前 fork platform/index.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/platform/index.vue)、[ModelSettings.vue](https://github.com/ybochuan/LanRAG-Next/blob/codex/m1-parser-routing/frontend/src/views/settings/ModelSettings.vue)、[原生图标离线守卫](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/utils/tdesign-icon-offline.ts)：应用骨架、页头、离线图标。
+- [当前 fork platform/index.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/platform/index.vue)、[ModelSettings.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/settings/ModelSettings.vue)、[原生图标离线守卫](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/utils/tdesign-icon-offline.ts)：应用骨架、页头、离线图标。
 - 用户本轮上传的 `AGENTS.md` §8.1–8.5 为 UI 强制规范依据，优先于本方案概念图和样式建议。
 
-链接为分支路径，内容可能随提交变化。上述源码审查未取得单一不可变提交快照；实施前需记录实际本地 HEAD 并重新核验，不能将当前文档视作源码永久承诺。
+上述 fork 源码链接已固定到实现提交 `d6057e412d7da147a2e1046799d06450f669be2d`（`batch6-1-gd6057e41`）；阅读中心新增文件尚在工作区、未提交，不能通过该提交访问。上游 WeKnora 链接固定到标签 `v0.9.0`（`f17ee8a`）。重新核验时须以实际本地 HEAD 和工作区 diff 为准，不能将当前文档视作源码永久承诺。
 
-## 附录 A：可直接交给 Codex 的首轮任务
+## 附录 A：首轮任务原文（实施前，已执行）
+
+以下保留发起 P0 时的任务原文，用于追溯范围；实际实施与验收状态见 §12.2 及 `docs/evidence/document-studio-source-mapping-2026-11-24.md`。
 
 ```text
 目标：依据《LanRAG-Next 文档阅读中心与关联研读系统 v1.1 — 原生复用与体验优先》实施准备。用户要求先完成整体框架，再逐步补细节；不要将本专项扩大为新平台。

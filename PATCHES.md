@@ -1,5 +1,11 @@
 # 原生薄补丁记录
 
+## DOC-STUDIO 阅读入口（2026-11-24）
+
+- `frontend/src/router/index.ts` 和 `frontend/src/stores/menu.ts` 注册 `/platform/reader`，复用平台的登录及初始化守卫。六语 `reader` 命名空间按同一键集维护。
+- `doc-content.vue`（`canPreview()` 时）和 `ChatReferenceSourceView.vue`（存在 `knowledgeBaseId`/`knowledgeId` 时）增加内部“阅读原文”路由入口，跳转携带 `state.readerSource=true`。工作台的返回位置和两窗状态由自研阅读模块管理。
+- `document-preview.vue` 新增可选 `fullscreenEnabled` prop（默认不传，原生旧调用行为不变）：仅 `active && fullscreenEnabled !== false` 时允许进入全屏，退出后恢复触发按钮焦点；fallback 全屏把焦点限制在预览根内，并保存/恢复 `body.style.overflow`。`PdfSourceViewer.vue` 不修改，Core 与 Host 接口继续使用原有实现。
+
 ## 文档清理提醒原生通知（2026-11-18）
 
 - 用户要求工作台文档列表与原生列表一致、清理提醒进入原生顶部铃铛。原生仅新增 `internal/handler/automation.go` 的 `NotifyCleanupAlert` 薄处理器、`internal/router/routes_automation.go` 的内部路由、`internal/middleware/auth.go` 的内部免 JWT 白名单，以及 `internal/handler/extension_lifecycle.go` 的 `business_cleanup_list` 只读动作白名单；固定使用管理密钥、服务端解析知识库 owner，不接收用户/角色/任意收件人。

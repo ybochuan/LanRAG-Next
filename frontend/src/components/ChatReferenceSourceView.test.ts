@@ -31,6 +31,7 @@ async function fixture(options: { details?: Record<string, unknown>; chunk?: Rec
     if (name === 'vue') return require('vue')
     if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
     if (name === 'vue-router') return { useRouter: () => ({ resolve: () => ({ href: '/knowledge' }) }) }
+    if (name === '@/views/document-reader/model') return require('../views/document-reader/model.ts')
     if (name === '@/api/knowledge-base/index') return {
       getKnowledgeDetails: async (id: string) => {
         requests.push(`details:${id}`)

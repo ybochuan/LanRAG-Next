@@ -17,6 +17,7 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
   let approved = false
   let overviewCalls = 0
   const prompts: string[] = []
+  const events: unknown[][] = []
   const modules: Record<string,unknown> = {
     vue: {...vue,onMounted(){},onBeforeUnmount(){}},
     'vue-router': {useRoute:()=>({query:{}}),useRouter:()=>({push(){}}),onBeforeRouteLeave(){}},
@@ -35,11 +36,23 @@ function setup(workspace: (kb:string,id:string) => Promise<unknown>, loseFirstRe
     '../business/CreateForm.vue':{},'../business/DocumentPicker.vue':{},'./FamilyDocumentPanel.vue':{},'../business/business.css':{},
   }
   const window = {confirm(message:string){prompts.push(message);return approved}}
-  const state = scope.run(()=>new Function('require','exports','window','defineProps','defineEmits',`${code}
-    return {kb,familyId,family,canWrite,members,recoverDocument,recoverReason,loadFamilies,loadView,recoverHead,approve,confirmSuggestions,perform,pending};
-  `)((id:string)=>modules[id],{},window,()=>props,()=>()=>{}))
-  return {state,calls,prompts,allow:()=>{approved=true},overviewCalls:()=>overviewCalls,stop:()=>scope.stop()}
+  const state = scope.run(()=>new Function('require','exports','window','defineProps','defineEmits','defineExpose',`${code}
+    return {kb,familyId,family,canWrite,members,recoverDocument,recoverReason,loadFamilies,loadView,recoverHead,approve,confirmSuggestions,perform,pending,compareReplacement,readerState};
+  `)((id:string)=>modules[id],{},window,()=>props,()=>(...args:unknown[])=>events.push(args),()=>{}))
+  return {state,calls,prompts,events,allow:()=>{approved=true},overviewCalls:()=>overviewCalls,stop:()=>scope.stop()}
 }
+
+test('a replacement compares the actual old and new documents with the known old pin', async () => {
+  const view = setup(async (_, id) => snapshot(id))
+  try {
+    view.state.kb.value = 'kb-family'; await vue.nextTick()
+    view.state.compareReplacement({ id: 'replacement', business_family_id: 'family', old_document_id: 'old', old_version_node_id: 'version-old', new_document_id: 'new' })
+    assert.deepEqual(view.events.at(-1), ['read', {
+      left: { kb: 'kb-family', id: 'old', version: 'version-old' }, right: { kb: 'kb-family', id: 'new' },
+      source: { kind: 'family', family: 'family', record: 'replacement', historyPreview: false },
+    }])
+  } finally { view.stop() }
+})
 
 const snapshot = (id: string) => ({family:{business_family_id:id,revision:2},can_write:true,members:[{document_id:id}],has_next:false})
 

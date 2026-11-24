@@ -18,6 +18,7 @@ function mountSetup(
   native: Record<string, unknown> = {},
 ) {
   const guards: (() => boolean | void)[] = []
+  const events: unknown[][] = []
   const scope = vue.effectScope()
   let overviewCalls = 0
   let nextID = 0
@@ -41,11 +42,37 @@ function mountSetup(
     '@/api/business': { documentTitle: async () => '', relationRecords: api.list, ...api },
     './CreateForm.vue': {}, './DocumentPicker.vue': {}, '../lifecycle/model': { requestFence }, './model': model,
   }
-  const state = scope.run(() => new Function('require', 'defineProps', 'defineEmits', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated,correctionSource,correctionSourceLoading,correctionSourceError,loadCorrectionSource};`)(
-    (id: string) => modules[id], () => props, () => () => {}, () => 0, () => {}, { addEventListener() {}, removeEventListener() {} }, {},
+  const state = scope.run(() => new Function('require', 'defineProps', 'defineEmits', 'defineExpose', 'setInterval', 'clearInterval', 'window', 'exports', `${code}\nreturn {kb,detail,pending,canWrite,perform,beginWrite,confirmWrite,resetScope,loadTitles,loadRecords,loadAuthority,loadKBs,titles,records,error,authorityError,feedbackTab,queryDocument,queryResult,queryRelated,correctionSource,correctionSourceLoading,correctionSourceError,loadCorrectionSource, recordReaderEntries, readRecord, readerState, restoreReaderState};`)(
+    (id: string) => modules[id], () => props, () => (...args: unknown[]) => events.push(args), () => {}, () => 0, () => {}, { addEventListener() {}, removeEventListener() {} }, {},
   ))
-  return { state, guards, props, overviewCalls: () => overviewCalls, stop: () => scope.stop() }
+  return { state, events, guards, props, overviewCalls: () => overviewCalls, stop: () => scope.stop() }
 }
+
+test('association reader uses the authorized record endpoints and their fixed versions', async () => {
+  const view = mountSetup({ list: async () => [] }, {}, { section: 'associations', scope: 'kb-a' })
+  try {
+    view.state.kb.value = 'kb-a'; await vue.nextTick()
+    view.state.detail.value = { id: 'relation-a', revision: 3, knowledge_base_id: 'kb-c', document_id: 'source',
+      source_version_id: 'v1', target_knowledge_base_id: 'kb-b', target_document_id: 'target', target_version_id: 'v3' }
+    view.state.readRecord(view.state.recordReaderEntries.value[0])
+    assert.deepEqual(view.events.at(-1), ['read', {
+      left: { kb: 'kb-c', id: 'source', version: 'v1' }, right: { kb: 'kb-b', id: 'target', version: 'v3' },
+      source: { kind: 'business', section: 'associations', record: 'relation-a', evidence: 'relation-a' },
+    }])
+    view.state.pending.value = { intent: { action: 'relation_confirm' } }
+    view.state.readRecord(view.state.recordReaderEntries.value[0])
+    assert.equal(view.events.filter(event => event[0] === 'read').length, 1)
+  } finally { view.stop() }
+})
+
+test('feedback with restricted evidence never offers a reader entry', async () => {
+  const view = mountSetup({ list: async () => [] }, {}, { section: 'feedback-governance', scope: 'kb-a' })
+  try {
+    view.state.kb.value = 'kb-a'; await vue.nextTick()
+    view.state.detail.value = { id: 'feedback-a', revision: 3, feedback_context: { snapshot_restricted: true }, citation_document_ids: ['protected'] }
+    assert.deepEqual(view.state.recordReaderEntries.value, [])
+  } finally { view.stop() }
+})
 
 const correctionQuery = { kb: 'kb-a', guidance: 'correction-a', correctionDocument: 'doc-a', correctionVersion: 'v1', correctionRevision: '2' }
 
