@@ -2,16 +2,16 @@
 
 - 日期：2026-11-24
 - 仓库：`D:\LanRAG-Next`
-- 分支/HEAD：`codex/m1-parser-routing` / `d6057e412d7da147a2e1046799d06450f669be2d`（`batch6-1-gd6057e41`）
+- 分支/HEAD：`codex/m1-parser-routing` / `5311e50385196b9a281a70e7a7d1ea87627a36f5`（`feat(doc-studio): add document reading center`；基线 `d6057e41` / `batch6-1-gd6057e41`）
 - 上游基线：`Tencent/WeKnora v0.9.0` / `f17ee8a`（`BASELINE.txt`）
-- 工作区状态：阅读中心实现仍为未提交改动；生成并更新本文件时有 27 个已修改文件、15 个未跟踪文件（含本文件），`internal/` 无 diff。本文记录实际源码映射、权限边界与已执行核验，不构成核心改动授权。
+- 工作区状态：阅读中心实现已提交并推送为 `5311e503`；提交前为 27 个已修改文件、15 个未跟踪文件，`internal/` 无 diff。本文记录实际源码映射、权限边界与已执行核验，不构成核心改动授权。
 
 ## 1. 边界与约束
 
 - `internal/` 为受控区，本轮未修改；`git diff -- internal/` 为空。
 - `extensions/` 为独立 Go module；未新增对 WeKnora `internal/` 包的 import、require 或 replace。
 - 前端改动位于 `frontend/`；全部可见文案进入六语 locale，TDesign token 与原生页面骨架为 UI 基准。
-- 不提交、不推送。Windows Lite 安装版前端已于 2026-11-25 00:30 切换至最终构建，入口 SHA-256 为 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`；回滚目录为 `resources/web-backup-20261125-0030`。
+- 已按用户指令于 2026-11-25 00:33 提交并推送 `5311e503`。Windows Lite 安装版前端已于 2026-11-25 00:30 切换至最终构建，入口 SHA-256 为 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`；回滚目录为 `resources/web-backup-20261125-0030`。
 
 ## 2. 原生预览契约
 
