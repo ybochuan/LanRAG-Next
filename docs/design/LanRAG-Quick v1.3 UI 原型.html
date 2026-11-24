@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>LanRAG Quick v1.3 · UI 原型</title>
+<style>
+:root {
+  --canvas:#eef1f5; --surface:#fff; --soft:#f6f8fb; --ink:#172335; --muted:#536377;
+  --line:#d8e0ea; --blue:#2055c7; --blue-ink:#1746ae; --blue-soft:#edf3ff; --focus:#4476e0;
+  --green:#126847; --green-soft:#e8f6ef; --amber:#805000; --amber-soft:#fff3dc;
+  --radius:6px; --shadow:0 16px 42px rgb(32 47 72 / 10%);
+  font:14px/1.55 "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  color:var(--ink); background:var(--canvas);
+}
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+body, h1, h2, h3, p { margin:0; }
+h1, h2 { font-size:20px; }
+h3 { font-size:16px; }
+button, input, select, textarea { font:inherit; color:inherit; }
+button { cursor:pointer; }
+button:disabled { cursor:default; opacity:.55; }
+:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
+input:not([type="checkbox"]), textarea, select {
+  padding:7px 10px; min-width:0; width:100%; border:1px solid var(--line); border-radius:3px; background:var(--surface);
+}
+input[type="checkbox"] { accent-color:var(--blue); }
+textarea { resize:vertical; }
+.muted { color:var(--muted); }
+.small { font-size:12px; }
+.mono { font:12px Consolas,monospace; overflow-wrap:anywhere; }
+.topbar { background:var(--surface); border-bottom:1px solid var(--line); }
+.topbar > div { display:flex; align-items:center; gap:12px; max-width:1240px; margin:auto; padding:21px 28px; }
+.brand-icon {
+  display:grid; place-items:center; width:39px; height:39px; border-radius:9px;
+  background:var(--blue); color:#fff; font:700 22px "Segoe UI",sans-serif;
+}
+.version { margin-left:5px; color:var(--muted); font-size:13px; font-weight:500; }
+.prototype { margin-left:auto; text-align:right; }
+main { max-width:1240px; padding:24px 28px 32px; margin:auto; }
+.tabs { display:flex; align-items:center; gap:3px; min-width:0; }
+.tabs button {
+  flex:1 1 auto; padding:7px 12px; border:1px solid transparent; border-radius:3px;
+  background:transparent; color:var(--muted); font-weight:600; white-space:nowrap;
+}
+.tabs button[aria-selected="true"] { color:var(--blue-ink); background:var(--blue-soft); }
+.tabs button:hover { color:var(--blue-ink); }
+.main-tabs { width:max-content; max-width:100%; padding:4px; margin-bottom:15px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); }
+.window { min-width:0; overflow:hidden; border:1px solid var(--line); border-radius:9px; background:var(--surface); box-shadow:var(--shadow); }
+.window-chrome { display:flex; align-items:center; gap:12px; min-height:49px; padding:9px 16px; background:#f0f3f8; border-bottom:1px solid var(--line); }
+.dots { display:flex; gap:5px; color:#8490a4; }
+.dots i { width:7px; height:7px; border-radius:50%; background:currentColor; }
+.address { flex:1; padding:5px 9px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); color:var(--muted); }
+.browser-layout, .review-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(315px,372px); min-height:530px; }
+.example-webpage { min-width:0; padding:clamp(22px,4vw,64px); background:#fbfaf7; }
+.example-webpage article { max-width:530px; }
+.example-webpage h2 { margin:11px 0 9px; font:600 clamp(24px,3.5vw,37px)/1.3 "Georgia","Songti SC",SimSun,serif; }
+.article-body { display:grid; gap:14px; padding-top:19px; margin-top:25px; border-top:1px solid var(--line); font-size:15px; line-height:1.85; }
+mark { color:inherit; background:#e4edff; }
+.sidebar, .review-detail { min-width:0; border-left:1px solid var(--line); }
+.surface-heading, .review-heading { display:flex; align-items:center; justify-content:space-between; gap:9px; padding:16px 18px 12px; }
+.surface-heading h2 { font-size:16px; }
+.surface-tabs { padding:0 13px 8px; border-bottom:1px solid var(--line); }
+.surface-content, .detail-body { display:grid; align-content:start; gap:13px; padding:16px 18px; }
+.fields { display:grid; gap:6px; }
+.fields > label, .field-label { font-size:13px; font-weight:600; }
+.card, .snapshot, .answer {
+  min-width:0; padding:11px 12px; border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--soft); overflow-wrap:anywhere;
+}
+.snapshot { white-space:pre-wrap; min-height:77px; }
+.actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.actions.space { justify-content:space-between; }
+.action, .control, .link { min-height:32px; padding:5px 10px; border:1px solid transparent; border-radius:3px; font-weight:600; line-height:1.4; }
+.action { color:#fff; background:var(--blue); }
+.action:hover:not(:disabled) { background:var(--blue-ink); }
+.control { border-color:var(--line); background:var(--surface); }
+.control:hover:not(:disabled) { color:var(--blue-ink); border-color:var(--blue); }
+.link { background:transparent; color:var(--blue-ink); }
+.link:hover { text-decoration:underline; }
+.status { display:inline-flex; width:max-content; max-width:100%; padding:2px 7px; border-radius:3px; background:var(--soft); color:var(--muted); font-size:12px; white-space:nowrap; }
+.status[data-tone="blue"] { background:var(--blue-soft); color:var(--blue-ink); }
+.status[data-tone="green"] { background:var(--green-soft); color:var(--green); }
+.status[data-tone="amber"] { background:var(--amber-soft); color:var(--amber); }
+.icon-square {
+  width:34px; height:34px; flex:0 0 34px; display:grid; place-items:center; border-radius:var(--radius);
+  background:var(--blue-soft); color:var(--blue-ink); font-size:11px; font-weight:700;
+}
+.qa-pair + .qa-pair, .answer { margin-top:5px; }
+.desktop-stage {
+  display:grid; grid-template-columns:minmax(195px,270px) minmax(0,545px); align-items:start; justify-content:center;
+  gap:clamp(20px,4vw,62px); min-height:525px; padding:52px 28px; border:1px solid var(--line); border-radius:9px;
+  background:linear-gradient(145deg,#e6ecf8,#eff3fa 63%,#dde7f8);
+}
+.entry-path { align-self:center; }
+.entry-path ol { display:grid; gap:8px; margin:12px 0 0; padding-left:22px; }
+.desktop-window .window-chrome { justify-content:space-between; }
+.files { border:1px solid var(--line); border-radius:var(--radius); }
+.file-item { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px; }
+.file-item + .file-item { border-top:1px solid var(--line); }
+.file-copy { flex:1 1 130px; min-width:0; overflow-wrap:anywhere; }
+.file-copy > span { display:block; }
+.review-heading { padding:20px 22px; }
+.review-layout { border-top:1px solid var(--line); }
+.inbox-top { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 15px; border-bottom:1px solid var(--line); background:var(--soft); }
+.inbox-top select { width:auto; max-width:60%; }
+.queue-entry {
+  display:flex; align-items:center; width:100%; gap:10px; padding:13px 15px;
+  border:0; border-bottom:1px solid var(--line); text-align:left; background:var(--surface);
+}
+.queue-entry[aria-pressed="true"] { background:var(--blue-soft); }
+.queue-entry:hover strong { color:var(--blue-ink); }
+.empty { margin:20px 14px; color:var(--muted); }
+.detail-data { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:6px 12px; margin:0; }
+.detail-data dt { color:var(--muted); }
+.detail-data dd { margin:0; overflow-wrap:anywhere; }
+[data-tone="amber"].message { padding:9px; background:var(--amber-soft); color:var(--amber); border-radius:3px; }
+.toast {
+  position:fixed; z-index:2; inset:auto 20px 16px auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  max-width:min(450px,calc(100vw - 40px)); padding:8px 10px 8px 14px; background:var(--surface);
+  border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
+}
+.toast:empty { display:none; }
+@media (max-width:760px) {
+  .topbar > div { padding:14px 12px; gap:8px; }
+  .brand-icon { width:30px; height:30px; font-size:17px; }
+  .prototype { font-size:11px; }
+  h1 { font-size:16px; }
+  main { padding:15px 12px 26px; }
+  .main-tabs { width:100%; }
+  .main-tabs button { padding-inline:4px; font-size:12px; }
+  .browser-layout, .desktop-stage, .review-layout { grid-template-columns:minmax(0,1fr); min-height:auto; }
+  .example-webpage { padding:18px; }
+  .article-body { display:none; }
+  .sidebar, .review-detail { border-left:0; border-top:1px solid var(--line); }
+  .desktop-stage { padding:18px 12px; gap:15px; }
+  .entry-path ol { display:flex; align-items:center; gap:9px; flex-wrap:wrap; list-style:none; padding-left:0; }
+  .entry-path li + li::before { content:"› "; color:var(--muted); }
+  .review-heading { padding:14px; }
+}
+</style>
+</head>
+<body>
+<header class="topbar"><div>
+  <span class="brand-icon" aria-hidden="true">Q</span>
+  <h1>LanRAG Quick <span class="version">v1.3</span></h1>
+  <span class="prototype muted small">离线交互原型 · 示例数据</span>
+</div></header>
+<main>
+<nav aria-label="原型视图">
+  <div class="tabs main-tabs" role="tablist" aria-label="客户端与工作台" id="main-tabs">
+    <button id="tab-chrome" role="tab" aria-controls="view-chrome" aria-selected="true">Chrome 侧栏</button>
+    <button id="tab-desktop" role="tab" aria-controls="view-desktop" aria-selected="false" tabindex="-1">Windows 快捷导入</button>
+    <button id="tab-review" role="tab" aria-controls="view-review" aria-selected="false" tabindex="-1">待审工作台</button>
+  </div>
+</nav>
+  <section class="window" id="view-chrome" role="tabpanel" aria-labelledby="tab-chrome">
+    <div class="window-chrome"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="address mono">https://example.com/handbook/handover</span>
+    </div>
+    <div class="browser-layout">
+      <div class="example-webpage"><article>
+        <span class="muted small">项目手册 / 交付流程</span>
+        <h2>项目交付检查清单</h2>
+        <p class="muted small">交付前核对与签署</p>
+        <div class="article-body">
+          <p>项目交付前应核对归档范围、对应负责人和材料版本。</p>
+          <p><mark>验收负责人确认交付物清单后，将签署版本放入项目归档目录。补传的材料单独记录提交时间和来源。</mark></p>
+          <p>对于仍需补充的材料，在交接记录中标明负责人和预计完成时间。</p>
+        </div>
+      </article></div>
+      <aside class="sidebar" aria-label="LanRAG Quick 侧栏">
+        <div class="surface-heading"><h2>LanRAG Quick</h2><span class="status">侧栏</span></div>
+        <div class="tabs surface-tabs" role="tablist" aria-label="Chrome 侧栏功能" id="chrome-tabs">
+          <button id="tab-clip" role="tab" aria-controls="chrome-clip" aria-selected="true">剪藏</button>
+          <button id="tab-note" role="tab" aria-controls="chrome-note" aria-selected="false" tabindex="-1">速记</button>
+          <button id="tab-qa" role="tab" aria-controls="chrome-qa" aria-selected="false" tabindex="-1">问答</button>
+        </div>
+        <section id="chrome-clip" role="tabpanel" aria-labelledby="tab-clip"><div class="surface-content">
+          <div class="fields"><label for="clip-mode">剪藏范围</label>
+            <select id="clip-mode"><option value="selected">划选内容</option><option value="body">当前页正文</option><option value="link">仅保存链接</option></select>
+          </div>
+          <div class="fields"><span class="field-label">快照预览</span>
+            <div class="card"><strong>项目交付检查清单</strong><p class="mono muted">https://example.com/handbook/handover</p></div>
+            <p class="snapshot" id="clip-preview"></p>
+          </div>
+          <div class="actions space"><span class="muted small">目标库 · 项目资料库</span><button class="action" id="send-clip">送审</button></div>
+        </div></section>
+        <section id="chrome-note" role="tabpanel" aria-labelledby="tab-note" hidden><div class="surface-content">
+          <div class="fields"><label for="note-title">标题</label><input id="note-title" maxlength="80" value="交付复盘手记"></div>
+          <div class="fields"><label for="note-text">Markdown 笔记</label><textarea id="note-text" rows="5" maxlength="4000">## 待确认
+- 更新归档负责人
+- 补充最终签署时间</textarea></div>
+          <label class="small"><input type="checkbox" id="note-source"> 附上当前网页出处</label>
+          <div class="fields"><span class="field-label">预览</span><div class="snapshot" id="note-preview"></div></div>
+          <div class="actions"><button class="control" id="save-note">保存草稿</button><button class="action" id="send-note">送审</button></div>
+        </div></section>
+        <section id="chrome-qa" role="tabpanel" aria-labelledby="tab-qa" hidden>
+          <form class="surface-content" id="qa-form">
+            <div class="fields"><label for="qa-scope">示例已授权知识库</label>
+              <select id="qa-scope"><option>项目资料库</option><option>运营手册库</option></select>
+            </div>
+            <div id="qa-thread" aria-live="polite" hidden></div>
+            <div class="fields"><label for="qa-question">向知识库提问</label><input id="qa-question" required maxlength="200" placeholder="交付前要核对哪些材料？"></div>
+            <div class="actions"><button class="action" type="submit">提问</button></div>
+          </form>
+        </section>
+      </aside>
+    </div>
+  </section>
+  <section id="view-desktop" role="tabpanel" aria-labelledby="tab-desktop" hidden>
+    <div class="desktop-stage">
+      <div class="entry-path"><h2>Windows 快捷导入</h2>
+        <nav aria-label="文件资源管理器入口"><ol class="muted">
+          <li>资源管理器右键</li><li>发送到</li><li><button class="control" id="explorer-example">LanRAG 待审</button></li>
+        </ol></nav>
+      </div>
+      <div class="window desktop-window">
+        <div class="window-chrome"><strong>快捷导入</strong><span class="small muted">LanRAG Desktop</span></div>
+        <div class="surface-heading"><h2>送入待审</h2><span class="status">项目资料库</span></div>
+        <div class="tabs surface-tabs" role="tablist" aria-label="桌面导入类型" id="desktop-tabs">
+          <button id="tab-files" role="tab" aria-controls="desktop-files" aria-selected="true">文件</button>
+          <button id="tab-url" role="tab" aria-controls="desktop-url" aria-selected="false" tabindex="-1">URL</button>
+        </div>
+        <section id="desktop-files" role="tabpanel" aria-labelledby="tab-files"><div class="surface-content">
+          <div id="file-list" class="files"></div>
+          <div class="actions space"><button class="control" id="more-files">添加示例文件</button><button class="action" id="send-files">送审所选文件</button></div>
+        </div></section>
+        <section id="desktop-url" role="tabpanel" aria-labelledby="tab-url" hidden>
+          <form class="surface-content" id="url-form">
+            <div class="fields"><label for="desktop-link">网页链接</label><input type="url" id="desktop-link" maxlength="2048" value="https://example.com/handbook/operations" required></div>
+            <div class="fields"><label for="desktop-link-title">标题（可选）</label><input id="desktop-link-title" maxlength="80" value="项目运营手册"></div>
+            <div class="card"><strong>仅保存链接</strong><p class="small muted">生成一条链接笔记。</p></div>
+            <p id="link-error" class="small message" data-tone="amber" aria-live="polite" hidden></p>
+            <div class="actions space"><button class="link" type="button" id="open-chrome">在 Chrome 剪藏正文</button><button class="action" type="submit">送审链接</button></div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section class="window" id="view-review" role="tabpanel" aria-labelledby="tab-review" hidden>
+    <header class="review-heading"><div><h2>待审工作台</h2><p class="muted small">核对快照和目标库，审核后提交解析。</p></div><span class="status" id="inbox-total"></span></header>
+    <div class="review-layout">
+      <section aria-label="送审记录">
+        <div class="inbox-top"><label for="status-filter">送审记录</label>
+          <select id="status-filter"><option value="all">全部状态</option><option value="pending">待审</option><option value="submitted">已提交解析</option><option value="unknown">待核对</option><option value="active">已可检索</option></select>
+        </div>
+        <div id="inbox-list"></div>
+      </section>
+      <section class="review-detail" aria-label="审批详情" id="review-detail"></section>
+    </div>
+  </section>
+</main>
+<aside class="toast" id="toast" aria-label="操作反馈"></aside>
+<script>
+"use strict";
+const get = (id) => document.getElementById(id);
+const articleUrl = "https://example.com/handbook/handover";
+const contents = {
+  selected: "验收负责人确认交付物清单后，将签署版本放入项目归档目录。补传的材料单独记录提交时间和来源。",
+  body: "项目交付前应核对归档范围、对应负责人和材料版本。\n\n验收负责人确认交付物清单后，将签署版本放入项目归档目录。补传的材料单独记录提交时间和来源。\n\n对于仍需补充的材料，在交接记录中标明负责人和预计完成时间。",
+  link: articleUrl
+};
+const statuses = {
+  pending: { label: "待审", tone: "blue" },
+  submitted: { label: "已提交解析", tone: "blue" },
+  unknown: { label: "待核对", tone: "amber" },
+  active: { label: "已可检索", tone: "green" }
+};
+const types = {
+  file: { label: "文件", icon: "文件" },
+  page: { label: "网页剪藏", icon: "网页" },
+  note: { label: "速记", icon: "速记" },
+  link: { label: "链接笔记", icon: "链接" }
+};
+const inbox = [
+  { id: "r-file", title: "交付材料签收单.pdf", kind: "file", status: "pending", origin: "Windows · 发送到", library: "项目资料库", body: "原文件快照预览（示例）\n\n签收范围：交付清单、验收记录及签署页。\n大小：284 KB" },
+  { id: "r-page", title: "归档规范", kind: "page", status: "pending", origin: "https://example.com/handbook/archive", library: "项目资料库", body: "归档前记录文件版本、交付日期和实际负责人。审批人核对本次剪藏的文本快照。" },
+  { id: "r-note", title: "培训反馈摘录", kind: "note", status: "unknown", origin: "Chrome · 速记", library: "项目资料库", body: "## 培训反馈\n- 在发现资料缺漏时标明补交时间。\n- 记录材料最终版本。" },
+  { id: "r-link", title: "原型评审指引", kind: "link", status: "active", origin: "https://example.com/handbook/review", library: "项目资料库", body: "链接笔记 · 原型评审指引\nhttps://example.com/handbook/review" }
+];
+const samples = [
+  { title: "项目验收清单.pdf", size: "284 KB", content: "文件示例 · 验收清单\n内容：交付项、验收情况、签署人。" },
+  { title: "交付会议纪要.docx", size: "32 KB", content: "文件示例 · 交付会议纪要\n内容：同步提交日期与材料负责人。" },
+  { title: "归档批次记录.xlsx", size: "58 KB", content: "文件示例 · 归档批次记录\n内容：版本号与材料归档时间。" },
+  { title: "提交物清单.md", size: "4 KB", content: "文件示例 · 提交物清单\n- 交付明细\n- 各模块联系人" }
+];
+const files = [];
+let recordIndex = 0;
+let selectedRecord = inbox[0].id;
+let toastTimer = 0;
+let qaCount = 0;
+
+function element(tag, className, label) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (label !== undefined) node.textContent = label;
+  return node;
+}
+
+function wireTabs(listId) {
+  const tabs = Array.from(get(listId).querySelectorAll('[role="tab"]'));
+  function activate(tab, focus) {
+    for (const item of tabs) {
+      const selected = item === tab;
+      item.setAttribute("aria-selected", selected);
+      item.tabIndex = selected ? 0 : -1;
+      get(item.getAttribute("aria-controls")).hidden = !selected;
+    }
+    if (focus) tab.focus();
+  }
+  tabs.forEach(function (tab, index) {
+    tab.addEventListener("click", function () { activate(tab, false); });
+    tab.addEventListener("keydown", function (event) {
+      let position;
+      if (event.key === "ArrowLeft") position = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === "ArrowRight") position = (index + 1) % tabs.length;
+      if (event.key === "Home") position = 0;
+      if (event.key === "End") position = tabs.length - 1;
+      if (position === undefined) return;
+      event.preventDefault();
+      activate(tabs[position], true);
+    });
+  });
+  return function (id) { activate(get(id), true); };
+}
+const goTo = wireTabs("main-tabs");
+const chromeTab = wireTabs("chrome-tabs");
+const desktopTab = wireTabs("desktop-tabs");
+
+function badge(label, tone) {
+  const node = element("span", "status", label);
+  node.dataset.tone = tone || "";
+  return node;
+}
+
+function flash(message, receipt) {
+  const toast = get("toast");
+  clearTimeout(toastTimer);
+  const label = element("p", "", message);
+  label.setAttribute("role", "status");
+  toast.replaceChildren(label);
+  if (receipt) {
+    const open = element("button", "link", "查看待审");
+    open.addEventListener("click", function () {
+      get("status-filter").value = "all";
+      selectedRecord = receipt;
+      updateInbox();
+      goTo("tab-review");
+      toast.replaceChildren();
+    });
+    toast.append(open);
+  }
+  const dismiss = element("button", "link", "关闭");
+  dismiss.addEventListener("click", function () { toast.replaceChildren(); });
+  toast.append(dismiss);
+  toastTimer = window.setTimeout(function () {
+    if (!toast.contains(document.activeElement)) toast.replaceChildren();
+  }, 8500);
+}
+
+function addRecord(item) {
+  const id = "demo-" + (++recordIndex);
+  inbox.unshift({ id: id, status: "pending", library: "项目资料库", ...item });
+  updateInbox();
+  return id;
+}
+
+function clipChange() {
+  get("clip-preview").textContent = contents[get("clip-mode").value];
+}
+get("clip-mode").addEventListener("change", clipChange);
+get("send-clip").addEventListener("click", function () {
+  const mode = get("clip-mode").value;
+  const id = addRecord({ title: "项目交付检查清单", kind: mode === "link" ? "link" : "page", origin: articleUrl, body: contents[mode] });
+  flash("剪藏已送入待审。", id);
+});
+
+try {
+  const saved = JSON.parse(localStorage.getItem("lanrag-quick-ui-demo-note") || "null");
+  if (saved && typeof saved.title === "string" && typeof saved.text === "string") {
+    get("note-title").value = saved.title;
+    get("note-text").value = saved.text;
+    get("note-source").checked = saved.source === true;
+  }
+} catch {}
+function renderNote() {
+  const preview = get("note-preview");
+  preview.replaceChildren();
+  for (const line of get("note-text").value.split(/\r?\n/)) {
+    if (/^#{1,6}\s/.test(line)) preview.append(element("strong", "", line.replace(/^#{1,6}\s+/, "")));
+    else preview.append(document.createTextNode(line.replace(/^-\s+/, "• ")));
+    preview.append(document.createElement("br"));
+  }
+}
+get("note-text").addEventListener("input", renderNote);
+get("save-note").addEventListener("click", function () {
+  try {
+    localStorage.setItem("lanrag-quick-ui-demo-note", JSON.stringify({
+      title: get("note-title").value, text: get("note-text").value, source: get("note-source").checked
+    }));
+    flash("草稿已保存到本机预览。");
+  } catch {
+    flash("浏览器未允许本地存储，草稿保留在当前预览。");
+  }
+});
+get("send-note").addEventListener("click", function () {
+  const body = get("note-text").value.trim();
+  if (!body) { flash("请先输入笔记内容。"); get("note-text").focus(); return; }
+  const id = addRecord({ title: get("note-title").value.trim() || "未命名笔记", kind: "note", body: body, origin: get("note-source").checked ? articleUrl : "Chrome · 速记" });
+  flash("笔记已送入待审。", id);
+});
+
+get("qa-form").addEventListener("submit", function (event) {
+  event.preventDefault();
+  const question = get("qa-question").value.trim();
+  if (!question) return;
+  const operations = get("qa-scope").selectedIndex === 1;
+  const pair = element("div", "qa-pair");
+  const answer = element("div", "answer");
+  pair.append(element("p", "small muted", question));
+  answer.append(element("p", "", operations
+    ? "运营交接应核对联系人、归档位置和待补事项，方便下一班继续处理。"
+    : "交付前核对交付清单、签署版本和归档负责人。缺件应标明预计补交时间。"));
+  const ref = element("button", "link", operations ? "引用 [1] 运营交接手册" : "引用 [1] 项目交付手册");
+  const detail = element("p", "small muted", operations
+    ? "示例运营交接手册 §2 · 交接记录包含负责人和提交时间。"
+    : "示例项目交付手册 §3 · 归档时保留签署版本，并登记待补材料。");
+  ref.type = "button";
+  detail.id = "qa-ref-" + (++qaCount);
+  detail.hidden = true;
+  ref.setAttribute("aria-controls", detail.id);
+  ref.setAttribute("aria-expanded", "false");
+  ref.addEventListener("click", function () {
+    detail.hidden = !detail.hidden;
+    ref.setAttribute("aria-expanded", !detail.hidden);
+  });
+  answer.append(ref, detail);
+  pair.append(answer);
+  get("qa-thread").hidden = false;
+  get("qa-thread").append(pair);
+  get("qa-question").value = "";
+});
+get("qa-scope").addEventListener("change", function () {
+  get("qa-thread").replaceChildren();
+  get("qa-thread").hidden = true;
+});
+
+function appendFile() {
+  const sample = samples[files.length];
+  if (sample) files.push({ ...sample, selected: true, sent: false });
+}
+function setFileAction() {
+  get("send-files").disabled = !files.some((file) => file.selected && !file.sent);
+}
+function updateFiles() {
+  const list = get("file-list");
+  list.replaceChildren();
+  for (const file of files) {
+    const row = element("label", "file-item");
+    const check = element("input");
+    check.type = "checkbox";
+    check.checked = file.selected;
+    check.disabled = file.sent;
+    check.setAttribute("aria-label", "选择 " + file.title);
+    check.addEventListener("change", function () { file.selected = check.checked; setFileAction(); });
+    const copy = element("span", "file-copy");
+    copy.append(element("strong", "", file.title), element("span", "small muted", file.size));
+    row.append(check, element("span", "icon-square", "文件"), copy, badge(file.sent ? "已提交待审" : "待发送", file.sent ? "blue" : ""));
+    list.append(row);
+  }
+  get("more-files").disabled = files.length >= samples.length;
+  setFileAction();
+}
+get("explorer-example").addEventListener("click", function () {
+  desktopTab("tab-files");
+  flash("已选中资源管理器中的示例文件。");
+});
+get("more-files").addEventListener("click", function () { appendFile(); updateFiles(); });
+get("send-files").addEventListener("click", function () {
+  const picked = files.filter((file) => file.selected && !file.sent);
+  let receipt;
+  for (const file of picked) {
+    receipt = addRecord({ title: file.title, kind: "file", origin: "Windows · 发送到", body: file.content + "\n大小：" + file.size });
+    file.sent = true;
+    file.selected = false;
+  }
+  updateFiles();
+  if (receipt) flash("已送审 " + picked.length + " 个文件。", receipt);
+});
+get("open-chrome").addEventListener("click", function () {
+  goTo("tab-chrome");
+  chromeTab("tab-clip");
+  get("clip-mode").value = "body";
+  clipChange();
+});
+get("url-form").addEventListener("submit", function (event) {
+  event.preventDefault();
+  const error = get("link-error");
+  let url;
+  try { url = new URL(get("desktop-link").value.trim()); } catch {}
+  if (!url || !["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+    error.textContent = "请输入不含账户信息的 HTTP 或 HTTPS 链接。";
+    error.hidden = false;
+    get("desktop-link").focus();
+    return;
+  }
+  error.hidden = true;
+  const id = addRecord({ title: get("desktop-link-title").value.trim() || url.hostname, kind: "link", origin: url.href, body: "链接笔记\n" + url.href });
+  flash("链接已送入待审。", id);
+});
+
+function focusRecord(id) {
+  Array.from(get("inbox-list").querySelectorAll("button")).find((node) => node.dataset.record === id)?.focus();
+}
+function updateInbox() {
+  const filter = get("status-filter").value;
+  const rows = get("inbox-list");
+  const list = inbox.filter((item) => filter === "all" || item.status === filter);
+  rows.replaceChildren();
+  get("inbox-total").textContent = inbox.filter((item) => item.status === "pending").length + " 条待审";
+  if (!list.some((item) => item.id === selectedRecord)) selectedRecord = list[0]?.id || "";
+  if (!list.length) rows.append(element("p", "empty", "该状态下没有记录。"));
+  for (const item of list) {
+    const button = element("button", "queue-entry");
+    button.dataset.record = item.id;
+    button.setAttribute("aria-pressed", item.id === selectedRecord);
+    button.setAttribute("aria-controls", "review-detail");
+    const copy = element("span", "file-copy");
+    copy.append(element("strong", "", item.title), element("span", "small muted", types[item.kind].label + " · " + item.library));
+    button.append(element("span", "icon-square", types[item.kind].icon), copy, badge(statuses[item.status].label, statuses[item.status].tone));
+    button.addEventListener("click", function () {
+      selectedRecord = item.id;
+      updateInbox();
+      focusRecord(item.id);
+    });
+    rows.append(button);
+  }
+  renderDetail();
+}
+function renderDetail() {
+  const pane = get("review-detail");
+  const item = inbox.find((record) => record.id === selectedRecord);
+  pane.replaceChildren();
+  if (!item) { pane.append(element("p", "empty", "选择一条记录查看详情。")); return; }
+  const card = element("div", "detail-body");
+  const title = element("h3", "", item.title);
+  title.style.overflowWrap = "anywhere";
+  card.append(title, badge(statuses[item.status].label, statuses[item.status].tone));
+  const facts = element("dl", "detail-data");
+  for (const [name, value] of [["类型", types[item.kind].label], ["来源", item.origin], ["目标库", item.library]]) {
+    facts.append(element("dt", "", name), element("dd", "", value));
+  }
+  card.append(facts, element("strong", "field-label", "快照预览"), element("div", "snapshot", item.body));
+  if (item.status === "pending") {
+    const bar = element("div", "actions");
+    const approve = element("button", "action", "演示批准");
+    approve.addEventListener("click", function () {
+      item.status = "submitted";
+      get("status-filter").value = "all";
+      updateInbox();
+      focusRecord(item.id);
+      flash("已演示提交解析。");
+    });
+    bar.append(approve);
+    card.append(bar);
+  } else {
+    const text = {
+      submitted: "解析任务已提交，等待处理结果。",
+      unknown: "提交结果尚未确认。请核对现有文档与原始记录。",
+      active: "该示例已解析完成，并获得当前知识库的检索许可。"
+    };
+    const message = element("p", "muted message", text[item.status]);
+    message.dataset.tone = statuses[item.status].tone;
+    card.append(message);
+  }
+  pane.append(card);
+}
+
+get("status-filter").addEventListener("change", updateInbox);
+clipChange();
+renderNote();
+appendFile();
+appendFile();
+updateFiles();
+updateInbox();
+</script>
+</body>
+</html>

@@ -1,423 +1,126 @@
 # AgentRAG 外部线索快捷采集器与流转方案 (LanRAG-Quick v1.2)
 
-> 状态：**Draft，草案，未获实施授权**。本文不构成任何改动 `internal/`、Frozen、原生表或根 `go.mod` 的许可。
-> 取代：`AgentRAG 外部线索快捷采集器与流转方案 (LanRAG-Quick v1.1).md`（已废弃，仅作历史记录）。
-> 上位文档：`AgentRAG 技术方案 v1.0 — Frozen Architecture.md`（本方案不改其任何条款）。
-> 基线：上游 `WeKnora v0.9.0` / `upstream_commit f17ee8a`，`frozen_at 2026-10-29`（见 `BASELINE.txt`）。
-> 边界自查：本文件所有结论来自源码直读；本轮 shell 不可用（`ops_bash` 报 workspace 前置条件失败），`git status/diff` 与 HEAD 未核实，标为未验证项。
+> 状态：设计草案。本次修订以复用 WeKnora 原生能力为主，实施需另行授权。
+> 基线：WeKnora `v0.9.0`（`f17ee8a`，见 [BASELINE.txt](../../BASELINE.txt)）。本次新增的 LanRAG-Next 接口核对至 `f16263be`。
+> 上位约束：[AGENTS.md](../../AGENTS.md) 与 [Frozen Architecture](<AgentRAG 技术方案 v1.0 — Frozen Architecture.md>)。v1.1 仅作历史记录。
 
----
+## 1. 目标与范围
 
-## 0. 修订摘要（v1.1 → v1.2）
+LanRAG-Quick 是 LanRAG 的独立浏览器知识助手。首版在同一个 Chrome 侧栏提供 **网页剪藏、Markdown 速记、知识库问答**。剪藏和速记共用 Quick 的暂存与审批，审批后复用 WeKnora 的 Markdown 文档、标签、解析和索引。问答直接复用 LanRAG 已有的会话、检索治理和答案引用。
 
-| # | v1.1 写法 | 问题 | v1.2 处理 |
-|---|---|---|---|
-| 1 | 采集优先调原生 `POST /knowledge/url` | `createKnowledgeFromURL` 在审批**之前**落库并 `Enqueue(documentProcess)`（`internal/application/service/knowledge_create.go:412-427,485`），内容已入库可检索 | 删除该路径。**审批前目标 KB 内不得出现任何文档**，改用 `manual` 创建在此次审批通过时一次完成 |
-| 2 | 抓取内容生成 `ext_feedback_events` + 反思 Agent 出 Diff | Frozen 的反馈事件绑定 `retrieved_chunk_ids`（`Frozen:493`），语义是问答质量反馈；仓库无“反思 Agent” | 删除。改用自建 `ext_clip_record`（迁移 010），Diff 不做 |
-| 3 | `ext_feedback_staging` 记 `ingest_status` | 该表不存在；迁移只有 001–009 | 删除。复用 `ext_ingest_observations` |
-| 4 | 后台 Worker 每 10 秒轮询 `parse_status` | `ext_ingest_observations.origin` 有 `CHECK(origin='reconcile')`（`extensions/store/migrations/002_ingest_taggov.sql:9`），另起写者写不进；且已有 `ingest.Reconciler` 周期运行（默认 1 分钟） | 删除。**只读**现有观察结果 |
-| 5 | 调 `TagProjectionWriter` 打 `gov:source:*` | 投影读标签遇 null/未标签直接 `ErrAmbiguousTags` 拒绝（`extensions/taggov/http_store.go:14`），新建文档必失败 | 创建时用 `tag_ids` 直接带原生 tag ID |
-| 6 | 写 `derived_from` 溯源原 URL | `RecordDerived` 两端必须是 lineage 节点（`extensions/lineage/edges.go` `requireNode`），URL 不是节点 | 来源写 `custom_metadata`（命名空间 `agentrag`）；不做“URL→文档”血缘边 |
-| 7 | 写 `supplements` / `amends` 边 | `amends` 是 governance_critical，明确无通用写入器（`extensions/lineage/edges.go:37-38`） | `supplements` 只走既有管理接口；`amends` 不做 |
-| 8 | “原子性流转” | 跨原生 HTTP + 本地 DB + 文件系统，无原子可言；且状态回写放在原生创建之后，崩溃即孤儿 | 改为 **intent-first Saga**，含 adopt-or-escalate 恢复 |
-| 9 | `cmd/desktop-quick/` 落在根 module，新增 `golang.design/x/hotkey` | 改根 `go.mod`/`go.sum`，违反 `AGENTS.md` 2.4 | 全部落在 `extensions/`；热键与托盘用 `x/sys/windows`，不引 GUI 框架 |
-| 10 | “仅 127.0.0.1” 即安全边界 | 8090 的 4 个 hook 路径无鉴权（`extensions/bridge/server.go:62-67`），本地 HTTP 无鉴权等于对本机任意进程开放 | 独立监听 + Bearer + Origin 白名单，复用 modelsupervisor 形态 |
-| 11 | `data/clips/{timestamp}_{title}.md` | `data/.gitignore` 无 `clips/` → 抓取内容进版本控制；标题未净化可路径注入 | `data/clips/{clip_id}.md` + 补 `.gitignore` |
-| 12 | “Web 端审批台与治理工作台融合” | 治理工作台不存在（前端只有 `/platform/lifecycle`、`/platform/model-supervisor`） | 新建 `/platform/clipper`，直连 Host |
-
----
-
-## 1. 定位与不变量
-
-**定位**：外部内容（网页 / 划词 / 未来本地文件）的**本地采集前端 + 准入审批台**。它本身不做治理裁决，只把“采到的东西”按治理流程交给人放行，然后调用**既有原生接口**完成入库。
-
-四条不变量，实现必须可验证：
-
-1. **I1 审批前不可见**：在任何人工放行动作完成之前，目标知识库内不得出现该内容对应的文档，也不得产生解析任务。验证方式是查原生库，不是查本地表。
-2. **I2 快照唯一事实源**：入库正文逐字节等于审批时预览的本地快照；原生侧不得因 `source_url` 重新抓取任何东西。
-3. **I3 单一写入路径**：入库只用既有原生 REST 接口（`manual` 创建 + `custom_metadata` 更新）。不新增原生表、不新增原生解析入口、不改 `internal/`。
-4. **I4 失败不改写结论**：采集失败、标签缺失、血缘接口不可用，一律显式报错并停在当前状态，不得静默降级（例如无标签入库、假装已关联）。
-
----
-
-## 2. 总流程
-
-```
-[触发] 热键 / 浏览器扩展 / 托盘
-   │
-   ▼
-[采集] 本地抓取 → 提取正文 → 写快照文件 + 计算 sha256
-   │                                  状态: captured
-   ▼
-[审批] /platform/clipper 预览（正文、来源、目标 KB、标签、关联）
-   │                                  状态: approved（人已放行）
-   ▼
-[入库] ① 先落 approving(意图)
-      ② POST /knowledge-bases/:id/knowledge/manual  status=publish
-      ③ PUT  /knowledge/:id  custom_metadata{agentrag{...}}
-      ④ 提交 created + document_id
-   │                                  状态: created
-   ▼
-[观察] 只读 ext_ingest_current / ext_ingest_observations 展示解析结果
-   │
-   ▼
-[生命周期] 原生无 lifecycle 记录的新文档默认被检索排除；
-           由操作员在既有生命周期界面推进，本方案不自动置 active
-```
-
----
-
-## 3. 采集端
-
-### 3.1 通道
-
-| 通道 | 第一版 | 说明 |
+| 首版入口 | 可用功能 | 操作结果 |
 |---|---|---|
-| 全局热键 | ✅ | 默认 `Ctrl+Shift+S`，可改；注册失败（被占用）必须**显式提示并按原值回滚**，不静默换键 |
-| 浏览器扩展 | ✅ | 选中文字 / 当前页 / 链接右键；走 Host 本地接口 |
-| 托盘 | ✅ | 设置、手动粘贴、退出 |
-| Windows 文件右键 | ❌ 二期 | 见 §15：扩展 HTTP client 目前只有 `JSON()`（`extensions/weknora/client.go:45,54`），无 multipart 上传能力 |
+| **剪藏** | 右键划选送审，或在侧栏预览并提交当前页正文、选区或链接。记录标题和来源 URL。 | 进入 Quick 待审队列。只收藏链接时按链接笔记显示。 |
+| **速记** | 在侧栏编辑、预览 Markdown，保存本机草稿，按需带上当前页出处。 | 草稿留在侧栏。点击「送审」后进入同一待审队列。 |
+| **问答** | 在侧栏选一个授权知识库，发起快速问答、查看流式答案与引用、在同一会话追问。 | 显示答案及原始引用，可跳转 LanRAG。切换知识库开启新会话。 |
 
-热键与托盘用 `golang.org/x/sys/windows`（`RegisterHotKey` / `Shell_NotifyIcon`），**不引入 Wails、systray、`golang.design/x/hotkey`**，避免动根 `go.mod` 与新增第三方门面依赖。
+首版提供打开侧栏的 Chrome 快捷键。AI 智能提取、复杂网页与图片归档、服务端 URL 抓取、文件导入、系统级热键和托盘留待后续评估。普通直接收藏仍可使用 WeKnora 官方插件。
 
-### 3.2 本地抓取
+四项验收约束：
 
-采集由**本机进程**发起，不经过原生 `/knowledge/url`。因此原生 SSRF 校验（`secutils.ValidateURLForSSRF`）不会替我们兜底，必须自带一份等价防护：
+1. **审批前零入库。** 目标知识库无对应原生文档，也无解析或索引任务。原生草稿只能在审批后创建。
+2. **审批绑定正文。** 预览对应一份 UTF-8 Markdown 快照。创建原生草稿后回读正文核对字节数和 SHA-256，通过后才提交发布。原生入库使用审批正文，来源 URL 作为出处保存。
+3. **审批绑定身份和作用域。** 服务端核对当前登录用户、租户、目标库和写权限。审批与入库意图同一扩展事务提交，原生写操作使用当前审批人的 JWT。
+4. **结果可核对。** 创建或发布结果不明时，优先核对同一条线索及其原生目标。确认存在的草稿继续使用同一个 `document_id`。正文、标签或身份校验失败时停在待核对状态。
 
-- 仅 `http` / `https`；解析后对**全部** A/AAAA 记录校验，拒绝 loopback、私有段、link-local（含 `169.254.169.254`）、组播、未指定地址。
-- 重定向最多 3 跳，**每跳重新校验**最终 IP；禁止跳转到 `file:`/`data:`。
-- 连接与读取超时、响应体上限（默认 8MiB）必须硬编码可配，超限即失败，不截断后当成功。
-- 抓不到正文 → 失败，不落半截快照。
+## 2. 原生能力复用
 
-HTML → Markdown 的清洗：移除 script/style/iframe，输出仅保留 Markdown 白名单语法；转换结果为空或长度 < 200 字符视为失败。
-
----
-
-## 4. 快照与暂存
-
-### 4.1 落盘
-
-- 目录：`data/clips/`（Host 数据目录下，与 `agentrag_ext*.db` 同级）。
-- 文件名：`{clip_id}.md`，`clip_id` 为服务端生成的有序 ID（ULID 或 `时间戳-随机串`），**不使用标题**。标题含 `../`、`:`、`*`、`?` 或超长时不得影响落盘路径。
-- 写入方式：临时文件 → `fsync` → 原子 `rename`；随后计算 `sha256` 与字节数，写入 `ext_clip_record`。
-- 权限：目录与文件仅当前用户可读写。
-
-### 4.2 必须补的忽略规则
-
-`data/.gitignore` 现有 13 条，**不含 `clips/`**。本方案实施的第一步就是在该文件加入：
-
-```
-clips/
-```
-
-验收判据：抓取若干条后 `git status --short --untracked-files=all` 不出现任何 `data/clips/` 路径。
-
-### 4.3 COPY-04 边界（重要）
-
-快照是**被采集内容的副本**。`M2-Copy-Lineage-2026-11-01.md:35` 已把 Web 缓存/页面快照列为必须继承来源的副本：只要 Agent 的 `read_file` / workspace reader 能读到该目录，它就成了一条绕过治理的读取通道。
-
-因此：
-
-- 快照目录**不得**位于任何 Agent 工作区根之下；实施时以 `internal/agent/tools/read_file.go` 的真实 workspace root 做一次显式否证（列出 workspace root，断言 `data/clips` 不在其中）。
-- 若未来确实需要 Agent 读取快照，必须按 COPY-04 继承来源并重新核验当前许可，不能因为“是本机文件”直接放行。
-
-### 4.4 保留与清理
-
-- 保留期默认 180 天（可配）；只清理 `abandoned` / `failed`，以及 `created` 且文档已被原生删除的记录。
-- `approved` / `approving` 状态的快照**永不自动删除**（否则重试无正文可用）。
-- 清理任务删除文件前先置状态并记审计，删除失败保留文件与记录，不掩盖。
-
----
-
-## 5. 审批台
-
-前端新增路由 `/platform/clipper`（`frontend/src/router/index.ts`，紧邻 :101-102 两个既有扩展页面），API 走裸 `fetch` + Host CORS 白名单，**不复用 `@/utils/request`**（那条链路会带 Core JWT 并加 `/api/v1` 前缀，参考 `frontend/src/api/modelSupervisor.ts` 的先例）。
-
-弹窗/页面展示：
-
-```text
-┌──────────────────────────────────────────────────────────────┐
-│ 📥 外部线索 → 准入审批                                        │
-├──────────────────────────────────────────────────────────────┤
-│ 来源     https://example.com/…                               │
-│ 采集于   2026-11-01 23:40:12 (+08:00)                        │
-│ 快照     sha256:3f9a…  ·  118.4 KiB / 12,904 字符             │
-│          ⚠ 正文上限 200,000 字符；上传上限 50 MiB（全局，可配）│
-│                                                              │
-│ 目标知识库  [ 财务制度库 ▼ ]                                  │
-│ 文档标题    [ 2026年最新差旅报销补充规定                      ] │
-│ 来源标签    [x] gov:source:web   [x] gov:doctype:external    │
-│             （标签须已在目标库内通过原生界面创建）            │
-│                                                              │
-│ 关联内部知识（可选，走 supplements 管理接口）                  │
-│   [ ] 《2024差旅报销管理办法》 —— 关联类型 固定为 supplements │
-│                                                              │
-│ 入库后                                             [待确认 ▼] │
-│   待确认：本方案默认，文档入库后仍被检索排除，需在生命周期界面 │
-│           推进                                              │
-│                                                              │
-│ 内容预览（只读，即入库正文）                                  │
-│   # 2026年最新差旅报销…                                       │
-│                                                              │
-│                          [ 取消 ]   [ 确认入库 ]              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-规则：
-
-- **大小提示必须来自真实约束**：`MAX_FILE_SIZE_MB` 默认 50（`internal/utils/filesize.go:9`）是**全局**上传上限且运行期可配，不是“目标知识库的限制”；正文上限是 `manualContentMaxLength = 200000` 字符（`internal/application/service/knowledge_create.go:784`）。两者都要显示，且服务端二次校验，前端提示不作数。
-- 预览内容**直接读快照文件**，不经任何重新抓取。
-- 目标 KB 下拉只列出当前凭据可写（Editor 及以上）的知识库。
-- 血缘区块在 supplements 接口不可用时**整块禁用并说明原因**，不得渲染成“已关联”。
-- 取消 = 置 `abandoned`，不调用任何原生写接口。
-
----
-
-## 6. 入库（intent-first Saga）
-
-### 6.1 顺序（不可调换）
-
-| 步 | 动作 | 落库/外部效果 | 失败处理 |
-|---|---|---|---|
-| 0 | 校验快照仍存在且 `sha256` 与记录一致 | 无 | 失败即拒绝，状态回 `captured` |
-| 1 | 本地提交意图 | `state=approving`，`attempt_at=now` | 事务失败则不发起任何外部调用 |
-| 2 | `POST /api/v1/knowledge-bases/{kb}/knowledge/manual`，`status="publish"` | 原生新建文档（唯一副作用） | 明确 4xx → `state=failed`，保留错误正文；超时/网络错误 → **保持 `approving`**（结果未知） |
-| 3 | `PUT /api/v1/knowledge/{id}`，`custom_metadata` | 原生文档挂来源 | 失败记 `last_error`，状态仍可 `created`（来源可后补），但 UI 必须标黄 |
-| 4 | 提交 `state=created` + `document_id` | — | SQL 失败 → 重启后走恢复 |
-
-第 2 步的请求体（`internal/types/knowledge.go:328-339`）：
-
-```json
-{
-  "title": "2026年最新差旅报销补充规定",
-  "content": "<快照全文，逐字节>",
-  "status": "publish",
-  "tag_ids": ["<原生标签ID>", "<原生标签ID>"],
-  "channel": "browser_extension"
-}
-```
-
-`channel` 取 `browser_extension`：`internal/types/knowledge.go:187-188` 明确 `Channel` 用于标识采集通道并给出了该取值。
-
-第 3 步（`internal/handler/knowledge.go:2353-2359`，部分更新、需 Editor 权限）：
-
-```json
-{
-  "custom_metadata": {
-    "agentrag": {
-      "clip_id": "01JB…",
-      "source_url": "https://…",
-      "source_kind": "url",
-      "captured_at": "2026-11-01T15:40:12Z",
-      "snapshot_sha256": "3f9a…"
-    }
-  }
-}
-```
-
-注意两点：`custom_metadata` 是**整体替换**语义，因此创建后只写一次，之后不得再改写（避免覆盖用户后续在原生界面维护的字段）；用 `agentrag` 子键命名空间，不与用户自定义字段抢占。
-
-### 6.2 为什么不是“原子流转”
-
-链路跨原生 HTTP、本地 SQLite 与文件系统，没有任何事务能覆盖。所以设计目标不是原子性，而是**任何一步崩溃后状态可判定、且不产生重复文档**。`AGENTS.md` 5.4 的要求在此体现为：第 1 步本地意图未提交时，不得发起第 2 步。
-
-### 6.3 崩溃恢复（adopt-or-escalate）
-
-启动时扫描 `state='approving'` 的记录：
-
-1. 读取 `attempt_at` 与标题，在目标 KB 内枚举 `channel=browser_extension` 且创建时间落在 `[attempt_at-5min, now]` 的文档（原生列表分页在顶层，见 `PROJECT_CONTEXT.md:195`）。**枚举必须有上限**（如最近 200 条 / 10 分钟窗口）。
-2. **标题精确匹配且唯一** → 认领：写 `document_id`，补第 3 步，置 `created`。
-3. **零匹配** → 说明第 2 步未生效，可安全重试一次（重试前重新校验快照哈希）。
-4. **多匹配或超出枚举上限** → **升级为人工处置**：置 `failed` 并写明确错误「存在 N 个候选文档，请人工确认后关联」，**禁止猜测**。
-
-`manual` 创建没有幂等键参数，重复调用必然产生重复文档，所以恢复逻辑必须先把“有没有创建成功”判定清楚，再决定是否重试。
-
-### 6.4 失败判据
-
-- `401/403` → 凭据或权限问题，`failed`，提示重新登录/换库。
-- `400`（标题非法、内容超长） → `failed`，附原生错误文本。
-- 5 秒超时（扩展 client 固定上限，`PROJECT_CONTEXT.md:107`） → **结果未知**，保持 `approving`，由 §6.3 判定。
-- 原生不可用（连不上 Core） → 保持 `approving`，不重试超过 3 次，之后升级人工。
-
----
-
-## 7. 标签
-
-- 来源：`ext_kb_tag_mapping` 中该 KB 的 `gov:source:web` / `gov:doctype:external` 映射，取**原生 tag ID**。
-- `PROJECT_CONTEXT.md:195`：规范 gov 标签必须在各 KB 通过原生 UI/API **预先创建**，扩展不自动创建。因此首次在某库使用时做一次预检：
-  - 缺失 → 阻断审批，给出可操作提示（"请先在目标库创建标签 X 后重试"），并记录预检结果。
-  - **不做**“缺标签就无标签入库”的降级。
-- 绝不调用 `TagProjectionWriter` 给**已存在**文档做全量替换（`extensions/taggov/http_store.go:14` 的 `ErrAmbiguousTags` 与 `PROJECT_CONTEXT.md:197` 的“无标签首写仍受限”即此约束的现状）。
-
----
-
-## 8. 来源与血缘
-
-| 需求 | v1.2 做法 | 理由 |
+| 能力 | 判断 | 使用方式与边界 |
 |---|---|---|
-| 详情页能看到来源 URL | `custom_metadata.agentrag` | 原生详情页展示该字段，无需改核心 |
-| 证明入库正文未被篡改 | 本地 `sha256` + `ext_clip_record` | 与 M3 快照接口"只返回身份和指纹"思路一致 |
-| “这份网页源自某内部制度”的可追溯边 | **不做** | URL 不是 lineage 节点；`derived_from` 需要真节点（`extensions/lineage/edges.go` 的 `requireNode`） |
-| 补充通知（supplements） | 走既有管理接口：`extensions/management/` + `extensions/lineage/supplements.go` + 原生 `internal/handler/extension_lifecycle.go`（迁移 `009_supplements.sql`） | 同库父文档、≤8 父、深度 ≤10、唯一节点 ≤64、禁自环/重复/环等校验都在既有实现里，不能绕开直接写边 |
-| 修订替代（amends / supersedes） | **不做** | governance_critical 无通用写入器（`extensions/lineage/edges.go:37-38`），必须与治理事实同事务（`AGENTS.md` 5.6），本方案不承载 |
+| 官方 Chrome「知识管理助手」 | **KEEP** 用于普通收藏，**参考**产品能力 | 以剪藏、速记和侧栏问答为产品参考。商店版连接实例后将剪藏写入所选知识库。当前基线未找到插件本体的可复用源码或自定义暂存契约。Quick 独立实现侧栏。 [官方剪藏说明](../../website-docs/05-clients/06-chrome-extension.md) |
+| BrowserSkill 扩展 | **参考**扩展工程 | 以本仓库锁定的 BrowserSkill v0.3.1 为参考，查看扩展构建、UI 与后台入口的划分、消息传递和连接反馈。Quick 按用户主动操作配置所需权限，首版交付独立扩展，不依赖 BrowserSkill daemon、配对或 Agent 浏览器控制。 [WeKnora 锁定版本](../../scripts/browserskill-release.json) · [BrowserSkill 扩展源码](https://github.com/Tencent/BrowserSkill/tree/da6bf4eed2dd7256567e152df8c903c87f6598c3/apps/extension) · [许可](https://github.com/Tencent/BrowserSkill/blob/da6bf4eed2dd7256567e152df8c903c87f6598c3/LICENSE) |
+| 原生会话、快速问答与引用 | **KEEP** 用于侧栏问答 | 复用 `POST /api/v1/sessions` 和 `POST /api/v1/knowledge-chat/{session_id}`。按现有 SSE 事件渲染答案和来源，沿用 LanRAG 的权限与生命周期门禁。 [会话与问答 API](../../website-docs/04-api/02-api-chat.md#L24) · [原生问答路由](../../internal/router/routes_chat.go#L150) |
+| 原生 URL 导入 | **REJECT** 用于审批前暂存 | 原生先建文档再入解析队列。普通直存仍使用已有能力。受控流程保存来源 URL 和已采集正文。 [URL 创建](../../internal/application/service/knowledge_create.go#L333) |
+| 原生 Markdown 草稿与发布 | **KEEP** 用于审批后 | `POST /api/v1/knowledge-bases/{kb}/knowledge/manual` 创建 `draft`。核对通过后用 `PUT /api/v1/knowledge/manual/{id}` 把相同正文提交为 `publish`，沿用原生索引任务。保存草稿本身已经创建文档。 [原生路由](../../internal/router/routes_knowledge.go#L73) · [DTO](../../internal/types/knowledge.go#L327) |
+| 原生会话、库权限和标签 | **KEEP** | 调用 `/api/v1/auth/me` 和目标库 `/lifecycle/authority` 核验当前用户与权限。用原生标签 ID 创建草稿，再回读绑定结果。 [认证路由](../../internal/router/routes_auth_tenant.go#L235) · [库权限路由](../../internal/router/routes_knowledge.go#L235) · [标签读取](../../internal/handler/knowledge.go#L683) |
+| 修订发布与对账 | **ADAPT** | 沿用先持久化意图、写入可核对标识、回读正文、绑定文档 ID 后继续发布的做法。Quick 单独保存线索意图，现有修订提案的来源、替代和审批规则继续按原业务执行。 [现有发布适配器](../../extensions/business/native.go#L70) |
+| 解析状态、生命周期、补充关系 | **KEEP** | Quick 只读现有导入观察，文档详情链接到生命周期工作台。补充关系经现有 `supplements` 管理入口维护。 [导入观察](../../extensions/ingest/observer.go#L93) · [生命周期 API](../../frontend/src/api/lifecycle.ts#L31) |
 
-若将来确需“URL→文档”的溯源图，应作为独立提案：新增节点类型或证据表，并明确它与 M3 版本族、`ext_source_snapshot_evidence` 的关系，不能借 `derived_from` 蒙混。
+## 3. 侧栏、暂存与审批
 
----
+### 3.1 侧栏与浏览器权限
 
-## 9. 归档状态观察
+- 使用 Chrome Manifest V3 的 `sidePanel`。工具栏、右键菜单和 Chrome 扩展快捷键打开侧栏。当前页选区及正文只在用户明确发起剪藏后读取。浏览器侧只申请当前标签页和已配置本机服务所需权限，不监听全站页面内容。
+- 侧栏使用独立的 LanRAG-Quick 品牌。网络请求由扩展上下文发往配置的本机 Core 或 Quick 服务。网页脚本与采集内容只携带待处理的数据，接触不到这两类凭据。出站凭据只发往各自的固定地址。 [Chrome 侧栏](https://developer.chrome.com/docs/extensions/reference/api/sidePanel) · [Chrome 快捷键](https://developer.chrome.com/docs/extensions/reference/api/commands) · [Chrome 扩展网络权限](https://developer.chrome.com/docs/extensions/develop/concepts/network-requests)
 
-**不自建轮询器**。解析状态只从既有观察管道读取：
+### 3.2 剪藏、速记与快照
 
-- 数据源：`ext_ingest_observations` / `ext_ingest_current`（`extensions/store/migrations/002_ingest_taggov.sql:1-23`），由现有 `ingest.Reconciler` 按 `AGENTRAG_RECONCILE_INTERVAL`（默认 `1m`，`extensions/host/config.go:47`）写入，`origin` 恒为 `reconcile`。
-- 审批台展示：`ext_ingest_current` 里该 `document_id` 的最新 `parse_status`。
-- 无记录时显示「等待下一轮对账（≤1 分钟）」，**不得**自行推断 `processing` 或 `success`。
-- 若将来需要更快反馈，正确做法是评估调小该 KB 的对账间隔或另批一个带新 origin 值的写入者（需要迁移 + 设计决策），而不是在 clipper 里偷偷写同一张表。
+- **网页剪藏**。选区直接整理为 Markdown。当前页正文从当前已加载的页面提取可见文章文本，预览后提交。正文提取失败时，提示改用划选或由用户明确选择「只存链接」。只存链接生成含标题和 URL 的 Markdown 条目，显示为链接笔记。三种方式均不触发 Core 重新抓取。
+- **Markdown 速记**。侧栏提供编辑和预览，在当前浏览器配置中保存未送审草稿。可显式附上当前页出处。送审时生成不可变的待审快照；浏览器本地草稿和待审快照均不会直接进入问答上下文。
+- 平台粘贴入口继续用于手动投递。网页剪藏、速记和粘贴都走同一份快照、审批与发布流程。
+- 固定记录的租户与目标库。粘贴入口用当前登录用户的权限选库。浏览器扩展的投递凭据绑定服务端配置的目标库，客户端传入的租户与库 ID 不授予访问权。
+- 将正文整理为供审批的 UTF-8 Markdown，落在 Host 数据目录的 `clips/{clip_id}.md`。服务端生成不可预测的 `clip_id`，文件名与标题无关。临时写入、同步并重命名后，记录哈希、字节数和落盘时间。快照与记录均持久化成功后才返回采集成功。
+- 快照目录仅本机服务用户可读写，纳入忽略规则，并核实实际路径位于 Agent 工作区根以外。审批预览按固定快照读取，以安全的文本或 Markdown 渲染呈现。来源 URL 仅作出处，不因预览或入库发起远端抓取。 [副本治理设计](M2-Copy-Lineage-2026-11-01.md)
+- 清理复用扩展的任务执行机制。保留期默认 180 天，可按使用场景配置。自动清理只处理已放弃的线索，以及达到保留期且原生文档已确认删除的线索。待审、待核对及仍需用于恢复的快照保留。记录清理结果并在失败后保留可重试状态。
 
----
+### 3.3 审批台与权限
 
-## 10. 生命周期与默认不可检索
+- 审批台落在 `/platform/clipper`，使用现有平台外壳、TDesign、六语 i18n、知识库选择与原生权限查询。展示正文、来源、字节数、采集时间、拟写标签和实际入库进度。只有具备目标库审批权限的登录用户可查看待审快照和执行审批。
+- 使用 WeKnora 登录 JWT。Quick 服务端以本次 JWT 和当前工作区上下文调用 `GET /api/v1/auth/me` 取得实际用户，并调用 `GET /api/v1/knowledge-bases/{kb}/lifecycle/authority` 核对 `tenant_id`、`knowledge_base_id` 与 `can_write`。第一版只接受当前工作区下 Host 已管理的目标库。原生写请求仍经过 Core 自身的写权限校验。读取身份与权限在持久化事务之外执行。
+- Quick 使用固定本机 Core 地址转发 JWT，禁止重定向。JWT 只用于本次请求，不入库、不进入日志。签名过期、权限撤销或 Core 不可用时，等待用户重新登录或权限恢复后，续办同一条记录。后台可用既有只读能力做观察，不能用服务 Key 替代审批人的写权限。
+- Quick 接口独立监听回环地址。审批入口只接受配置内的平台 Origin 和登录 JWT。浏览器扩展只用投递凭据调用 Quick 暂存接口，凭据绑定固定扩展 Origin 和目标库，不能列出或读取快照、审批或触发原生写入。审批和投递请求分别校验 Origin、方法、Content-Type 和请求大小。问答凭据及服务地址按 §3.5 单独配置。Origin、回环地址和源 URL 均不作为用户身份。
+- 确认操作绑定当前快照 SHA-256、标题、来源、目标库、实际审批人和操作 ID。预览后若快照或关键字段变化，重新展示并确认。放弃操作只关闭本地待审记录。已经创建原生草稿的异常记录进入对账和人工处置流程。
 
-- `AGENTS.md` 6.1：未有生命周期记录、或任意非 active 文档均被检索排除。新建的 clip 文档天然没有 lifecycle 记录，因此**入库后默认不可被检索**，这是安全默认值，必须在 UI 里讲清楚，不能让人以为“入库=生效”。
-- 推进到 active 由操作员在既有 `/platform/lifecycle` 界面完成，本方案不调用任何直接置 active 的接口。
-- 是否提供“审批时直接 active”的快捷开关，列为未决问题 Q1（需要 lifecycle 决策事务的正式入口，不能本地伪造）。
-- 新增文档的 lifecycle 登记沿用既有 observer，不在本方案里另写一套。
+### 3.4 正文与标签预检
 
----
+- 采用原生 `manual` 的正文限制，按清洗后 **200,000 个 Unicode 码点**校验，并设定与该入口匹配的请求字节上限。审批页显示手工 Markdown 的限制。文件上传上限用于后续文件入口。
+- WeKnora 创建和更新手工文档时均会执行 `CleanMarkdown`。Quick 保存的是用户看到并批准的规范化正文。对可能被原生改写的内容，以草稿回读为准。发生差异时保留禁用草稿和差异状态，交给用户处理。任何新正文都需要重新预览和审批。
+- 复用目标库的原生标签列表及 `taggov.Mapping` 的按库匹配规则，外部线索审批时重新解析 `gov:doctype:external` 的原生 ID。网页选区、当前页正文、网页链接笔记以及有明确网页出处的外部粘贴内容另需 `gov:source:web`。原创 Markdown 笔记保存独立的速记类型，作者附上的链接作为参考出处展示，不自动归类为外部网页。所需标签需在目标库预先创建。缺失或匹配不唯一时阻断审批。创建时带 `tag_ids`，创建后依赖原生精确标签接口回读。 [Markdown 清洗和校验](../../internal/application/service/knowledge_create.go#L780) · [标签分库匹配](../../extensions/taggov/mapping.go#L30)
 
-## 11. 安全
+### 3.5 侧栏问答
 
-### 11.1 本地接口
+1. **选库和会话。** 在可信扩展设置中配置独立的原生受限 API Key，启用 `chat` 与列库和引用读取所需的 `retrieve`，仅授权明确的知识库列表。侧栏用原生接口显示可用库，每轮发送用户当前显式选择的非空 `knowledge_base_ids`。无可用库时呈现错误或空态。换库、新建会话或更换凭据时重新绑定。 [原生 API Key 约定](../../website-docs/04-api/01-api-overview.md#L43) · [原生列库入口](../../internal/router/routes_knowledge.go#L247)
+2. **提问和显示。** 复用 `POST /api/v1/sessions` 与 `POST /api/v1/knowledge-chat/{session_id}` 的快速问答路径，显示流式答案、引用和失败反馈，支持在同一范围内追问和跳转原文。问题只来自用户此轮输入；插件不自动把当前网页、待审快照、笔记草稿或网页选区拼进问答请求。 [快速问答请求](../../website-docs/04-api/02-api-chat.md#L384) · [原生流式事件](../../website-docs/04-api/01-api-overview.md#L168)
+3. **治理与凭据。** 由 Core 校验真实知识库与会话权限，沿用 LanRAG 的检索和来源门禁。问答 Key 不含 `ingest` 或管理能力，也不代替审批 JWT；投递凭据不能调用问答。Quick 首版界面和请求只走快速问答。原生 `chat` 能力也可使用 Core 的 `agent-chat`，仍由该接口执行自身权限校验。Quick 的智能推理、网页上下文提问与更多模式另行评估。
 
-不复用 `127.0.0.1:8090` 的 bridge mux：那 4 个 hook 路径无鉴权（`extensions/bridge/server.go:62-67`），"仅回环"在本地 HTTP 下不构成鉴权（任意本机进程可直接投递、浏览器可发简单跨域 POST、DNS rebinding 可解析到 127.0.0.1）。
+## 4. 审批后的入库和恢复
 
-按 modelsupervisor 的既有形态做独立监听：
+执行顺序：
 
-- 独立端口，只绑 `127.0.0.1`（形态见 `extensions/modelsupervisor/manager.go:116`）。
-- 凭据：首次运行生成 32 字节随机 token，写 `data/clipper-token`（权限仅本人，且加入 `.gitignore`），请求必须带 `Authorization: Bearer`；比较用常量时间（同 `extensions/management/server.go:76`）。
-- Origin 白名单：浏览器扩展的 `chrome-extension://<固定 ID>` + 审批台来源；**拒绝通配符、拒绝带路径、非 http(s)**（校验规则照 `extensions/modelsupervisor/config.go:100-165`）。POST 请求缺 Origin 一律拒绝。
-- 方法限定 `POST` / `GET`，`Content-Type` 必须是 `application/json`，请求体上限 4MiB，`Accept` 之外的跨域响应不回显通配 `*`。
-
-### 11.2 数据
-
-- 不在日志、错误消息、`ext_clip_record` 里存正文；日志只记 `clip_id`、字节数、哈希前缀。
-- 快照目录加入 `.gitignore`（§4.2），并在验收里实际检查。
-- 浏览器扩展不硬编码 token；由用户在扩展设置里粘贴一次，保存在扩展本地存储。
-
-### 11.3 边界
-
-桌面端只与本机 Core / Host 通信，不监听公网地址，不做局域网发现与多设备同步。
-
----
-
-## 12. 数据模型（迁移 010）
-
-当前最高迁移是 `009_supplements.sql`，本方案新增 `extensions/store/migrations/010_clipper.sql`。
-
-```sql
-CREATE TABLE ext_clip_record (
-    clip_id           TEXT PRIMARY KEY,
-    tenant_id         TEXT NOT NULL,
-    knowledge_base_id TEXT NOT NULL,
-    source_kind       TEXT NOT NULL CHECK(source_kind IN ('url','selection','file')),
-    source_url        TEXT NOT NULL DEFAULT '',
-    title             TEXT NOT NULL,
-    snapshot_path     TEXT NOT NULL,
-    snapshot_sha256   TEXT NOT NULL,
-    snapshot_bytes    INTEGER NOT NULL,
-    captured_at       INTEGER NOT NULL,
-    state             TEXT NOT NULL CHECK(state IN
-                        ('captured','approved','approving','created','failed','abandoned')),
-    document_id       TEXT NOT NULL DEFAULT '',
-    last_error        TEXT NOT NULL DEFAULT '',
-    attempt_at        INTEGER NOT NULL DEFAULT 0,
-    created_at        INTEGER NOT NULL,
-    updated_at        INTEGER NOT NULL
-);
-
-CREATE INDEX idx_clip_record_state ON ext_clip_record(state, updated_at);
-CREATE UNIQUE INDEX idx_clip_record_doc
-    ON ext_clip_record(tenant_id, document_id) WHERE document_id <> '';
-```
-
-约束说明：
-
-- **不存正文**。正文只在快照文件里，DB 只存路径与指纹，避免出现第二份事实源。
-- 不建到原生表的 FK（跨库无法保证）。
-- 状态机单向：`captured → approved → approving → created`，异常分支 `failed` / `abandoned`；`failed` 可由人工重置为 `approved` 重试，重置必须记审计。
-- `document_id` 唯一（部分索引）防止同一原生文档被两条记录认领。
-
----
-
-## 13. 工程落位
-
-| 组件 | 位置 | 依赖约束 |
+| 步骤 | 行为 | 继续条件与失败处理 |
 |---|---|---|
-| 领域逻辑（抓取、快照、状态机、恢复） | `extensions/clipper/` | 只用 `extensions/go.mod` 内依赖；不得 import `internal/`；构建 `go build -mod=readonly ./...` |
-| 本地 HTTP 服务 | `extensions/clipper/http.go`（独立监听） | Bearer + Origin 白名单，见 §11.1 |
-| 桌面壳（热键/托盘/剪贴板） | `extensions/cmd/clipper-desktop/` | `x/sys/windows`，`//go:build windows`；非 Windows 返回 `ErrUnsupported`（形态同 `extensions/modelsupervisor/winjob/`） |
-| 浏览器扩展 | `extensions/ui/browser-extension/` | 纯 JS，无 Go 依赖，不进 Go module |
-| 审批台 | `frontend/src/views/clipper/` + `frontend/src/api/clipper.ts` | 裸 fetch；路由 `/platform/clipper` |
+| 1. 提交意图 | 本地核对快照哈希后，使用记录版本和操作 ID 领取该次提交。原子保存 `approving`、审批审计、快照哈希和稳定关联标识（建议 `channel=agentrag-clip-<clip_id>`）。 | 意图未提交前无原生写操作。并发点击只有一次可发出创建请求。该 `channel` 用于对账，具体采集方式保存在 Quick 记录中。 |
+| 2. 创建原生草稿 | 向目标库的原生 `manual` 入口提交批准的标题、完整正文、必需标签 ID、关联标识，显式指定 `status=draft`。 | 原生草稿应处于 `draft/disabled`。收到格式和作用域有效的创建响应后，将文档 ID 持久绑定到同一条线索。超时、断连、非预期响应或写后校验失败按结果未知处理。 |
+| 3. 回读并核验 | 调 `GET /api/v1/knowledge/{id}` 核验租户、库、类型、关联标识、标题、草稿状态及原生 `metadata.content` 的哈希与字节数，再调 `GET /api/v1/knowledge/{id}/tags/ids` 核验必需标签。 | 所有校验通过才允许发布。标签写入可能在文档创建后失败，即使原生返回错误也要先核对已有草稿。缺标签时由有权限的用户在原生界面修复同一草稿，Quick 再回读核验。 |
+| 4. 发布同一文档 | 重新读取审批快照，核对当前审批权限、目标绑定、标题、正文与标签后，持久化 `publishing` 后向已绑定的原生文档 ID 提交同一份 Markdown，显式指定 `status=publish`。 | 成功后回读确认身份、标题、正文、标签及已保存的发布状态，记录为 `created`。原生 API 接收发布与解析完成分别展示。 |
 
-硬性约束：
+原生 `manual` 创建未提供幂等键，`channel` 是对账标识。恢复时先读取已绑定的文档 ID。缺 ID 时，按原生分页契约枚举目标库并精确匹配关联标识，对唯一候选再按步骤 3 回读。若查到已进入发布阶段的同一目标，则按下述发布规则判定。分页不完整、超出扫描上限、多个匹配、身份或正文冲突均待人工核对。超时后的零匹配不足以授权自动重发创建请求。只有能够确认原请求未发出或在写入前被拒绝时，才在当前授权下继续原操作。 [原生先写文档后写标签](../../internal/application/service/knowledge_create.go#L853) · [现有分页对账](../../extensions/business/native.go#L111)
 
-- **根 `go.mod` / `go.sum` 零改动**（`AGENTS.md` 2.4）；不新增 `go.work`。
-- 不修改 `internal/`；`git diff -- internal/` 必须为空。
-- 模块门禁必须通过：`cd extensions && python scripts/check_module_boundary.py`；`go list -deps -f '{{.ImportPath}}' ./...` 中不得出现 `github.com/Tencent/WeKnora/internal/`。
+发布响应未知时，只读回已绑定目标及已出现的真实解析观察。原生会先保存 `pending`，再尝试入队，单凭该状态无法确认任务已经入队。若同一目标已实际进入 `processing` 或 `completed` 且回读核验通过，可补记 `created`。只有 `pending` 且缺成功回执时保留 `publishing`。解析失败时展示真实状态，由有权限的用户通过既有重试入口处理同一文档。状态不明时禁止自动重发发布或创建第二份文档。 [原生发布顺序](../../internal/application/service/knowledge_create.go#L1120)
 
----
+Quick 控制自身的发布顺序。原生普通编辑入口仍由 Core 按权限开放。现有 API 没有覆盖正文、标签和发布状态的联合 CAS。Quick 在发布前后核对，发生变更时报告冲突。若要防止其他原生编辑入口并行更改或发布该草稿，需要另行设计并授权相应门禁。
 
-## 14. 必须验证
+## 5. 来源、观察与生效
 
-| # | 场景 | 判据 |
-|---|---|---|
-| V1 | 采集指向 `127.0.0.1` / `169.254.169.254` / 私有段 / 重定向到私有段 | 全部拒绝，不落快照 |
-| V2 | 采集后**未审批**，直接查原生 KB | 目标库无新文档、无新解析任务（I1） |
-| V3 | 审批入库 | 文档存在；`custom_metadata.agentrag.snapshot_sha256` 与本地文件一致；正文与快照逐字节一致（I2） |
-| V4 | 第 2 步后强杀进程再重启 | §6.3 只认领 1 条，不产生重复文档；歧义时升级人工而非猜测 |
-| V5 | 目标 KB 缺 `gov:source:web` 标签 | 阻断并给出可操作提示；**不得**无标签入库 |
-| V6 | 入库后解析状态展示 | 必须来自 `ext_ingest_current`；无记录时显示等待，不伪造 |
-| V7 | 无权限 / 跨库 / 错 token | 401/403；状态停在 `approved`，无副作用 |
-| V8 | 无 Origin、错 Origin、通配 Origin | 全部拒绝 |
-| V9 | 抓取 3 条后 `git status --short --untracked-files=all` | 不出现 `data/clips/` |
-| V10 | 文档入库后立即检索 | 因无 lifecycle 记录被排除（§10） |
-| V11 | 标题含 `../`、`:`、超长 | 落盘路径不变，标题按原生校验结果报错 |
-| V12 | 快照文件被外部修改后审批 | 哈希不一致直接拒绝（步 0） |
-| V13 | `go build -mod=readonly ./...`、`go vet`、`gofmt -l .`、模块门禁 | 分别退出 0 / 无输出 |
-| V14 | `git diff -- internal/` | 空 |
+- **来源记录。** Quick 保存来源 URL、采集方式、采集时间、快照哈希和已核验的原生文档 ID，在审批台提供来源详情和原生文档跳转。原生 `custom_metadata` 仅支持顶层标量、按整体替换处理。需要在原生详情显示出处时，再评估使用平铺字段和并发写入契约。首版发布只依赖 Quick 的持久化来源记录。 [原生元数据契约](../../internal/application/service/knowledge.go#L886)
+- **补充关系。** 对已完成必要版本观察的文档，通过生命周期详情的现有 `supplements` 接口登记。Quick 提供入口链接，由既有页面展示真实结果。必须先建立父件依赖才能生效的场景超出本版的单次审批流程，不能用事后补链替代准入条件。外部 URL 保存在来源记录，不创建 URL 血缘节点。 [补充关系契约](../../PROJECT_CONTEXT.md#L139)
+- **解析观察。** Quick 只读 `ext_ingest_current`，通过现有 `ingest.Reconciler` 获取真实解析状态。无记录时显示「等待对账」。一分钟是默认对账间隔，缺记录、分页和退避可能延长等待时间。 [对账实现](../../extensions/ingest/reconcile.go#L194) · [默认配置](../../extensions/host/config.go#L59)
+- **生命周期。** 第一版采用一次准入审批。原生草稿阶段不可检索。发布并解析完成后，现有观察者可将文档初始化为 `pending`，随后按日期和依赖推进为 `active`、`scheduled` 或 `stale`。没有有效的 `active` 许可时，现有检索策略会排除文档。UI 显示「解析完成后按库规则生效」，不承诺入库后的第二次人工放行。 [完成观察](../../extensions/ingest/lifecycle.go#L24) · [状态机](../../extensions/lifecycle/automation.go#L32) · [检索许可](../../extensions/retrieval/policy.go#L266)
 
-未执行项必须如实注明；不得用“设计通过”替代上述任何一条。
+## 6. 工程落位
 
----
+| 范围 | 实施时的落点 |
+|---|---|
+| 扩展后端 | `extensions/clipper/` 保存暂存、审批事务、原生 API 请求和对账。复用扩展存储、审计、分页和对账机制。 |
+| 数据 | 在实施时按实际最新版本分配下一迁移号。本轮最高为 `041`，`010` 已用于来源运行记录。保存 `clip_id`、租户、库、来源、标题、快照路径与指纹、审批人和时间、操作 ID、关联标识、原生文档 ID、阶段和错误码。记录状态建议 `captured → approving → draft_bound → publishing → created`，未发起远端写入可置 `abandoned`。结果未知保留对应阶段和原因。文档 ID 一旦绑定，不被另一条线索重复认领。正文存放于快照。 |
+| 审批 UI | `frontend/src/views/clipper/` 与 `frontend/src/api/clipper.ts`，复用既有平台路由和管理页面规范。 |
+| 浏览器扩展 | `extensions/ui/browser-extension/`，独立实现剪藏、速记和问答侧栏。剪藏和速记投递到 Quick，问答使用原生会话和 SSE。参考 BrowserSkill 的扩展工程，构建与发布独立。 |
 
-## 15. 明确不做
+核心业务源码、Frozen Architecture、原生表、根 Go 依赖和解析调度保持冻结。Quick 与 WeKnora 通过公开 HTTP 接口协作。扩展来源记录不写入问答 `ext_feedback_events`，不创建替代关系，也不接管生命周期裁决。本方案是 M2 生命周期和 M3 来源能力之上的浏览器入口。待审数据仍由 Quick 管理，问答仍由原生会话承载。 [冻结架构](<AgentRAG 技术方案 v1.0 — Frozen Architecture.md>) · [扩展模块规则](../../AGENTS.md)
 
-1. 调原生 `/knowledge/url` 采集（会在审批前入库）。
-2. `ext_feedback_events` / 反思 Agent / 自动 Diff（属 M5 问答反馈语义，非外部内容准入）。
-3. `amends` / `supersedes` 等 governance_critical 边的自动写入。
-4. “URL→文档”的 lineage 边（URL 不是节点）。
-5. 本地文件（PDF/DOCX）右键入库：需要给 `extensions/weknora` 增加 multipart 能力，列为二期。
-6. 局域网 / 多设备同步 / 公网监听。
-7. 自动把新文档置为 active。
-8. 修改 Frozen、原生表、检索/解析/调度算法。
+## 7. 实施验收
 
----
+| 验收点 | 可核对的结果 |
+|---|---|
+| 首版侧栏 | 同一扩展可右键划选、提取当前页正文、只存链接、编辑和恢复 Markdown 草稿、选择授权知识库及发起快速问答。切换标签页不自动采集，快捷键能打开侧栏。 |
+| 审批前隔离 | 划选、整页正文、链接笔记、Markdown 速记和手动粘贴均能生成待审快照。直接查询原生目标库及队列，确认零新文档、零新解析任务。放弃后仍为零。 |
+| 侧栏问答 | 验证流式答案、真实引用、继续追问与换库隔离。投递凭据不能问答，无可用库时不发起问答，未授权库请求被拒绝。确认问答请求不附带当前页和待审内容，待审或失去有效许可的文档不能成为受控知识来源。 |
+| 审批授权 | 只有通过当前用户、租户和库写权限验证的 JWT 能执行审批与发布。投递凭据、问答 Key、过期 JWT、只读用户、跨库和错误 Origin 均不能触发审批或原生知识库文档写入。 |
+| 正文和标签 | 草稿回读哈希与已审批快照一致，必需标签 ID 属于目标库。快照变更、原生正文改写、标签缺失或失败均不触发 Quick 发布。 |
+| 创建恢复 | 覆盖意图提交前失败、草稿创建后断连、重复点击和标签写入部分失败。最多认领同一目标一次。零匹配但结果不明、扫描不完整或多个候选时保持待核对。 |
+| 发布恢复 | 在保存发布状态后、提交队列前后分别注入故障。始终核对原 ID。仅有 `pending` 且缺回执时展示待核对，解析失败通过既有入口恢复。 |
+| 生命周期 | 核对草稿不可检索、已发布而未获有效 `active` 许可时被排除、正常库规则下可自动生效、排期或依赖失效时按既有策略处理。 |
+| 数据与界面 | 快照不出现在未跟踪清单、日志或 Agent 工作区。检查六语词条、zh-CN 与 en-US 界面、实际构建产物和失败状态。 |
+| 仓库边界 | 实施时运行扩展格式、构建、测试、静态检查与独立模块门禁。前端运行 `npm run check-i18n`、`npm run type-check`、`npm test`、`npm run build` 并按仓库规则验证部署。用 `git diff -- internal/` 核查核心边界。 |
 
-## 16. 未决问题
-
-| # | 问题 | 影响 |
-|---|---|---|
-| Q1 | 是否允许“审批时直接 active” | 需要 lifecycle 决策事务的正式入口；在此之前只能是“入库后人工推进” |
-| Q2 | 浏览器扩展固定 ID 与打包方式 | 决定 Origin 白名单的具体取值，须在打包后确认 |
-| Q3 | 快照保留期与合规要求 | 影响 §4.4 的默认值 |
-| Q4 | 二期文件采集是否需要 multipart | 决定是否扩展 `extensions/weknora/client.go` |
-| Q5 | clip 记录是否接入 `extensions/review/` 复核告警 | 若接入需另设计告警策略，本方案不夹带 |
-| Q6 | 是否在 `TASK_BACKLOG.md` 登记为独立条目 | 未登记前本文件不构成实施授权（`AGENTS.md` 1.4） |
-
----
-
-## 17. 与里程碑的关系
-
-- **不属于 M5**。Frozen 的 `ext_feedback_events` 绑定 `retrieved_chunk_ids`（`Frozen:493`），其“采集→裁决→准入→审批→指导层”（`Frozen:623`）指问答反馈驱动的指导层修订；外部网页采集没有 `retrieved_chunk_ids`，把它塞进 M5 是分类错误。
-- 本方案是**建立在 M2 生命周期 / M3 可信来源之上的外部准入前端**：复用 lifecycle 排除规则、复用 ingest 观察、复用 supplements 管理接口、复用 M3 的“只存身份与指纹”取舍。
-- 它不声称任何 M2/M3 的验收结论，也不改变它们的验收状态。
+本稿只记录静态源码核对和实施验收标准。真实剪藏、笔记草稿、侧栏问答、审批入库、解析、崩溃恢复及检索行为需在实现后验证。
