@@ -1,10 +1,12 @@
 <template>
   <div class="reader-history" :aria-busy="loading">
-    <h3>{{ $t(mode === 'history' ? 'reader.groups.history' : 'workbench.lineage.modeProvenance') }}</h3>
-    <t-radio-group v-if="mode === 'sources'" v-model="sourceMode" :aria-label="$t('workbench.lineage.viewTabsAria')">
-      <t-radio-button value="provenance">{{ $t('workbench.lineage.modeProvenance') }}</t-radio-button>
-      <t-radio-button value="renditions">{{ $t('workbench.lineage.modeRenditions') }}</t-radio-button>
-    </t-radio-group>
+    <div class="reader-history__heading">
+      <h3>{{ $t(mode === 'history' ? 'reader.groups.history' : 'workbench.lineage.modeProvenance') }}</h3>
+      <t-radio-group v-if="mode === 'sources'" v-model="sourceMode" size="small" :aria-label="$t('workbench.lineage.viewTabsAria')">
+        <t-radio-button value="provenance">{{ $t('workbench.lineage.modeProvenance') }}</t-radio-button>
+        <t-radio-button value="renditions">{{ $t('workbench.lineage.modeRenditions') }}</t-radio-button>
+      </t-radio-group>
+    </div>
     <t-loading v-if="loading" size="small" :text="$t('workbench.lineage.loading')" />
     <t-alert v-else-if="error" theme="warning">{{ $t(`reader.error.${error}`) }}
       <t-button variant="text" size="small" @click="retry++">{{ $t('workbench.common.retry') }}</t-button>
@@ -15,35 +17,45 @@
         <span v-if="partialError">{{ $t(`reader.error.${partialError}`) }}</span>
         <t-button variant="text" size="small" @click="retry++">{{ $t('workbench.common.retry') }}</t-button>
       </t-alert>
-      <template v-if="family">
+      <section v-if="family" class="reader-history__section">
         <h4 v-if="doc.version || doc.kind">{{ $t('reader.currentFamilyContext') }}</h4>
-        <strong>{{ family.label }}</strong>
-        <t-tag v-if="publishedTitle" theme="success" variant="light">{{ $t('reader.published', { title: publishedTitle }) }}</t-tag>
-        <t-alert v-else-if="!family.published_document_id || family.published_head_availability === 'missing'" theme="info">{{ $t('reader.noPublished') }}</t-alert>
-        <ol v-if="steps.length" class="reader-history-list" role="list">
-          <li v-for="step in steps" :key="step.id">
-            <p>{{ title(step.old_document_id) }} → {{ title(step.new_document_id) }}</p>
-            <p>{{ $t('workbench.familyUi.effectiveAt', { date: formatDate(step.effective_at) }) }} · {{ replacementStatus(step.status) }}</p>
-            <t-button v-if="step.status === 'applied' && readerID(step.old_document_id) && readerID(step.new_document_id)" size="small" variant="outline"
-              @click="emit('compare', { kb: doc.kb, id: step.old_document_id }, { kb: doc.kb, id: step.new_document_id })">{{ $t('reader.compare') }}</t-button>
+        <div class="reader-history__family-row">
+          <strong class="reader-history__family" :title="family.label">{{ family.label }}</strong>
+          <t-tag v-if="publishedTitle" theme="success" variant="light" :title="publishedTitle">{{ $t('reader.currentPublished') }}</t-tag>
+        </div>
+        <t-alert v-if="!publishedTitle && (!family.published_document_id || family.published_head_availability === 'missing')" theme="info">{{ $t('reader.noPublished') }}</t-alert>
+        <ol v-if="steps.length" class="reader-history__list" role="list">
+          <li v-for="step in steps" :key="step.id" class="reader-history__step">
+            <div class="reader-history__step-title" :title="`${title(step.old_document_id)} → ${title(step.new_document_id)}`">{{ title(step.old_document_id) }} → {{ title(step.new_document_id) }}</div>
+            <div class="reader-history__meta">
+              <span>{{ $t('workbench.familyUi.effectiveAt', { date: formatDate(step.effective_at) }) }}</span>
+              <t-tag size="small" variant="light">{{ replacementStatus(step.status) }}</t-tag>
+              <t-button v-if="step.status === 'applied' && readerID(step.old_document_id) && readerID(step.new_document_id)" size="small" variant="outline"
+                @click="emit('compare', { kb: doc.kb, id: step.old_document_id }, { kb: doc.kb, id: step.new_document_id })">{{ $t('reader.compare') }}</t-button>
+            </div>
           </li>
         </ol>
         <t-alert v-if="moreReplacements" theme="info">{{ $t('reader.moreReplacementHistory') }}</t-alert>
-      </template>
+      </section>
       <t-alert v-if="graphTruncated || graph?.truncated" theme="info">{{ $t('reader.truncatedData') }}</t-alert>
-      <h4 v-if="nodes.length">{{ $t(mode === 'history' ? 'workbench.lineage.modeVersion' : 'workbench.lineage.nodeListAria') }}</h4>
-      <ul v-if="nodes.length" class="reader-history-list" role="list">
-        <li v-for="node in nodes" :key="node.id">
-          <p><strong>{{ nodeName(node) }}</strong></p>
-          <span v-if="node.created_at">{{ formatDate(node.created_at) }}</span>
-          <t-tag v-if="node.current && node.type === 'document_version'" size="small" variant="light">{{ $t('workbench.lineage.currentObserved') }}</t-tag>
-          <t-button v-if="node.type === 'document_version' && node.document_id" variant="text" size="small"
-            @click="emit('open', { kb: doc.kb, id: node.document_id, version: node.id })">{{ $t('reader.versionRecord') }}</t-button>
-        </li>
-      </ul>
-      <ul v-if="edges.length" class="reader-history-list" role="list">
-        <li v-for="edge in edges" :key="edge.id">{{ edgeText(edge) }}</li>
-      </ul>
+      <section v-if="nodes.length" class="reader-history__section">
+        <h4>{{ $t(mode === 'history' ? 'workbench.lineage.modeVersion' : 'workbench.lineage.nodeListAria') }}</h4>
+        <ul class="reader-history__list" role="list">
+          <li v-for="node in nodes" :key="node.id" class="reader-history__node">
+            <span class="reader-history__node-name" :title="nodeName(node)">{{ nodeName(node) }}</span>
+            <span v-if="node.created_at" class="reader-history__meta">{{ formatDate(node.created_at) }}</span>
+            <t-button v-if="node.type === 'document_version' && node.document_id" variant="text" size="small"
+              @click="emit('open', { kb: doc.kb, id: node.document_id, version: node.id })">{{ $t('reader.versionRecord') }}</t-button>
+          </li>
+        </ul>
+      </section>
+      <t-collapse v-if="edges.length" class="reader-history__details">
+        <t-collapse-panel :header="$t('reader.historyDetails')">
+          <ul class="reader-history__list" role="list">
+            <li v-for="edge in edges" :key="edge.id" class="reader-history__edge">{{ edgeText(edge) }}</li>
+          </ul>
+        </t-collapse-panel>
+      </t-collapse>
       <t-empty v-if="!partial && !graphTruncated && !graph?.truncated && !nodes.length && !family" :description="$t('reader.noHistory')" />
     </template>
   </div>
@@ -194,7 +206,7 @@ function setPartial(reason: unknown) {
 
 function formatDate(value: string) {
   const date = new Date(value)
-  return Number.isFinite(date.getTime()) ? date.toLocaleString(locale.value) : ''
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString(locale.value, { year: 'numeric', month: 'numeric', day: 'numeric' }) : ''
 }
 function replacementStatus(state: string) {
   return state === 'applied' ? t('workbench.familyUi.statusApplied') : statusLabel(state, t)
@@ -213,8 +225,19 @@ function edgeText(edge: LineageEdge) {
 </script>
 
 <style scoped>
-.reader-history { display: grid; gap: var(--td-comp-margin-m); overflow-wrap: anywhere; }
+.reader-history { display: grid; gap: var(--td-comp-margin-m); min-width: 0; overflow-wrap: anywhere; }
+.reader-history__heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--td-comp-margin-s); min-width: 0; }
 h3, h4, p { margin: 0; }
 h3 { font-size: var(--td-font-size-title-medium); }
-.reader-history-list { display: grid; gap: var(--td-comp-margin-m); padding-inline-start: var(--td-comp-paddingLR-l); margin: 0; }
+h4 { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); }
+.reader-history__section { display: grid; gap: var(--td-comp-margin-s); min-width: 0; }
+.reader-history__family-row { display: flex; align-items: center; gap: var(--td-comp-margin-xs); min-width: 0; }
+.reader-history__family { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--td-font-size-body-medium); }
+.reader-history__list { display: grid; gap: var(--td-comp-margin-s); padding: 0; margin: 0; list-style: none; min-width: 0; }
+.reader-history__step { display: grid; gap: 4px; min-width: 0; padding-block: var(--td-comp-paddingTB-xs); border-top: 1px solid var(--td-component-stroke); }
+.reader-history__step:first-child { padding-block-start: 0; border-top: 0; }
+.reader-history__step-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; color: var(--td-text-color-primary); font-size: var(--td-font-size-body-medium); }
+.reader-history__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--td-comp-margin-xs); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
+.reader-history__node, .reader-history__edge { display: flex; flex-wrap: wrap; align-items: center; gap: var(--td-comp-margin-xs); min-width: 0; font-size: var(--td-font-size-body-medium); }
+.reader-history__node-name { flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

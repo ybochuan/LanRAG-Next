@@ -1,23 +1,33 @@
 # AgentRAG Task Backlog
 
+## DOC-VIEWER 多格式阅读引擎升级（2026-11-25）
+
+- **DV-P0 部分完成，DV-P1a 已通过隔离 Edge 冒烟。** 基线为 `87642ade`，候选为 `@zrimo/viewer@0.1.2`。候选包签名通过核验；多格式静态矩阵与 DOCX 及十种合成格式浏览器夹具通过。原型对照见 [首轮 DOCX 实测](docs/evidence/doc-viewer-poc-2026-11-25.md)。
+- **DV-P1b 已实现并通过隔离 Edge 集成。** 根据用户选型，正式阅读中心的普通文档默认使用 Zrimo，支持 DOCX/DOCM/XLSX/XLSM/PPTX/PPTM/PPSX/DOC/XLS/PPT/PDF/CSV/TSV/PNG/JPEG/GIF/WebP/SVG/BMP/TIFF；保留原生读取鉴权、证据定位和兼容渲染。阅读窗格使用连续滚动布局（`layout: 'continuous'`），支持工作表切换、按页、搜索、全屏和适宽/整页。预览流上限 50 MiB。运行配置 `READER_DOCX_ENGINE: 'native'` 可切回原生。已验证生产构建及 DOCX 默认渲染、双窗、中文搜索、全屏、拒绝、超限和回退；另以合成夹具验证 XLSX/PDF/PNG/PPTX/CSV/SVG/JPG/WEBP/BMP/TIFF 的真实加载与画布渲染，验证 PDF/PPTX 连续多页滚动，并以 PDF+PPTX 验证双窗同时渲染；复杂业务件排版与双窗资源峰值已用 61 页 DOCX、20 页 PPTX、30 页 PDF 合成夹具及 PDF+PPTX 双窗采样补测。多格式设计见 [Zrimo 多格式阅读设计](docs/design/document-reader-zrimo-multiformat-2026-11-25.md)。
+- **工作区 Web 已切换。** `D:/LanRAG-Next/web` 已使用该构建，保留原 `config.js`，并通过部署前后两次 Edge 浏览器夹具验证。整目录备份为 `tmp/doc-viewer-zrimo-web-backup-20261125-211001`。
+- **Windows Lite 安装版资源已切换并启动。** 已逐文件验证 504 个构建文件，原 `config.js` 保留。已运行安装版 Core/Host 探针，真实测试 DOCX 的授权预览返回 200，匿名返回 401。使用安装目录资源的独立 Edge 回归通过。原安装资源备份为 `resources/web-backup-zrimo-20261125-211410`。
+- **多格式与阅读体验第三轮已部署。** 搜索区按原生骨架改为三列卡片，打开/对照按钮与文档选择同一行，窄窗自动堆叠；阅读侧栏 18–24rem，标签页标题不再被 14em 截断；版本沿革、附件与关系列表压缩为单行省略，版本沿革日期只显示日期、移除重复的“当前观测版本”标签，阅读标签栏无多余纵向滚动条；附件行只保留图标、标题与打开/对照操作；打开/对照按钮均为纯图标方钮（眼睛/交换，aria-label/title 保留对应文字）。`frontend/dist` 505 个文件、入口 SHA-256 `4f1e25f65589cd07b8cc24cb663a40d3bce53931049945795f84afb9b71b4d9a`；`resources/web` 与 `tmp/doc-studio-windows-stage` 均为 505 个文件、同哈希，备份 `resources/web-backup-20261125-2359` 与 `tmp/doc-studio-windows-stage-backup-20261125-2359`，部署脚本 `tmp/deploy-doc-studio-web-20261125-2359.ps1`。
+- **双页视图已实现并部署（2026-11-26）。** 应 m03785 请求，在 ZrimoReader 增加可选双页模式：同一已加载 viewer 通过 renderPage 渲染两块 canvas，按页对翻页，单页/双页图标切换，保留连续滚动与原生回退；六语新增 spreadPage/spread/singlePage/spreadFailed。DOCX 夹具验证两页 canvas、Pages 1–2 of 6、Pages 3–4 翻页与单页恢复。`frontend/dist` 505 个文件、入口 SHA-256 `882a3a9eb7209f178aa57c46b78e865ee9f1de347d7840803196c9b0035158ea`；`resources/web` 与 `tmp/doc-studio-windows-stage` 均 505 个文件、同哈希，备份 `resources/web-backup-20261126-0020` 与 `tmp/doc-studio-windows-stage-backup-20261126-0020`，部署脚本 `tmp/deploy-doc-studio-web-20261126-0020.ps1`，启动并确认 `LanRAG Desktop` PID 24096、`LanRAG Lite` PID 5408 运行。`npm test` 2539 tests / 2537 pass / 2 skip；type-check/build/check-i18n 退出 0。
+- **安装版界面验收由用户复核。** 最新构建已切换并启动 `LanRAG Desktop`；用户明确自行验证，不再以截图替代验收。安装窗口内的单窗、双窗、搜索、全屏和双窗资源预算、跨库目标权限、附件失效及 Host 停止场景仍待用户确认。
+
 ## DOC-STUDIO 文档阅读中心与关联研读（2026-11-24）
 
 - 用户授权以完成整个改造为目标。Windows LanRAG Lite 是首要交付和验收环境。按 P0 原生预览双实例核验、P1 台账到原文和关联对照、P2 版本族／附件／引用／勘误与来源衔接、P3 桌面回归和旧图替代推进。
 - 实施依据为[阅读中心 v1.1](docs/design/LanRAG-Next-文档阅读中心与关联研读系统-v1.1-最终方案-2026-11-24.md)及桌面优先代码审查。阅读只使用现有授权入口和事实。固定版本原件证据不足时显示记录，旧图在实际替代验收前保留。
-- **当前里程碑**为 P1 阅读闭环通过隔离浏览器验收，并在 Windows Lite 安装版完成真实 DOCX 选择／预览和附件与模板面板验收；P2 和 P3 的部分代码已落地。仓库 HEAD 为 `5311e503`（`feat(doc-studio): add document reading center`；基线 `d6057e41` / `batch6-1-gd6057e41`），阅读中心改动已提交并推送。安装版前端已切换至入口 SHA-256 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`（2026-11-25 00:30）。
+- **当前里程碑**为 P1 阅读闭环通过隔离浏览器验收，并在 Windows Lite 安装版完成真实 DOCX 选择／预览和附件与模板面板验收；P2 和 P3 的部分代码已落地。仓库 HEAD 为 `87642ade`（`docs(doc-studio): record implementation commit`；阅读中心实现提交 `5311e503`；核心构建基线 `d6057e41` / `batch6-1-gd6057e41`）。安装版前端已切换至入口 SHA-256 `882a3a9eb7209f178aa57c46b78e865ee9f1de347d7840803196c9b0035158ea`（2026-11-26 00:20，505 个文件）；安装版核心 `resources/REVISION` 为 `d6057e41`。
 
 | 阶段 | 当前状态 | 剩余验收或工作 |
 |---|---|---|
 | P0 源码与原生预览核对 | 已确认冻结基线和原生预览复用契约。两个原生预览实例同时显示 Markdown，固定历史版本走记录展示。 | 用真实授权文档核验 PDF、DOCX、XLSX 等格式、双实例工具栏及权限边界。 |
 | P1a 路由与单窗 | 阅读中心菜单、路由、原生文档选择与单窗预览已实现，类型检查、构建和六语键审计通过；Windows Lite 已验证“文档阅读中心”菜单、测试库选择和 DOCX 单窗预览。 | 继续补测 PDF／XLSX／图片以及无权限、异常预览。 |
 | P1b 工作台阅读闭环 | Windows Chrome 使用隔离 API 夹具验证台账打开原文、同库关联加入双栏、关闭末标签后返回并恢复原详情，以及固定旧版不获取当前原文；安装版已通过真实 Core／Host 打开真实授权 DOCX。 | 在安装版完成台账抽屉→阅读中心→返回并恢复详情的真实往返。 |
-| P2a／P2b 业务衔接与关系细节 | 代码已接入版本族沿革、附件入口、知识库与问答原文跳转、勘误对照入口和来源列表。固定版本原件无法核验时显示历史记录。安装版真实附件文档已验证父件提示本地化；按用户要求附件列表只保留标题与打开操作，不再显示摘要、序号、原文件与正文引用。 | 补齐待复核、修订及条款证据定位等链路，验证版本身份、附件许可、勘误撤回和返回状态。现有问答入口传递文档身份，阅读中心的条款锚点仍待贯通。 |
-| P3a 阅读体验 | 双栏鼠标／键盘调宽、窄屏 A/B 切换和简中／英文阅读页通过隔离浏览器回归。 | 核验阅读位置与标签恢复、双栏独立缩放、主题和真实桌面中英文界面。 |
+| P2a／P2b 业务衔接与关系细节 | 代码已接入版本族沿革、附件入口、知识库与问答原文跳转、勘误对照入口和来源列表。固定版本原件无法核验时显示历史记录。安装版真实附件文档已验证父件提示本地化；按用户要求附件列表只保留标题与纯图标（眼睛/交换）打开、对照操作（aria-label/title 保留对应文字），不再显示摘要、序号、原文件与正文引用。 | 补齐待复核、修订及条款证据定位等链路，验证版本身份、附件许可、勘误撤回和返回状态。现有问答入口传递文档身份，阅读中心的条款锚点仍待贯通。 |
+| P3a 阅读体验 | 双栏鼠标／键盘调宽、窄屏 A/B 切换、488px 内容区无横向溢出和简中／英文阅读页通过隔离浏览器回归。 | 核验阅读位置与标签恢复、双栏独立缩放、主题和真实桌面中英文界面。 |
 | P3b 旧图替代 | 旧图已有跳转到阅读中心的入口。 | 验收关系、沿革和来源列表能覆盖旧图入口，完成旧链接兼容回归后再退役旧图 UI。 |
 
-- **部署状态**：Windows Lite 安装目录 `resources/web` 已于 2026-11-24 23:40、23:52、2026-11-25 00:00 和 00:30 四次切换；当前最终入口 SHA-256 为 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`，回滚目录为 `resources/web-backup-20261125-0030`，更早备份保留 `resources/web-backup-20261124-2340`、`resources/web-backup-20261124-2352`、`resources/web-backup-20261125-0000` 与 `resources/web-backup-20261125-0020`。`tmp/doc-studio-windows-stage` 已同步为 255 个文件、同入口哈希；部署脚本为 `tmp/deploy-doc-studio-web-20261125-0030.ps1`。
-- **验证记录**：`npm run check-i18n` 退出 0（15/15）；`npm run type-check && npm run build` 退出 0，`frontend/dist` 255 个文件、入口 SHA-256 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`；115 条阅读中心定向用例退出 0（115/115，含业务版本对照按文档 ID 打开的回归）；`npm test` 最近一次完整执行使用真实 Git for Windows shell 置于 PATH 后退出 0（2529 tests，2527 pass、2 skip、0 fail；本次最后两处 UI/对照修复后未再重跑）；`node frontend/scripts/verify-document-reader.mjs` 退出 0。Windows Lite 安装版已实测真实 DOCX 单窗预览与附件面板，附件文案本地化，附件行仅保留标题与打开操作，截图 `tmp/doc-studio-attachment-simplified-20261125-0002.png`。隔离浏览器回归仍使用 Markdown 夹具。
-- **恢复顺序**为使用 `tmp/deploy-doc-studio-web-20261125-0030.ps1` 重新部署或从 `resources/web-backup-20261125-0030` 回滚；启动 Windows Lite 后校验 `resources/web/index.html` 哈希与候选一致，再验收真实文档和业务链路。旧图替代验收单独记录。
+- **部署状态**：Windows Lite 安装目录 `resources/web` 已于 2026-11-26 00:20 切换至双页视图构建（505 个文件，入口 SHA-256 `882a3a9eb7209f178aa57c46b78e865ee9f1de347d7840803196c9b0035158ea`）；回滚目录为 `resources/web-backup-20261126-0020`，更早备份保留 `resources/web-backup-20261125-2359`、`resources/web-backup-20261125-2258`、`resources/web-backup-20261125-0020` 等。`tmp/doc-studio-windows-stage` 已同步为 505 个文件、同入口哈希；部署脚本为 `tmp/deploy-doc-studio-web-20261126-0020.ps1`。
+- **验证记录**：`npm run check-i18n` 退出 0（15/15）；`npm run type-check && npm run build` 退出 0，`frontend/dist` 505 个文件、入口 SHA-256 `882a3a9eb7209f178aa57c46b78e865ee9f1de347d7840803196c9b0035158ea`；`npm test` 退出 0（2539 tests，2537 pass、2 skip、0 fail；使用 `C:\Program Files\Git\cmd` 置于 PATH 的 cmd.exe 运行，排除 POSIX shell 环境误报）；`node frontend/scripts/verify-document-reader.mjs`（带 DOCX、十种合成格式与复杂夹具）退出 0，覆盖 DOCX 双页 canvas、Pages 1–2／3–4 页对翻页和单页恢复及 PDF/PPTX 双页切换，XLSX/PDF/PNG/PPTX/CSV/SVG/JPG/WEBP/BMP/TIFF 多格式加载、PDF/PPTX 连续多页滚动、PDF+PPTX 双窗同时渲染、61 页 DOCX／20 页 PPTX／30 页 PDF 复杂业务件连续滚动（单窗浏览器堆采样峰值约 78–95 MiB，PDF+PPTX 双窗约 92–107 MiB）、488px 内容区无横向溢出、中文搜索、全屏、拒绝、超限、回退与切回原生；附件行仅保留标题与纯图标打开操作（截图 `tmp/doc-studio-reader-icononly.png`、双页截图 `tmp/doc-studio-reader-spread-20261126.png`）。Windows Lite 安装版已实测真实 DOCX 单窗预览与附件面板，附件文案本地化；最新构建已部署。
+- **恢复顺序**为使用 `tmp/deploy-doc-studio-web-20261126-0020.ps1` 重新部署或从 `resources/web-backup-20261126-0020` 回滚；启动 Windows Lite 后校验 `resources/web/index.html` 哈希与候选一致，再验收真实文档和业务链路。旧图替代验收单独记录。
 
 ## 问答流程灰度验收（2026-11-21）
 

@@ -10,31 +10,42 @@
     </header>
 
     <t-alert v-if="!intent" theme="warning">{{ $t('reader.invalidLink') }}</t-alert>
-    <search class="reader-search" :aria-label="$t('reader.search')">
-      <div class="reader-search__field reader-search__field--kb">
-        <t-select v-model="pickerKB" :options="kbOptions" :loading="kbLoading" :aria-label="$t('reader.knowledgeBase')" :placeholder="$t('reader.knowledgeBase')" />
+    <t-card :bordered="true" class="reader-picker-card">
+      <div class="reader-picker">
+        <div class="reader-search" role="search" :aria-label="$t('reader.search')">
+          <div class="reader-search__field reader-search__field--kb">
+            <t-select v-model="pickerKB" :options="kbOptions" :loading="kbLoading" filterable
+              :aria-label="$t('reader.knowledgeBase')" :placeholder="$t('reader.knowledgeBase')" />
+          </div>
+          <div class="reader-search__field reader-search__field--keyword">
+            <t-input v-model="keyword" clearable :maxlength="160" :aria-label="$t('reader.search')"
+              :placeholder="$t('reader.search')" :disabled="!pickerKB">
+              <template #prefix-icon><t-icon name="search" size="16px" /></template>
+            </t-input>
+          </div>
+          <div class="reader-search__field reader-search__field--document">
+            <t-select v-model="selection" :options="fileOptions" :loading="filesLoading" clearable filterable
+              :title="selectionLabel" :aria-label="$t('reader.choose')" :placeholder="$t('reader.choose')" :disabled="!pickerKB" />
+          </div>
+          <div class="reader-search__actions">
+            <t-button v-if="hasMoreFiles && !filesError" variant="outline" :loading="filesLoading" @click="loadMoreFiles">{{ $t('common.loadMore') }}</t-button>
+            <t-button class="reader-open-button" theme="primary" shape="square" :disabled="!selection"
+              :aria-label="$t('reader.open')" :title="$t('reader.open')" @click="openSelection(false)">
+              <t-icon name="browse" />
+            </t-button>
+            <t-button v-if="left" variant="outline" :disabled="!selection" @click="openSelection(true)">{{ $t('reader.compare') }}</t-button>
+          </div>
+        </div>
       </div>
-      <div class="reader-search__field reader-search__field--keyword">
-        <t-input v-model="keyword" clearable :maxlength="160" :aria-label="$t('reader.search')" :placeholder="$t('reader.search')" :disabled="!pickerKB" />
-      </div>
-      <div class="reader-search__field reader-search__field--document">
-        <t-select v-model="selection" :options="fileOptions" :loading="filesLoading" clearable
-          :aria-label="$t('reader.choose')" :placeholder="$t('reader.choose')" :disabled="!pickerKB" />
-      </div>
-      <div class="reader-search__actions">
-        <t-button v-if="hasMoreFiles && !filesError" variant="outline" :loading="filesLoading" @click="loadMoreFiles">{{ $t('common.loadMore') }}</t-button>
-        <t-button theme="primary" :disabled="!selection" @click="openSelection(false)">{{ $t('reader.open') }}</t-button>
-        <t-button v-if="left" variant="outline" :disabled="!selection" @click="openSelection(true)">{{ $t('reader.compare') }}</t-button>
-      </div>
-    </search>
+    </t-card>
     <t-alert v-if="kbError || filesError" theme="warning">{{ $t('reader.pickerUnavailable') }}
       <t-button variant="text" size="small" @click="retryPicker">{{ $t('workbench.common.retry') }}</t-button>
     </t-alert>
-    <div role="status"><t-empty v-if="filesEmpty" :description="$t('reader.pickerEmpty')" /></div>
+    <div v-if="filesEmpty" role="status"><t-empty :description="$t('reader.pickerEmpty')" /></div>
 
     <nav v-if="session.tabs.length" class="reader-tabs" :aria-label="$t('reader.tabs')">
       <div v-for="tab in session.tabs" :key="readerKey(tab.doc)" class="reader-tab">
-        <t-button :variant="left && readerKey(left) === readerKey(tab.doc) ? 'outline' : 'text'" :title="tab.title || $t('reader.original')"
+        <t-button size="small" :variant="left && readerKey(left) === readerKey(tab.doc) ? 'outline' : 'text'" :title="tab.title || $t('reader.original')"
           :aria-current="left && readerKey(left) === readerKey(tab.doc) ? 'page' : undefined" @click="open(tab.doc)">
           <span class="reader-tab-title">{{ tab.title || $t('reader.original') }}<template v-if="tab.doc.version"> · {{ tab.doc.version.slice(0, 8) }}</template></span>
         </t-button>
@@ -46,24 +57,25 @@
 
     <template v-if="left">
       <div class="reader-actions">
-        <t-button variant="outline" :aria-expanded="panel === 'relations'" @click="togglePanel('relations')">{{ $t('reader.relations') }}</t-button>
-        <t-button variant="text" :aria-expanded="panel === 'history'" @click="togglePanel('history')">{{ $t('reader.groups.history') }}</t-button>
-        <t-button variant="text" :aria-expanded="panel === 'sources'" @click="togglePanel('sources')">{{ $t('workbench.lineage.modeProvenance') }}</t-button>
-        <t-button v-if="!left.version" variant="text" :aria-expanded="panel === 'attachments'" @click="togglePanel('attachments')">{{ $t('reader.groups.attachments') }}</t-button>
-        <template v-if="right">
-          <t-button v-if="!right.kind" variant="text" @click="swap">{{ $t('reader.swap') }}</t-button>
-          <t-button variant="text" @click="open(left)">{{ $t('reader.exitCompare') }}</t-button>
-          <t-radio-group v-model="activeSide" variant="primary-filled" :aria-label="$t('reader.pane')">
+        <div class="reader-context-actions">
+          <t-button v-for="item in panelActions" :key="item.id" size="small"
+            :variant="panel === item.id ? 'outline' : 'text'" :theme="panel === item.id ? 'primary' : 'default'"
+            :aria-expanded="panel === item.id" @click="togglePanel(item.id)">{{ $t(item.label) }}</t-button>
+        </div>
+        <div v-if="right" class="reader-compare-actions">
+          <t-button v-if="!right.kind" size="small" variant="text" @click="swap">{{ $t('reader.swap') }}</t-button>
+          <t-button size="small" variant="text" @click="open(left)">{{ $t('reader.exitCompare') }}</t-button>
+          <t-radio-group v-model="activeSide" size="small" variant="primary-filled" :aria-label="$t('reader.pane')">
             <t-radio-button value="A">A</t-radio-button><t-radio-button value="B">B</t-radio-button>
           </t-radio-group>
-        </template>
+        </div>
       </div>
       <div class="reader-layout" :class="{ 'reader-layout--relations': panel, 'reader-layout--narrow': narrow }">
         <t-card v-if="panel === 'history' || panel === 'sources'" :bordered="true" class="reader-relations">
           <ReaderHistory :doc="left" :mode="panel" @open="openHistoryRecord" @compare="open" />
         </t-card>
         <t-card v-else-if="panel === 'attachments'" :bordered="true" class="reader-relations">
-          <ReaderAttachments :doc="left" @open="open($event)" @compare="open(left, $event)" />
+          <ReaderAttachments :doc="left" :side="right ? 'A' : undefined" @open="open($event)" @compare="open(left, $event)" />
         </t-card>
         <t-card v-else-if="panel === 'relations'" :bordered="true" class="reader-relations">
           <h3>{{ $t('reader.relations') }}</h3>
@@ -91,13 +103,13 @@
         </t-card>
         <div ref="panes" class="reader-panes" :class="{ 'reader-panes--compare': right && !narrow }" :style="{ '--reader-split': split + 'fr', '--reader-rest': 100 - split + 'fr' }">
           <ReaderPane v-if="!right || !narrow || activeSide === 'A'" :doc="left" :side="right ? 'A' : undefined"
-            :fullscreen-owner="!right || activeSide === 'A'" :refresh="refresh" source-mode @ready="onPaneReady">
+            :fullscreen-owner="!right || activeSide === 'A'" :refresh="refresh" source-mode @activate="activeSide = 'A'" @ready="onPaneReady">
             <template #actions="{ metadata }"><t-button v-if="metadata && canDownload(left.kb)" variant="text" size="small" :loading="downloading.includes(readerKey(left))" @click="download(left, metadata)">{{ $t('reader.download') }}</t-button></template>
           </ReaderPane>
           <PanelResizeHandle v-if="right && !narrow" edge="right" :label="$t('reader.split')"
             :value="split" :min="40" :max="60" @start="splitAtStart = split" @resize="resizeSplit" />
           <ReaderPane v-if="right && (!narrow || activeSide === 'B')" :doc="right" side="B"
-            :fullscreen-owner="activeSide === 'B'" :refresh="refresh" source-mode @ready="onPaneReady">
+            :fullscreen-owner="activeSide === 'B'" :refresh="refresh" source-mode @activate="activeSide = 'B'" @ready="onPaneReady">
             <template #actions="{ metadata }"><t-button v-if="metadata && !right.kind && canDownload(right.kb)" variant="text" size="small" :loading="downloading.includes(readerKey(right))" @click="download(right, metadata)">{{ $t('reader.download') }}</t-button></template>
           </ReaderPane>
         </div>
@@ -155,6 +167,12 @@ const keyword = ref('')
 const kbReload = ref(0)
 const kbOptions = computed(() => knowledgeBases.value.map(kb => ({ label: kb.name, value: kb.id })))
 const panel = ref<'relations' | 'history' | 'sources' | 'attachments' | ''>('relations')
+const panelActions = computed(() => ([
+  { id: 'relations', label: 'reader.relations' },
+  { id: 'history', label: 'reader.groups.history' },
+  { id: 'sources', label: 'workbench.lineage.modeProvenance' },
+  { id: 'attachments', label: 'reader.groups.attachments' },
+] as const).filter(item => item.id !== 'attachments' || !left.value?.version))
 const relationRetry = ref(0)
 const relationStatus = ref<'loading' | 'ready' | 'empty' | 'partial' | RelationFailure>('unavailable')
 const relationItems = ref<VerifiedRelation[]>([])
@@ -212,6 +230,7 @@ watch([() => session.scope, () => auth.isLoggedIn, kbReload], async (_, __, onCl
 
 const { selection, fileOptions, filesLoading, filesError, filesEmpty, hasMoreFiles, loadMoreFiles } =
   useReaderPickerFiles(pickerKB, keyword, () => session.scope, listKnowledgeFiles)
+const selectionLabel = computed(() => fileOptions.value.find(option => option.value === selection.value)?.label || '')
 
 watch(() => left.value && readerKey(left.value), () => {
   activeSide.value = 'A'
@@ -365,36 +384,55 @@ async function download(doc: ReaderDocument, metadata: NativeReaderDocument) {
 
 <style scoped>
 .reader-page { box-sizing: border-box; height: 100%; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--td-comp-margin-m); padding: 24px 32px; }
-.section-header { display: flex; flex-direction: column; gap: 4px; }
-.section-header__top, .reader-actions, .reader-search, .reader-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--td-comp-margin-s); }
-.section-header__top { justify-content: space-between; }
+.section-header { display: flex; flex-direction: column; gap: var(--td-comp-margin-xxs); }
+.section-header__top { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--td-comp-margin-s); }
 h2, h3, p { margin: 0; }
 h2 { font-size: var(--td-font-size-title-large); }
 h3 { font-size: var(--td-font-size-title-medium); }
 .section-description { color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-medium); }
-.reader-search { display: grid; grid-template-columns: minmax(10em, 14em) minmax(12em, 1fr) minmax(16em, 1.3fr) auto; align-items: center; }
+.reader-picker-card { flex: 0 0 auto; }
+.reader-picker-card > :deep(.t-card__body) { padding: var(--td-comp-paddingTB-m) var(--td-comp-paddingLR-l); }
+.reader-picker { container-type: inline-size; display: flex; flex-direction: column; gap: var(--td-comp-margin-s); min-width: 0; }
+.reader-search { display: grid; grid-template-columns: minmax(10rem, 14rem) minmax(12rem, 1fr) minmax(16rem, 1.4fr) auto; grid-template-areas: 'kb keyword document actions'; align-items: center; gap: var(--td-comp-margin-s); min-width: 0; }
 .reader-search__field { min-width: 0; }
+.reader-search__field--kb { grid-area: kb; }
+.reader-search__field--keyword { grid-area: keyword; }
+.reader-search__field--document { grid-area: document; }
 .reader-search__field :deep(.t-select__wrap), .reader-search__field :deep(.t-input__wrap) { width: 100%; }
-.reader-search__actions { display: flex; align-items: center; gap: var(--td-comp-margin-s); white-space: nowrap; }
-@media (max-width: 1100px) {
-  .reader-search { grid-template-columns: minmax(10em, 16em) minmax(0, 1fr); }
-  .reader-search__field--keyword, .reader-search__field--document, .reader-search__actions { grid-column: 1 / -1; }
+.reader-search__actions { grid-area: actions; display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: var(--td-comp-margin-s); }
+.reader-open-button { flex: 0 0 32px; width: 32px; min-width: 32px; padding: 0; }
+.reader-open-button :deep(.t-icon) { margin: 0; }
+.reader-search__actions :deep(.t-button) { margin-inline-start: 0; }
+@container (max-width: 64rem) {
+  .reader-search {
+    grid-template-columns: minmax(10rem, 14rem) minmax(12rem, 1fr) auto;
+    grid-template-areas:
+      'kb keyword keyword'
+      'document document actions';
+  }
 }
-@media (max-width: 760px) {
-  .reader-search { grid-template-columns: minmax(0, 1fr); }
-  .reader-search__field--kb { grid-column: 1 / -1; }
+@container (max-width: 36rem) {
+  .reader-search {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'kb' 'keyword' 'document' 'actions';
+  }
+  .reader-search__actions { flex-wrap: wrap; justify-content: flex-start; }
 }
-.reader-tab { display: flex; align-items: center; min-width: 0; }
-.reader-tab-title { max-width: 14em; overflow: hidden; text-overflow: ellipsis; }
-.reader-layout { flex: 1; min-height: 360px; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--td-comp-margin-m); }
-.reader-layout--relations:not(.reader-layout--narrow) { grid-template-columns: minmax(14em, 20%) minmax(0, 1fr); }
-.reader-layout--narrow.reader-layout--relations { grid-template-rows: auto minmax(360px, 1fr); }
-.reader-relations { min-width: 0; overflow: auto; }
-.reader-relations > :deep(.t-card__body) { display: grid; gap: var(--td-comp-margin-m); padding: var(--td-comp-paddingTB-m) var(--td-comp-paddingLR-m); }
-.reader-layout--narrow .reader-relations { max-height: 15em; }
+.reader-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--td-component-stroke); }
+.reader-tab { display: flex; align-items: center; min-width: 0; flex: 0 0 auto; }
+.reader-tab-title { max-width: 32em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--td-comp-margin-s); min-width: 0; }
+.reader-context-actions, .reader-compare-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--td-comp-margin-xs); min-width: 0; }
+.reader-compare-actions { margin-inline-start: auto; }
+.reader-layout { flex: 1; min-height: 22rem; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); gap: var(--td-comp-margin-s); }
+.reader-layout--relations:not(.reader-layout--narrow) { grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr); }
+.reader-layout--narrow.reader-layout--relations { min-height: 30rem; grid-template-rows: minmax(0, auto) minmax(0, 1fr); }
+.reader-relations { min-width: 0; min-height: 0; overflow: auto; }
+.reader-relations > :deep(.t-card__body) { display: grid; gap: var(--td-comp-margin-s); padding: var(--td-comp-paddingTB-m) var(--td-comp-paddingLR-m); }
+.reader-layout--narrow .reader-relations { max-height: min(16rem, 38vh); }
 .reader-relation-list { display: grid; gap: var(--td-comp-margin-m); list-style: none; padding: 0; margin: 0; overflow-wrap: anywhere; }
-.reader-panes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--td-comp-margin-m); min-height: 0; }
+.reader-panes { display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); gap: var(--td-comp-margin-s); min-height: 0; }
 .reader-panes--compare { position: relative; grid-template-columns: minmax(0, var(--reader-split)) minmax(0, var(--reader-rest)); }
 .reader-panes--compare > :deep(.panel-resize-handle) { position: absolute; grid-column: 1; right: 0; }
-@media (max-width: 760px) { .reader-page { padding-inline: 24px; } }
+@media (max-width: 760px) { .reader-page { padding: 16px 20px; } .reader-search__actions :deep(.t-button) { flex: 1 1 auto; } }
 </style>

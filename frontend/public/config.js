@@ -6,4 +6,6 @@ window.__RUNTIME_CONFIG__ = {
   EMBED_BASE_URL: '',
   // Optional: default UI locale for first-time visitors (zh-CN | zh-TW | en-US | ru-RU | ko-KR | ja-JP)
   DEFAULT_LOCALE: '',
+  // Set to 'native' to use the compatibility renderer for DOCX in the reading center.
+  READER_DOCX_ENGINE: 'zrimo',
 };

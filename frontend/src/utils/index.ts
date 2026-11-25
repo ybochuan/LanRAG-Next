@@ -10,6 +10,7 @@ declare global {
       MAX_SKILL_BUNDLE_SIZE_MB?: number;
       DEFAULT_LOCALE?: string;
       LANRAG_LITE_PRODUCT?: boolean;
+      READER_DOCX_ENGINE?: 'zrimo' | 'native';
     };
   }
 }

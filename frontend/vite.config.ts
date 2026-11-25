@@ -1,10 +1,10 @@
 import { fileURLToPath, URL } from 'node:url'
 import { resolve, dirname } from 'node:path'
-import { existsSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { copyPdfJsWasm } from './scripts/copy-pdfjs-wasm.mjs'
 import { createRequire } from 'node:module'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, normalizePath, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 
@@ -88,6 +88,39 @@ function pdfJsWasmAssets(): Plugin {
   }
 }
 
+function zrimoRuntimeAssets(): Plugin {
+  const source = dirname(fileURLToPath(import.meta.resolve('@zrimo/viewer')))
+  let output = ''
+  return {
+    name: 'zrimo-runtime-assets',
+    configureServer(server) {
+      const prefix = `${server.config.base}vendor/zrimo/`
+      server.middlewares.use((req, _res, next) => {
+        const resource = req.url?.startsWith(prefix) ? req.url.slice(prefix.length) : ''
+        if (/^(assets|fonts|workers)\/(?:[\w.-]+\/)*[\w.-]+$/.test(resource) && !resource.split('/').includes('..')) {
+          req.url = `${server.config.base}@fs/${normalizePath(source)}/${resource}`
+        }
+        next()
+      })
+    },
+    configResolved(config) {
+      if (config.command === 'build') output = resolve(config.root, config.build.outDir, 'vendor', 'zrimo')
+    },
+    closeBundle() {
+      if (!output) return
+      mkdirSync(output, { recursive: true })
+      for (const directory of ['assets', 'fonts', 'workers']) {
+        cpSync(resolve(source, directory), resolve(output, directory), { recursive: true })
+      }
+      for (const notice of ['LICENSE-MIT', 'LICENSE-APACHE', 'THIRD_PARTY_NOTICES.md']) {
+        cpSync(resolve(source, '..', notice), resolve(output, notice))
+      }
+      const silurus = dirname(fileURLToPath(import.meta.resolve('@silurus/ooxml/docx')))
+      cpSync(resolve(silurus, '..', 'LICENSE'), resolve(output, 'LICENSE-SILURUS'))
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __FRONTEND_VERSION__: JSON.stringify(FRONTEND_VERSION),
@@ -142,6 +175,7 @@ export default defineConfig({
     vueJsx(),
     embedHtmlDevFallback(),
     pdfJsWasmAssets(),
+    zrimoRuntimeAssets(),
   ],
   resolve: {
     dedupe: ['vue', 'vue-demi'],

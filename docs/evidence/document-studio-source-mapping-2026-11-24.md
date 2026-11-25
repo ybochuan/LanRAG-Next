@@ -1,17 +1,17 @@
 # 文档阅读中心源码映射与 P0 核验证据
 
-- 日期：2026-11-24
+- 日期：2026-11-24（2026-11-25 复核更新）
 - 仓库：`D:\LanRAG-Next`
-- 分支/HEAD：`codex/m1-parser-routing` / `5311e50385196b9a281a70e7a7d1ea87627a36f5`（`feat(doc-studio): add document reading center`；基线 `d6057e41` / `batch6-1-gd6057e41`）
+- 分支/HEAD：`codex/m1-parser-routing` / `87642ade0f9787e51faa34dd746acf52612c88fc`（`docs(doc-studio): record implementation commit`；阅读中心实现提交 `5311e503`；核心构建基线 `d6057e41` / `batch6-1-gd6057e41`）
 - 上游基线：`Tencent/WeKnora v0.9.0` / `f17ee8a`（`BASELINE.txt`）
-- 工作区状态：阅读中心实现已提交并推送为 `5311e503`；提交前为 27 个已修改文件、15 个未跟踪文件，`internal/` 无 diff。本文记录实际源码映射、权限边界与已执行核验，不构成核心改动授权。
+- 工作区状态：阅读中心实现提交为 `5311e503`，仓库 HEAD 为 `87642ade`；当前工作区另有 DOC-VIEWER 多格式与阅读体验改动未提交（Zrimo 阅读器、格式矩阵、紧凑 UI 等），`internal/` 无 diff。本文记录实际源码映射、权限边界与已执行核验，不构成核心改动授权。
 
 ## 1. 边界与约束
 
 - `internal/` 为受控区，本轮未修改；`git diff -- internal/` 为空。
 - `extensions/` 为独立 Go module；未新增对 WeKnora `internal/` 包的 import、require 或 replace。
 - 前端改动位于 `frontend/`；全部可见文案进入六语 locale，TDesign token 与原生页面骨架为 UI 基准。
-- 已按用户指令于 2026-11-25 00:33 提交并推送 `5311e503`。Windows Lite 安装版前端已于 2026-11-25 00:30 切换至最终构建，入口 SHA-256 为 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`；回滚目录为 `resources/web-backup-20261125-0030`。
+- 阅读中心实现已提交为 `5311e503`。Windows Lite 安装版前端已于 2026-11-26 00:20 切换至双页视图构建（505 个文件），入口 SHA-256 为 `882a3a9eb7209f178aa57c46b78e865ee9f1de347d7840803196c9b0035158ea`；回滚目录为 `resources/web-backup-20261126-0020`。
 
 ## 2. 原生预览契约
 
@@ -26,7 +26,7 @@
 
 | 场景 | 执行方式 | 结果 | 证据 |
 |---|---|---|---|
-| Markdown 原文预览、同一 KB 关联、双栏对照、键盘/指针调宽、窄屏 A/B | 隔离浏览器夹具 `frontend/scripts/verify-document-reader.mjs`，使用本地 HTTP 夹具与 Playwright | 通过；夹具输出 `Reader browser fixture passed: workbench restoration, same-KB comparison, keyboard and pointer resizing, pinned denial, narrow A/B, en-US and zh-CN, read-only requests`，退出 0 | 本文件第 5 节；脚本位于 `frontend/scripts/verify-document-reader.mjs` |
+| Markdown 原文预览、同一 KB 关联、双栏对照、键盘/指针调宽、窄屏 A/B、488px 内容区无横向溢出 | 隔离浏览器夹具 `frontend/scripts/verify-document-reader.mjs`，使用本地 HTTP 夹具与 Playwright | 通过；夹具输出 `Reader browser fixture passed: workbench restoration, same-KB comparison, keyboard and pointer resizing, pinned denial, narrow A/B, narrow 488px no overflow, en-US and zh-CN, read-only requests`，退出 0 | 本文件第 5 节；脚本位于 `frontend/scripts/verify-document-reader.mjs` |
 | DOCX 单窗预览 | Windows Lite 安装版 WebView2，真实测试库，文档 `70ec19b1-fae0-4950-925b-38d1fff6ff9f`（`annex-06.docx`） | 通过；预览渲染、文件名与工具栏显示 | 截图 `422f15dd8485778d94129a7cc3fc332d0283f012592aba1e7bdca048c1619aee`（菜单）、`2ada468c168570358f5637adaeabde1913e199ac79597e32cd42d3c6b782ccb7`（预览） |
 | DOCX 双栏对照与唯一全屏窗格 | Windows Lite 安装版，真实测试库，对照“记录清单”与“上门影像特殊情况说明” | 通过；双栏出现，活动 A 栏有“全屏预览”，非活动 B 栏只有“下载原件”；退出全屏后焦点回到触发按钮 | 截图 `1fe94698f043ee38e0c5aa1e8f32dc06effb37e1129258455e8137ded690a6e4`、`9129f4ff59c01c25981e5320679f42cdb0f2789746b81cf58964f77c110b25d0`、`f116cf1c06fd0c933bbfc5a1026eda6cd17536cc1e35d19bccd240e530c4897b` |
 | 固定历史版本不取当前原文 | Windows Lite 安装版，制度沿革点击“查看版本记录”打开“原文 · 3216193a” | 通过；提示“仅有历史记录，无法核验此版本的原件。”，未调用当前预览 | 截图 `a3459eec5d517cfb4c967a8211d444ccc958a9b6e6006a994ed1a2de3bbf8e40` |
@@ -107,8 +107,8 @@
 ## 9. 本轮验证记录
 
 - `npm run check-i18n`：退出 0（15/15）。
-- `npm run type-check && npm run build`：退出 0；`frontend/dist` 255 个文件，入口 `index.html` SHA-256 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`（4736 字节）。
-- `npx tsx --test` 定向阅读用例：退出 0（115/115）；覆盖固定证据拒绝、普通预览前后校验、附件文档父件族展示、附件动作摘要变化失败关闭、作用域切换取消、历史当前观察解析、业务版本对照按文档 ID 打开。
-- 完整前端 `npm test`：退出 0（2529 tests，2527 pass、2 skip、0 fail）；运行前将 `C:\Program Files\Git\cmd` 与 `C:\Program Files\Git\usr\bin` 置于 PATH，排除此前 POSIX shell 环境误报。
-- `node frontend/scripts/verify-document-reader.mjs`：退出 0，输出 `Reader browser fixture passed: workbench restoration, same-KB comparison, keyboard and pointer resizing, pinned denial, narrow A/B, en-US and zh-CN, read-only requests`。
+- `npm run type-check && npm run build`：退出 0；`frontend/dist` 505 个文件，入口 `index.html` SHA-256 `882a3a9eb7209f178aa57c46b78e865ee9f1de347d7840803196c9b0035158ea`（4736 字节）。
+- `npx tsx --test` 定向阅读用例：退出 0（含 Zrimo 格式矩阵、XLSX 流式读取、Zrimo 组件静态断言、固定证据拒绝、普通预览前后校验、附件文档父件族展示、附件动作变化失败关闭、历史当前观察解析、业务版本对照按文档 ID 打开）。
+- 完整前端 `npm test`：退出 0（2539 tests，2537 pass、2 skip、0 fail）；使用 `C:\Program Files\Git\cmd` 置于 PATH 的 cmd.exe 运行，排除此前 POSIX shell 环境误报。
+- `node frontend/scripts/verify-document-reader.mjs`（带 DOCX、十种合成格式与复杂业务件夹具）：退出 0，输出 `Reader DOCX fixture passed: ...`、`Reader multi-format fixture passed: XLSX, PDF, PNG, PPTX, CSV, SVG, JPG, WEBP, BMP, TIFF`、`Reader complex docx passed: 61 pages...`、`Reader complex pptx passed: 20 pages...`、`Reader complex pdf passed: 30 pages...`、`Reader complex dual-pane passed: PDF + PPTX...` 与 `Reader browser fixture passed: ... narrow 488px no overflow ...`。
 - Windows Lite 安装版资源切换与桌面实测：见 TASK_BACKLOG.md 第 18-20 行及本文件第 2.1 节截图。

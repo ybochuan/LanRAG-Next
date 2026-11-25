@@ -1,32 +1,35 @@
 <template>
   <section class="reader-attachments" aria-labelledby="reader-attachments-heading" :aria-busy="loading">
-    <h3 id="reader-attachments-heading">{{ $t('reader.groups.attachments') }}</h3>
+    <h3 id="reader-attachments-heading"><span v-if="side">{{ side }} · </span>{{ $t('reader.groups.attachments') }}</h3>
     <t-alert v-if="doc.version || doc.kind" theme="info">{{ $t('reader.attachmentsVersionUnavailable') }}</t-alert>
     <t-loading v-else-if="loading" size="small" :text="$t('reader.loadingRelations')" />
     <t-alert v-else-if="error" theme="warning">{{ $t(error === 'unsupported' ? 'reader.attachmentsVersionUnavailable' : `reader.error.${error}`) }}
       <t-button variant="text" size="small" @click="reload++">{{ $t('workbench.common.retry') }}</t-button>
     </t-alert>
     <template v-else>
-      <t-alert v-if="parentTitle" theme="info">{{ $t('reader.attachmentFamilyNote', { name: parentTitle }) }}</t-alert>
+      <p v-if="parentTitle" class="attachment-parent" :title="parentTitle">
+        <t-icon name="link" size="14px" aria-hidden="true" />
+        <span class="attachment-parent__title">{{ parentTitle }}</span>
+      </p>
       <t-alert v-if="partial" theme="warning">{{ $t('reader.partialData') }}
         <t-button variant="text" size="small" @click="reload++">{{ $t('workbench.common.retry') }}</t-button>
       </t-alert>
       <t-empty v-if="!partial && !items.length" :description="$t('workbench.attachmentWorkbench.empty')" />
       <ul v-if="items.length" role="list">
         <li v-for="item in items" :key="item.relation_id || item.id" class="attachment-item">
-          <span class="attachment-item__icon" aria-hidden="true"><t-icon name="file" /></span>
+          <t-icon name="file" size="16px" class="attachment-item__icon" aria-hidden="true" />
           <div class="attachment-item__content">
-            <strong class="attachment-item__title">{{ item.title || item.file_name }}</strong>
-            <span v-if="item.relation_type === 'template_for' || item.relation_type === 'cites'" class="attachment-item__tags">
-              <t-tag v-if="item.relation_type === 'template_for'" size="small" variant="light">{{ $t('workbench.attachmentWorkbench.tags.template') }}</t-tag>
-              <t-tag v-if="item.relation_type === 'cites'" size="small" variant="light">{{ $t('workbench.attachmentWorkbench.tags.cites') }}</t-tag>
-            </span>
+            <span class="attachment-item__title" :title="item.title || item.file_name">{{ item.title || item.file_name }}</span>
           </div>
           <div class="attachment-item__actions">
-            <t-button size="small" variant="outline" theme="primary" :disabled="busy" @click="select(item, false)">
-              <t-icon name="browse" /> {{ $t('reader.open') }}
+            <t-button class="reader-open-button" size="medium" variant="text" theme="primary" shape="square"
+              :disabled="busy" :aria-label="$t('reader.open')" :title="$t('reader.open')" @click="select(item, false)">
+              <t-icon name="browse" />
             </t-button>
-            <t-button v-if="canCompare" size="small" variant="text" :disabled="busy" @click="select(item, true)">{{ $t('reader.compare') }}</t-button>
+            <t-button v-if="canCompare" size="small" variant="text" shape="square" :disabled="busy"
+              :aria-label="$t('reader.compare')" :title="$t('reader.compare')" @click="select(item, true)">
+              <t-icon name="swap" />
+            </t-button>
           </div>
         </li>
       </ul>
@@ -41,7 +44,7 @@ import { useDocumentReaderStore } from '@/stores/documentReader'
 import { readerKey, type ReaderDocument } from './model'
 import { ReaderError, readerError, readerMetadata, readerTitles } from './readerApi'
 
-const props = defineProps<{ doc: ReaderDocument }>()
+const props = defineProps<{ doc: ReaderDocument; side?: 'A' }>()
 const emit = defineEmits<{ open: [doc: ReaderDocument]; compare: [doc: ReaderDocument] }>()
 const session = useDocumentReaderStore()
 const snapshot = shallowRef<AttachmentWorkbench>()
@@ -126,14 +129,17 @@ async function select(item: AttachmentItem, compare: boolean) {
 </script>
 
 <style scoped>
-.reader-attachments { display: grid; gap: var(--td-comp-margin-m); overflow-wrap: anywhere; }
+.reader-attachments { display: grid; gap: var(--td-comp-margin-s); min-width: 0; overflow-wrap: anywhere; }
 h3, p { margin: 0; }
 h3 { font-size: var(--td-font-size-title-medium); }
-ul { display: grid; gap: var(--td-comp-margin-s); padding: 0; margin: 0; list-style: none; }
-.attachment-item { display: flex; align-items: center; gap: var(--td-comp-margin-s); min-width: 0; padding: 8px 10px; background: var(--td-bg-color-secondarycontainer); border-radius: var(--td-radius-medium); }
-.attachment-item__icon { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; border-radius: var(--td-radius-default); background: var(--td-bg-color-container); color: var(--td-brand-color); font-size: 18px; }
-.attachment-item__content { display: grid; gap: 4px; flex: 1 1 auto; min-width: 0; }
-.attachment-item__title { color: var(--td-text-color-primary); font-size: var(--td-font-size-body-medium); font-weight: 600; overflow-wrap: anywhere; }
-.attachment-item__tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.attachment-parent { display: flex; align-items: center; gap: var(--td-comp-margin-xxs); min-width: 0; color: var(--td-text-color-secondary); }
+.attachment-parent__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--td-font-size-body-small); }
+ul { display: grid; gap: var(--td-comp-margin-xxs); padding: 0; margin: 0; list-style: none; }
+.attachment-item { display: flex; align-items: center; gap: var(--td-comp-margin-s); min-width: 0; padding: 8px 10px; border-radius: var(--td-radius-medium); background: var(--td-bg-color-secondarycontainer); }
+.attachment-item__icon { flex: none; color: var(--td-text-color-secondary); }
+.attachment-item__content { flex: 1 1 auto; min-width: 0; }
+.attachment-item__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td-text-color-primary); font-size: var(--td-font-size-body-medium); }
 .attachment-item__actions { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; }
+.reader-open-button { flex: 0 0 32px; width: 32px; min-width: 32px; padding: 0; }
+.reader-open-button :deep(.t-icon) { margin: 0; }
 </style>

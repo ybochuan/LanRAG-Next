@@ -4,18 +4,18 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档状态 | 实施中设计稿（P1 隔离浏览器验收完成；Windows Lite 桌面已部署并完成真实 DOCX 与附件面板验收；不构成核心改动授权） |
+| 文档状态 | 实施中设计稿（P1 隔离浏览器验收完成；Zrimo 多格式与阅读体验第二轮已部署；Windows Lite 桌面真实 DOCX 与附件面板已验收；不构成核心改动授权） |
 | 日期 | 2026-11-24 |
 | 项目 | LanRAG-Next / LanRAG Lite（基于 WeKnora Lite） |
 | 审查分支 | `codex/m1-parser-routing` |
-| 实现提交 | `5311e503`（`feat(doc-studio): add document reading center`；基于 `d6057e41` / `batch6-1-gd6057e41`） |
+| 实现提交 | `5311e503`（`feat(doc-studio): add document reading center`）；仓库 HEAD `87642ade`（`docs(doc-studio): record implementation commit`）；核心构建基于 `d6057e41` / `batch6-1-gd6057e41` |
 | 冻结上游基线 | `Tencent/WeKnora` v0.9.0，`f17ee8a`（已核对 `BASELINE.txt`） |
 | 架构约束 | Frozen Architecture、Core + Extension Host、Bridge v1、`AGENTS.md`、`PATCHES.md` |
 | 建设方式 | 独立自研阅读中心 + 双文档对照 + 工作台联动 + 原生能力复用 |
 | 建议任务编号 | `DOC-STUDIO`（与原 M6 展示任务衔接，编号待维护者确认） |
 | 建议归档位置 | `docs/design/文档阅读中心与关联研读系统-v1.1.md` |
 
-> 本方案基于已读取的项目文档、当前分支相关源码和 WeKnora v0.9.0 原生预览实现进行静态设计。v1.1 定稿时尚未运行项目、修改代码、执行迁移或部署。截至 2026-11-24，工作区已按本方案完成 P1 主干与 P2/P3 部分实现，阅读中心 P1 已在隔离浏览器夹具中通过；实际源码映射、预览与权限矩阵、双实例验证见 [document-studio-source-mapping-2026-11-24](../evidence/document-studio-source-mapping-2026-11-24.md)。Windows Lite 安装版前端已切换至最终构建（2026-11-25 00:30，入口 SHA-256 `5f86d3c11d00e6151b672e2d55cd187e2008f3e648baf9f2bd1d709d38a143b5`），已用真实测试库完成 DOCX 单窗预览与附件面板验收；PDF／XLSX／图片格式矩阵、真实权限负向与既有业务链路仍待补测。本文不修改冻结架构，不自动授权核心受控区改动。
+> 本方案基于已读取的项目文档、当前分支相关源码和 WeKnora v0.9.0 原生预览实现进行静态设计。v1.1 定稿时尚未运行项目、修改代码、执行迁移或部署。截至 2026-11-25，工作区已按本方案完成 P1 主干与 P2/P3 部分实现，阅读中心 P1 已在隔离浏览器夹具中通过；实际源码映射、预览与权限矩阵、双实例验证见 [document-studio-source-mapping-2026-11-24](../evidence/document-studio-source-mapping-2026-11-24.md)。Windows Lite 安装版前端已切换至最新构建（2026-11-26 00:20，505 个文件，入口 SHA-256 `882a3a9eb7209f178aa57c46b78e865ee9f1de347d7840803196c9b0035158ea`），已用真实测试库完成 DOCX 单窗预览与附件面板验收；普通文档已按用户选型接入 Zrimo 多格式阅读，采用连续滚动分页、双页视图并支持工作表切换。XLSX／PDF／PNG／PPTX／CSV／SVG／JPG／WEBP／BMP／TIFF 已用合成夹具验证加载与画布渲染；61 页 DOCX、20 页 PPTX、30 页 PDF 复杂业务件连续滚动和 PDF+PPTX 双窗资源采样已通过；真实权限负向与既有业务链路仍待补测。本文不修改冻结架构，不自动授权核心受控区改动。
 
 ## 0. 执行摘要与核心裁决
 
