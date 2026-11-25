@@ -8,7 +8,7 @@
 | 日期 | 2026-11-24 |
 | 项目 | LanRAG-Next / LanRAG Lite（基于 WeKnora Lite） |
 | 审查分支 | `codex/m1-parser-routing` |
-| 实现提交 | `5311e503`（`feat(doc-studio): add document reading center`）；仓库 HEAD `87642ade`（`docs(doc-studio): record implementation commit`）；核心构建基于 `d6057e41` / `batch6-1-gd6057e41` |
+| 实现提交 | `5311e503`（`feat(doc-studio): add document reading center`）；DOC-VIEWER 功能提交 `d8445458`（`feat(document-reader): ship Zrimo multi-format reader with two-page view`）；工作区基线 `87642ade`；核心构建基于 `d6057e41` / `batch6-1-gd6057e41` |
 | 冻结上游基线 | `Tencent/WeKnora` v0.9.0，`f17ee8a`（已核对 `BASELINE.txt`） |
 | 架构约束 | Frozen Architecture、Core + Extension Host、Bridge v1、`AGENTS.md`、`PATCHES.md` |
 | 建设方式 | 独立自研阅读中心 + 双文档对照 + 工作台联动 + 原生能力复用 |
@@ -838,7 +838,7 @@ P1 必须构成真实使用闭环，不是视觉占位原型。最低支持原�
 - [当前 fork platform/index.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/platform/index.vue)、[ModelSettings.vue](https://github.com/ybochuan/LanRAG-Next/blob/d6057e412d7da147a2e1046799d06450f669be2d/frontend/src/views/settings/ModelSettings.vue)、[原生图标离线守卫](https://github.com/Tencent/WeKnora/blob/v0.9.0/frontend/src/utils/tdesign-icon-offline.ts)：应用骨架、页头、离线图标。
 - 用户本轮上传的 `AGENTS.md` §8.1–8.5 为 UI 强制规范依据，优先于本方案概念图和样式建议。
 
-上述 fork 源码链接固定到实现前基线 `d6057e412d7da147a2e1046799d06450f669be2d`（`batch6-1-gd6057e41`）；阅读中心实现已提交为 `5311e503`（`feat(doc-studio): add document reading center`），新增文件可从该提交访问。上游 WeKnora 链接固定到标签 `v0.9.0`（`f17ee8a`）。重新核验时须以实际本地 HEAD 为准，不能将当前文档视作源码永久承诺。
+上述 fork 源码链接固定到实现前基线 `d6057e412d7da147a2e1046799d06450f669be2d`（`batch6-1-gd6057e41`）；阅读中心实现已提交为 `5311e503`（`feat(doc-studio): add document reading center`）；DOC-VIEWER、Zrimo 多格式、双页视图及对应文档与示例已提交为 `d8445458`（`feat(document-reader): ship Zrimo multi-format reader with two-page view`），新增文件可从该提交访问。上游 WeKnora 链接固定到标签 `v0.9.0`（`f17ee8a`）。重新核验时须以实际本地 HEAD 为准，不能将当前文档视作源码永久承诺。
 
 ## 附录 A：首轮任务原文（实施前，已执行）
 

@@ -2,9 +2,9 @@
 
 - 日期：2026-11-24（2026-11-25 复核更新）
 - 仓库：`D:\LanRAG-Next`
-- 分支/HEAD：`codex/m1-parser-routing` / `87642ade0f9787e51faa34dd746acf52612c88fc`（`docs(doc-studio): record implementation commit`；阅读中心实现提交 `5311e503`；核心构建基线 `d6057e41` / `batch6-1-gd6057e41`）
+- 分支与提交：`codex/m1-parser-routing`；工作区基线 `87642ade0f9787e51faa34dd746acf52612c88fc`（`docs(doc-studio): record implementation commit`）；DOC-VIEWER 功能提交 `d8445458`（`feat(document-reader): ship Zrimo multi-format reader with two-page view`）；阅读中心实现提交 `5311e503`；核心构建基线 `d6057e41` / `batch6-1-gd6057e41`
 - 上游基线：`Tencent/WeKnora v0.9.0` / `f17ee8a`（`BASELINE.txt`）
-- 工作区状态：阅读中心实现提交为 `5311e503`，仓库 HEAD 为 `87642ade`；当前工作区另有 DOC-VIEWER 多格式与阅读体验改动未提交（Zrimo 阅读器、格式矩阵、紧凑 UI 等），`internal/` 无 diff。本文记录实际源码映射、权限边界与已执行核验，不构成核心改动授权。
+- 工作区状态：阅读中心实现提交为 `5311e503`；DOC-VIEWER 多格式与阅读体验改动已提交为 `d8445458`（Zrimo 阅读器、格式矩阵、双页视图、紧凑 UI 等），工作区干净，`internal/` 无 diff。本文记录实际源码映射、权限边界与已执行核验，不构成核心改动授权。
 
 ## 1. 边界与约束
 
