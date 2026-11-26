@@ -1021,6 +1021,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       customInstructions: ''
     },
     questionGenerationConfig: {
+      modelId: '',
       enabled: true,
       questionCount: 3,
       customInstructions: ''
@@ -1189,6 +1190,7 @@ const loadKBData = async (
         customInstructions: kb.extract_config?.custom_instructions || ''
       },
       questionGenerationConfig: {
+        modelId: kb.question_generation_config?.model_id || '',
         enabled: kb.question_generation_config?.enabled || false,
         questionCount: kb.question_generation_config?.question_count || 3,
         customInstructions: kb.question_generation_config?.custom_instructions || ''
@@ -1636,12 +1638,14 @@ const buildSubmitData = () => {
   // 添加问题生成配置
   if (formData.value.questionGenerationConfig?.enabled) {
     data.question_generation_config = {
+      model_id: formData.value.questionGenerationConfig?.modelId || '',
       enabled: true,
       question_count: formData.value.questionGenerationConfig.questionCount || 3,
       custom_instructions: formData.value.questionGenerationConfig.customInstructions || ''
     }
   } else {
     data.question_generation_config = {
+      model_id: formData.value.questionGenerationConfig?.modelId || '',
       enabled: false,
       question_count: 3,
       custom_instructions: formData.value.questionGenerationConfig?.customInstructions || ''
@@ -1844,6 +1848,7 @@ const doSubmit = async () => {
           customInstructions: data.extract_config?.custom_instructions || ''
         },
         questionGeneration: {
+          modelId: data.question_generation_config?.model_id || '',
           enabled: data.question_generation_config?.enabled || false,
           questionCount: data.question_generation_config?.question_count || 3,
           customInstructions: data.question_generation_config?.custom_instructions || ''
