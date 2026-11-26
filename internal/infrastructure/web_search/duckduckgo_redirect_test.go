@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	"github.com/Tencent/WeKnora/internal/types"
 )
 
 type ddgRedirectTransport func(*http.Request) (*http.Response, error)
@@ -37,7 +35,7 @@ func TestDuckDuckGoSearchResolvesRedirectQuery(t *testing.T) {
 						}, nil
 					},
 				)}}
-				results, err := provider.Search(t.Context(), types.WebSearchRequest{Query: "guide", MaxResults: 1})
+				results, err := provider.Search(t.Context(), "guide", 1, false)
 				if err != nil {
 					t.Fatal(err)
 				}
