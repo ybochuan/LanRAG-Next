@@ -78,12 +78,13 @@ func TestWikiLintUsesCurrentMarkdownInsteadOfStaleOutLinks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(
-		&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}, &types.WikiPageIssue{},
+		&types.KnowledgeBase{}, &types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}, &types.WikiPageIssue{},
 	))
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
 	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil)
 	const kbID = "kb-markdown-links"
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: kbID, TenantID: 1}).Error)
 	content := "A sufficiently long explanation of this topic and its references.\n\n" +
 		`| [[CONCEPT/FOO\|显示名称]] |` + "\n\n`[[concept/example]]`\n\n```json\n[[1, 2]]\n```"
 	for _, page := range []*types.WikiPage{
