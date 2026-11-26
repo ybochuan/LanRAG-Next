@@ -9740,6 +9740,7 @@ definitions:
     - metaso
     - bocha
     - serply
+    - deepseek
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBrave
@@ -9756,6 +9757,7 @@ definitions:
     - WebSearchProviderTypeMetaso
     - WebSearchProviderTypeBocha
     - WebSearchProviderTypeSerply
+    - WebSearchProviderTypeDeepSeek
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       config_fields:

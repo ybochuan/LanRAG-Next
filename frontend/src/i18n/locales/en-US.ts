@@ -2696,6 +2696,14 @@ pendingDraft: "Finish or discard the current edits before opening the reader.",
     baseUrlLabel: 'Instance URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'Enter API key',
+    clients: {
+      label: 'Search & page reading',
+      search: 'Search',
+      fetch: 'Page reading',
+      viaApi: '{name} API',
+      local: 'Built-in page reader',
+      help: 'Search results come from this provider; agents read page content with the reader above.'
+    },
     toasts: {
       providerCreated: 'Search provider created',
       providerUpdated: 'Search provider updated',
