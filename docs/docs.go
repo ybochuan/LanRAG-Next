@@ -36655,7 +36655,8 @@ const docTemplate = `{
                 "metaso",
                 "bocha",
                 "serply",
-                "deepseek"
+                "deepseek",
+                "searchapi"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBrave",
@@ -36672,7 +36673,8 @@ const docTemplate = `{
                 "WebSearchProviderTypeMetaso",
                 "WebSearchProviderTypeBocha",
                 "WebSearchProviderTypeSerply",
-                "WebSearchProviderTypeDeepSeek"
+                "WebSearchProviderTypeDeepSeek",
+                "WebSearchProviderTypeSearchAPI"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo": {

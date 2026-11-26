@@ -6442,6 +6442,7 @@ definitions:
     - zhipu
     - volcengine
     - deepseek
+    - searchapi
     - hunyuan
     - minimax
     - openai
@@ -9758,6 +9759,7 @@ definitions:
     - WebSearchProviderTypeBocha
     - WebSearchProviderTypeSerply
     - WebSearchProviderTypeDeepSeek
+    - WebSearchProviderTypeSearchAPI
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       config_fields:
