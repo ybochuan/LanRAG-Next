@@ -20,7 +20,7 @@
       </t-alert>
       <ZrimoReader v-else-if="useZrimo" :key="generation" :blob="result.blob"
         :file-name="result.metadata.file_name || title" :format="zrimoFormat(result.metadata)"
-        :fullscreen-owner="fullscreenOwner" @issue="renderIssue = $event" />
+        :fullscreen-owner="fullscreenOwner" @issue="renderIssue = $event" @ask="askSelection" />
       <template v-else>
         <t-alert v-if="renderIssue === 'fallback'" theme="info">{{ $t('reader.docx.fallback') }}</t-alert>
         <DocumentPreview :key="generation" :source-blob="result.blob"
@@ -36,7 +36,10 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
+import { useStartChat } from '@/components/GlobalCommandPalette/useStartChat'
 import { useDocumentReaderStore } from '@/stores/documentReader'
+import { useSettingsStore } from '@/stores/settings'
 import type { SourceLocateRequest } from '@/utils/sourceLocator'
 import type { SourceLocateResult } from '@/components/document-preview.vue'
 import { readerKey, type ReaderDocument } from './model'
@@ -47,6 +50,8 @@ const DocumentPreview = defineAsyncComponent(() => import('@/components/document
 const props = defineProps<{ doc: ReaderDocument; side?: 'A' | 'B'; fullscreenOwner: boolean; sourceMode?: boolean; locate?: SourceLocateRequest; refresh?: number }>()
 const emit = defineEmits<{ ready: [document: ReaderDocument, metadata: NativeReaderDocument]; located: [result: SourceLocateResult]; settled: []; activate: [] }>()
 const session = useDocumentReaderStore()
+const settings = useSettingsStore()
+const { startChat } = useStartChat()
 const { t } = useI18n()
 const toolbar = ref<HTMLElement>()
 const result = shallowRef<Awaited<ReturnType<typeof readCurrentFile>>>()
@@ -59,6 +64,14 @@ const pinned = computed(() => (!!props.doc.version && !props.doc.kind) || error.
 const title = computed(() => props.doc.kind === 'correction' ? t('workbench.correction.title') : result.value?.metadata.title || result.value?.metadata.file_name || t('reader.original'))
 const useZrimo = computed(() => !renderIssue.value && !props.locate && !props.doc.kind && !props.doc.version &&
   window.__RUNTIME_CONFIG__?.READER_DOCX_ENGINE !== 'native' && !!result.value && isZrimoReadable(result.value.metadata))
+
+function askSelection(location: string) {
+  if (!useZrimo.value) return
+  const { id, kb } = props.doc
+  settings.selectAgent(BUILTIN_QUICK_ANSWER_ID)
+  settings.setFileKbMap({ [id]: kb })
+  startChat(t('reader.docx.selectionDraft', { title: title.value, location }), [], [id])
+}
 
 watch(() => [readerKey(props.doc), session.scope, retry.value, props.sourceMode, props.refresh] as const, async (_, __, onCleanup) => {
   const doc = props.doc

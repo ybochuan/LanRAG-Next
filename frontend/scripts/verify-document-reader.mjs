@@ -94,6 +94,7 @@ const overview = {
 const detail = { snapshot: { current: { state: 'active', last_event_id: 'fixture-event' }, annotations, review_overdue: false }, events: [], events_truncated: false, can_write: true }
 const previewRequests = []
 const badWrites = []
+const chatSends = []
 let browser
 try {
   browser = await chromium.launch({ executablePath: chromiumPath, headless: true })
@@ -114,6 +115,7 @@ try {
     if (!path.startsWith('/api/')) return route.continue()
     const respond = data => route.fulfill({ json: { success: true, data } })
     if (request.method() === 'PUT' || request.method() === 'DELETE') badWrites.push(path)
+    if (request.method() === 'POST' && /\/(?:sessions|knowledge-chat|agent-chat)(?:\/|$)/.test(path)) chatSends.push(path)
     if (path.endsWith('/auth/me')) return respond({ user, tenant, tenant_role: 'admin' })
     if (path.endsWith('/knowledge-bases')) return respond([knowledgeBase])
     if (path.endsWith(`/knowledge-bases/${knowledgeBase.id}`)) return respond(knowledgeBase)
@@ -245,6 +247,16 @@ try {
     await first.getByRole('button', { name: 'Fit page' }).click()
     assert.equal(await first.getByRole('button', { name: 'Fit page' }).getAttribute('aria-pressed'), 'true')
     await first.getByRole('button', { name: 'Fit width' }).click()
+    const thumbnails = first.getByRole('button', { name: 'Page thumbnails', exact: true })
+    await thumbnails.click({ timeout: 5000 })
+    const thumbnailList = first.getByRole('region', { name: 'Page thumbnails' })
+    const thirdPage = thumbnailList.getByRole('button', { name: 'Page 3', exact: true })
+    await thirdPage.locator('canvas[data-ready]').waitFor({ timeout: 15000 })
+    await thirdPage.click()
+    await first.locator('.zrimo-page-status').filter({ hasText: /^Page 3 of / }).waitFor()
+    assert.equal(await second.getByRole('region', { name: 'Page thumbnails' }).count(), 0)
+    await thumbnailList.getByRole('button', { name: 'Page 1', exact: true }).click()
+    await thumbnails.click()
     const spreadButton = first.getByRole('button', { name: 'Two pages', exact: true })
     await spreadButton.click()
     await first.locator('.zrimo-spread').waitFor()
@@ -295,7 +307,15 @@ try {
     await find.fill('制度末尾核验')
     await find.press('Enter')
     await first.getByText('Match 1 of 1', { exact: true }).waitFor()
-    await find.press('Escape')
+    const results = first.getByRole('region', { name: 'Search results' })
+    const lastMatch = results.getByRole('button').filter({ hasText: /制度末尾核验/ })
+    await lastMatch.getByText(/制度末尾核验/).waitFor()
+    const destination = await lastMatch.locator('strong').textContent()
+    await first.getByRole('button', { name: 'Previous page', exact: true }).click()
+    assert.ok(!(await first.locator('.zrimo-page-status').textContent()).startsWith(destination + ' of '))
+    await lastMatch.click()
+    await first.locator('.zrimo-page-status').filter({ hasText: destination + ' of ' }).waitFor()
+    await lastMatch.press('Escape')
     await find.waitFor({ state: 'detached' })
     await page.getByRole('button', { name: 'Exit comparison', exact: true }).click()
     await viewers.nth(1).waitFor({ state: 'detached' })
@@ -327,7 +347,43 @@ try {
     await page.locator('.docx-container').getByText('合成跨页检查表', { exact: true }).waitFor()
     assert.equal(await viewers.count(), 0)
     await page.unroute('**/config.js', nativeConfigRoute)
-    console.log('Reader DOCX fixture passed: active pane, fit page, bounded viewport, compact attachments, search shortcuts, fullscreen, denied and bounded reads, fallback and rollback')
+    await page.evaluate(() => {
+      const settings = JSON.parse(localStorage.getItem('WeKnora_settings') || '{}')
+      settings.selectedKnowledgeBases = ['unrelated-kb']
+      settings.selectedFiles = ['unrelated-file']
+      settings.selectedFileKbMap = { 'unrelated-file': 'unrelated-kb' }
+      localStorage.setItem('WeKnora_settings', JSON.stringify(settings))
+    })
+    await page.goto(origin + '/platform/reader?kb=kb-a&doc=docx-policy')
+    await waitForPage(first)
+    const textLayer = first.locator('[data-zrimo-layer="text"] span').filter({ hasText: /\S/ }).first()
+    await textLayer.waitFor()
+    const selectText = () => textLayer.evaluate(span => {
+      const range = document.createRange()
+      range.selectNodeContents(span)
+      const selection = window.getSelection()
+      selection.removeAllRanges()
+      selection.addRange(range)
+      return selection.toString()
+    })
+    const askSelection = first.getByRole('button', { name: 'Ask about selection' })
+    await selectText()
+    await askSelection.waitFor()
+    await page.evaluate(() => window.getSelection().removeAllRanges())
+    await askSelection.waitFor({ state: 'detached' })
+    const selectedText = await selectText()
+    await askSelection.click({ timeout: 5000 })
+    await page.waitForURL('**/platform/creatChat')
+    const draft = await page.locator('textarea:visible').first().inputValue()
+    assert.match(draft, /DOCX policy/)
+    assert.match(draft, /page 1/i)
+    assert.ok(selectedText && !draft.includes(selectedText), 'the raw selection stays in the reader')
+    const settings = await page.evaluate(() => JSON.parse(localStorage.getItem('WeKnora_settings')))
+    assert.deepEqual(settings.selectedKnowledgeBases, [])
+    assert.deepEqual(settings.selectedFiles, ['docx-policy'])
+    assert.deepEqual(settings.selectedFileKbMap, { 'docx-policy': 'kb-a' })
+    assert.deepEqual(chatSends, [], 'opening the selection draft does not send it')
+    console.log('Reader DOCX fixture passed: thumbnails, search results and shortcuts, selection draft, active pane, fit page, bounded viewport, compact attachments, fullscreen, denied and bounded reads, fallback and rollback')
   }
   if (formatFixtures) {
     await page.setViewportSize({ width: 1640, height: 950 })
@@ -355,6 +411,17 @@ try {
       }
       await viewer.locator('.zrimo-viewport canvas:visible, .zrimo-viewport img:visible').first().waitFor({ timeout: 30000 })
       assert.equal(await page.locator('.t-alert').filter({ hasText: 'Zrimo could not open this file' }).count(), 0)
+      if (ext === 'xlsx') {
+        const surface = viewer.locator('[data-zrimo="spreadsheet-viewport"]')
+        const viewport = await surface.boundingBox()
+        await surface.click({ position: { x: viewport.width / 2, y: viewport.height / 3 } })
+        await viewer.getByRole('button', { name: 'Ask about selection' }).click({ timeout: 10000 })
+        await page.waitForURL('**/platform/creatChat')
+        const draft = await page.locator('textarea:visible').first().inputValue()
+        assert.match(draft, /Format XLSX/)
+        assert.match(draft, /· [A-Z]+\d+/)
+        assert.deepEqual(chatSends, [], 'opening the spreadsheet selection draft does not send it')
+      }
     }
     console.log('Reader multi-format fixture passed: ' + formatFormats.map(ext => ext.toUpperCase()).join(', '))
     await page.goto(origin + '/platform/reader?kb=kb-a&doc=format-pdf&compare=format-pptx')

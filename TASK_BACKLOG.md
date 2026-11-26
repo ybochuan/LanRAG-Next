@@ -2,6 +2,7 @@
 
 ## DOC-VIEWER 多格式阅读引擎升级（2026-11-25）
 
+- **阅读导航与选区提问已部署（2026-11-26）。** 缩略图每批最多渲染 8 张，查找结果按命中页显示上下文并支持跳转，两个对照窗格独立操作。文本或表格选区可打开原生快速问答草稿，预选该文件并带入页码、文本位置或单元格范围，提交由用户触发。当页正文继续由原生问答按当前权限读取。源码基线 `2d20a78c2`。工作区 Web 与 Windows Lite 安装目录的入口 SHA-256 均为 `4592821a544a2edc353fc7f82344a0f59123fbf7b364e3c8242b52e7dff64d3a`，两处分别校验 506 个发布文件并保留运行配置。整目录备份在 `tmp/zrimo-reading-publish-20261126-225047`。前端全量测试 2537 通过、2 跳过、0 失败，六语审计、类型检查、构建和两处已部署资源的隔离 Edge 回归均退出 0，覆盖 DOCX 选区及 XLSX 单元格草稿。Windows Lite 原生 WebView2 窗口及真实模型回答待复核。
 - **DV-P0 部分完成，DV-P1a 已通过隔离 Edge 冒烟。** 基线为 `87642ade`，候选为 `@zrimo/viewer@0.1.2`。候选包签名通过核验；多格式静态矩阵与 DOCX 及十种合成格式浏览器夹具通过。原型对照见 [首轮 DOCX 实测](docs/evidence/doc-viewer-poc-2026-11-25.md)。
 - **DV-P1b 已实现并通过隔离 Edge 集成。** 根据用户选型，正式阅读中心的普通文档默认使用 Zrimo，支持 DOCX/DOCM/XLSX/XLSM/PPTX/PPTM/PPSX/DOC/XLS/PPT/PDF/CSV/TSV/PNG/JPEG/GIF/WebP/SVG/BMP/TIFF；保留原生读取鉴权、证据定位和兼容渲染。阅读窗格使用连续滚动布局（`layout: 'continuous'`），支持工作表切换、按页、搜索、全屏和适宽/整页。预览流上限 50 MiB。运行配置 `READER_DOCX_ENGINE: 'native'` 可切回原生。已验证生产构建及 DOCX 默认渲染、双窗、中文搜索、全屏、拒绝、超限和回退；另以合成夹具验证 XLSX/PDF/PNG/PPTX/CSV/SVG/JPG/WEBP/BMP/TIFF 的真实加载与画布渲染，验证 PDF/PPTX 连续多页滚动，并以 PDF+PPTX 验证双窗同时渲染；复杂业务件排版与双窗资源峰值已用 61 页 DOCX、20 页 PPTX、30 页 PDF 合成夹具及 PDF+PPTX 双窗采样补测。多格式设计见 [Zrimo 多格式阅读设计](docs/design/document-reader-zrimo-multiformat-2026-11-25.md)。
 - **工作区 Web 已切换。** `D:/LanRAG-Next/web` 已使用该构建，保留原 `config.js`，并通过部署前后两次 Edge 浏览器夹具验证。整目录备份为 `tmp/doc-viewer-zrimo-web-backup-20261125-211001`。
