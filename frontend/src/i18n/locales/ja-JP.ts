@@ -3617,6 +3617,16 @@ pendingDraft: "リーダーを開く前に、現在の編集を完了するか�
     },
   },
   embedPublish: {
+    history: "チャット履歴",
+    historyHint: "最新 30 件をこのブラウザーに保存します。履歴を消去してもサーバーのメッセージは削除されません。",
+    historyEmpty: "保存済みのチャットはありません",
+    historyUntitled: "無題のチャット",
+    historyClear: "ローカル履歴を消去",
+    historyClearConfirm: "履歴を消去して新しいチャットを開始しますか？サーバーのメッセージは保持されます。",
+    historyRetry: "再試行",
+    historyLoadFailed: "チャットを開けませんでした。もう一度お試しください。",
+    historyUnavailable: "このチャットは利用できないため、ローカル履歴から削除しました。",
+
     create: '埋め込みチャネルを作成',
     channelsTitle: '埋め込みチャネル',
     disabled: '無効',
