@@ -115,6 +115,7 @@ test('KB list cache is tenant-scoped and invalidated by KB mutations', async (t)
         getDown: async () => ({}),
       },
       './knowledgeFileListQuery': {},
+      './knowledgeReadOptions': {},
       '../requestCache': requestCache,
     },
   )
@@ -157,6 +158,7 @@ test('manual document updates invalidate the batch title cache', async (t) => {
         getDown: async () => ({}),
       },
       './knowledgeFileListQuery': {},
+      './knowledgeReadOptions': {},
       '../requestCache': requestCache,
     },
   )
