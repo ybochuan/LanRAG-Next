@@ -60,6 +60,7 @@ import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 import { isVoiceInputSupported, useVoiceInput, type VoiceInputError } from '@/composables/useVoiceInput';
 import { createHoldToTalk, voiceHotkeyLabel } from '@/utils/voiceHotkey';
+import { cleanVoiceTranscript } from '@/utils/voiceTranscript';
 
 const route = useRoute();
 const router = useRouter();
@@ -531,7 +532,7 @@ const voiceInput = useVoiceInput({
     : null,
   transcribe: async (wav, target) => {
     const res = await transcribeVoice(wav, target.agentId, target.agentSourceTenantId, target.locale);
-    return res?.data?.text ?? '';
+    return cleanVoiceTranscript(res?.data?.text ?? '');
   },
   onText: insertVoiceText,
   onError: (error, detail) => {
