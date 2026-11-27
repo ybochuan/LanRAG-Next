@@ -209,7 +209,15 @@ func (m *Manager) launch(inst *instance) error {
 	if err != nil {
 		return err
 	}
-	argv, err := inst.spec.Argv(binary, modelPath, m.opts.APIKey)
+	spec := inst.spec
+	if spec.MMProj != "" {
+		projectorPath, _, err := m.ProjectorPath(spec)
+		if err != nil {
+			return err
+		}
+		spec.MMProjPath = projectorPath
+	}
+	argv, err := spec.Argv(binary, modelPath, m.opts.APIKey)
 	if err != nil {
 		return err
 	}
@@ -443,6 +451,38 @@ func (m *Manager) ModelPath(spec Spec) (string, int64, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return "", 0, ErrInvalidModel
+	}
+	return path, info.Size(), nil
+}
+
+// ProjectorPath resolves the optional multimodal projector using the same
+// containment rules as ModelPath. It is separate from the main model because an
+// ASR instance needs both files, and a missing projector otherwise surfaces only
+// when the first transcription request is rejected with HTTP 501.
+func (m *Manager) ProjectorPath(spec Spec) (string, int64, error) {
+	spec.Normalize()
+	if err := spec.Validate(); err != nil {
+		return "", 0, err
+	}
+	if spec.MMProj == "" {
+		return "", 0, nil
+	}
+	path := spec.MMProjPath
+	if path == "" {
+		var err error
+		path, err = ResolveUnder(m.opts.ModelDir, spec.MMProj)
+		if err != nil {
+			return "", 0, err
+		}
+	} else if !m.opts.AllowSelectedFiles || !filepath.IsAbs(path) || filepath.Base(path) != spec.MMProj {
+		return "", 0, ErrPathEscape
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, fmt.Errorf("mmproj %s is not available: %w", spec.MMProj, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", 0, ErrInvalidMMProj
 	}
 	return path, info.Size(), nil
 }

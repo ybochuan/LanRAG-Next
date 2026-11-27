@@ -22,11 +22,15 @@ const (
 	TaskEmbedding TaskType = "embedding"
 	TaskRerank    TaskType = "rerank"
 	TaskChat      TaskType = "chat"
+	// TaskASR serves speech-to-text through /v1/audio/transcriptions. It uses
+	// llama-server's default chat mode plus a separate multimodal projector, so
+	// it needs no serving-mode flag of its own.
+	TaskASR TaskType = "asr"
 )
 
 // Valid reports whether the task type is one this package can serve.
 func (t TaskType) Valid() bool {
-	return t == TaskEmbedding || t == TaskRerank || t == TaskChat
+	return t == TaskEmbedding || t == TaskRerank || t == TaskChat || t == TaskASR
 }
 
 // flag is the llama-server switch that enables the serving mode. Chat returns
@@ -36,7 +40,7 @@ func (t TaskType) flag() string {
 	switch t {
 	case TaskRerank:
 		return "--rerank"
-	case TaskChat:
+	case TaskChat, TaskASR:
 		return ""
 	default:
 		return "--embedding"
@@ -49,7 +53,7 @@ func (t TaskType) probePath() string {
 	switch t {
 	case TaskRerank:
 		return "/v1/rerank"
-	case TaskChat:
+	case TaskChat, TaskASR:
 		return "/v1/chat/completions"
 	default:
 		return "/v1/embeddings"
@@ -66,7 +70,7 @@ func (t TaskType) probePath() string {
 // declared a loaded, healthy server unreachable for the first minute.
 func (t TaskType) taskTimeout() time.Duration {
 	switch t {
-	case TaskChat:
+	case TaskChat, TaskASR:
 		return 45 * time.Second
 	case TaskEmbedding:
 		return 20 * time.Second
@@ -116,6 +120,7 @@ const (
 	DefaultEmbeddingPort = 8081
 	DefaultRerankPort    = 8082
 	DefaultChatPort      = 8083
+	DefaultASRPort       = 8084
 	DefaultCtxSize       = 4096
 	DefaultThreads       = 8
 )
@@ -133,6 +138,8 @@ var (
 	ErrInvalidID        = errors.New("instance id must be lowercase alphanumeric with dashes")
 	ErrUnknownTask      = errors.New("unknown task type")
 	ErrInvalidModel     = errors.New("model must name a .gguf file")
+	ErrInvalidMMProj    = errors.New("mmproj must name a .gguf audio projector")
+	ErrMMProjNotAllowed = errors.New("mmproj is only supported for chat and ASR tasks")
 	ErrInvalidPort      = errors.New("port must be 1024-65535 and not reserved")
 	ErrInvalidCtxSize   = errors.New("ctx_size must be 0 or 512-131072")
 	ErrInvalidThreads   = errors.New("threads must be 0 or 1-256")
@@ -153,11 +160,16 @@ var (
 // also the accepted body of POST /instances, so every field carries an explicit
 // JSON name and nothing runtime-only lives here.
 type Spec struct {
-	ID        string   `json:"id"`
-	Model     string   `json:"model"`
-	ModelPath string   `json:"model_path,omitempty"`
-	TaskType  TaskType `json:"task_type"`
-	Port      int      `json:"port"`
+	ID        string `json:"id"`
+	Model     string `json:"model"`
+	ModelPath string `json:"model_path,omitempty"`
+	// MMProj is the multimodal projector file for ASR or multimodal chat. It is
+	// separate from Model because llama-server requires both files and without
+	// it the audio endpoint answers 501 even though /health is green.
+	MMProj     string   `json:"mmproj,omitempty"`
+	MMProjPath string   `json:"mmproj_path,omitempty"`
+	TaskType   TaskType `json:"task_type"`
+	Port       int      `json:"port"`
 	// UseGPU offloads layers to the GPU. It is a pointer so that "not specified"
 	// can mean "use the GPU": a plain bool would default to false and silently run
 	// CPU inference on a machine that has a perfectly good card.
@@ -184,6 +196,17 @@ func (s Spec) Validate() error {
 	}
 	if len(s.Model) == 0 || len(s.Model) > 255 || !hasSuffixFold(s.Model, ".gguf") {
 		return ErrInvalidModel
+	}
+	if s.MMProj != "" {
+		if len(s.MMProj) > 255 || !hasSuffixFold(s.MMProj, ".gguf") {
+			return ErrInvalidMMProj
+		}
+		if s.TaskType != TaskChat && s.TaskType != TaskASR {
+			return ErrMMProjNotAllowed
+		}
+	}
+	if s.TaskType == TaskASR && s.MMProj == "" {
+		return ErrInvalidMMProj
 	}
 	if s.Port < 1024 || s.Port > 65535 || reservedPorts[s.Port] {
 		return ErrInvalidPort
@@ -221,6 +244,8 @@ func (s Spec) Normalize() Spec {
 			s.Port = DefaultRerankPort
 		case TaskChat:
 			s.Port = DefaultChatPort
+		case TaskASR:
+			s.Port = DefaultASRPort
 		default:
 			s.Port = DefaultEmbeddingPort
 		}
@@ -242,12 +267,14 @@ type Health struct {
 // View is the read projection returned by the HTTP API. It intentionally omits
 // the model API key, the process handle and the resolved binary path.
 type View struct {
-	ID        string   `json:"id"`
-	Model     string   `json:"model"`
-	ModelPath string   `json:"model_path,omitempty"`
-	TaskType  TaskType `json:"task_type"`
-	Port      int      `json:"port"`
-	Status    Status   `json:"status"`
+	ID         string   `json:"id"`
+	Model      string   `json:"model"`
+	ModelPath  string   `json:"model_path,omitempty"`
+	MMProj     string   `json:"mmproj,omitempty"`
+	MMProjPath string   `json:"mmproj_path,omitempty"`
+	TaskType   TaskType `json:"task_type"`
+	Port       int      `json:"port"`
+	Status     Status   `json:"status"`
 	// GPULayers is the resolved -ngl value, so a reader never has to reproduce
 	// the use_gpu/gpu_layers precedence to know what the process will do.
 	GPULayers int        `json:"gpu_layers"`
@@ -264,14 +291,16 @@ type View struct {
 // ViewOf projects a spec into its default read form for a stopped instance.
 func ViewOf(s Spec) View {
 	return View{
-		ID:        s.ID,
-		Model:     s.Model,
-		ModelPath: s.ModelPath,
-		TaskType:  s.TaskType,
-		Port:      s.Port,
-		Status:    StatusStopped,
-		GPULayers: s.GPULayerCount(),
-		Endpoint:  Address{URL: fmt.Sprintf("http://127.0.0.1:%d/v1", s.Port)},
+		ID:         s.ID,
+		Model:      s.Model,
+		ModelPath:  s.ModelPath,
+		MMProj:     s.MMProj,
+		MMProjPath: s.MMProjPath,
+		TaskType:   s.TaskType,
+		Port:       s.Port,
+		Status:     StatusStopped,
+		GPULayers:  s.GPULayerCount(),
+		Endpoint:   Address{URL: fmt.Sprintf("http://127.0.0.1:%d/v1", s.Port)},
 	}
 }
 

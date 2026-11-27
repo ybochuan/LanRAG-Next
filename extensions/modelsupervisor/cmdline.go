@@ -28,6 +28,7 @@ var managedFlags = map[string]bool{
 	"--api-key": true, "--api-key-file": true,
 	"--embedding": true, "--embeddings": true,
 	"--rerank": true, "--reranking": true,
+	"--mmproj":   true,
 	"--jinja":    true,
 	"--no-webui": true, "--no-ui": true,
 	// Layer offload is resolved from use_gpu/gpu_layers and written by Argv.
@@ -89,6 +90,12 @@ func (s Spec) Argv(binary, modelPath, apiKey string) ([]string, error) {
 	argv := []string{
 		binary,
 		"--model", modelPath,
+	}
+	if s.TaskType == TaskASR && s.MMProjPath == "" {
+		return nil, ErrInvalidMMProj
+	}
+	if s.MMProjPath != "" {
+		argv = append(argv, "--mmproj", s.MMProjPath)
 	}
 	if flag := s.TaskType.flag(); flag != "" {
 		argv = append(argv, flag)

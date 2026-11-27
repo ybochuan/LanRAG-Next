@@ -229,7 +229,7 @@ func TestObservePortsReportsOnlyListening(t *testing.T) {
 // server kept being reported unreachable.
 func TestTaskClientAppliesPerTaskTimeout(t *testing.T) {
 	prober := &Prober{}
-	for _, task := range []TaskType{TaskEmbedding, TaskRerank, TaskChat} {
+	for _, task := range []TaskType{TaskEmbedding, TaskRerank, TaskChat, TaskASR} {
 		if got, want := prober.taskClient(task).Timeout, task.taskTimeout(); got != want {
 			t.Fatalf("%s client timeout = %s, want %s", task, got, want)
 		}

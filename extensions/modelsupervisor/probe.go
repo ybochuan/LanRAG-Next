@@ -177,9 +177,11 @@ func (p *Prober) task(ctx context.Context, spec Spec) (int, error) {
 		payload = map[string]any{"input": "ping"}
 	case TaskRerank:
 		payload = map[string]any{"query": "ping", "documents": []string{"alpha", "beta"}, "top_n": 1}
-	case TaskChat:
+	case TaskChat, TaskASR:
 		// One token is enough to prove the chat template loads and the model
 		// answers; asking for more would make a health probe cost real GPU time.
+		// ASR uses the same endpoint because the audio endpoint needs a real
+		// audio file, while this still proves the process accepts inference.
 		payload = map[string]any{
 			"messages":   []map[string]string{{"role": "user", "content": "ping"}},
 			"max_tokens": 1,
@@ -223,7 +225,7 @@ func (p *Prober) task(ctx context.Context, spec Spec) (int, error) {
 		}
 		return len(decoded.Data[0].Embedding), nil
 	}
-	if spec.TaskType == TaskChat {
+	if spec.TaskType == TaskChat || spec.TaskType == TaskASR {
 		// A completion with no choices means the request was accepted by the HTTP
 		// layer but not served, which is exactly the "wrong mode flag" shape.
 		var decoded struct {

@@ -19,6 +19,9 @@ func TestSpecValidateAcceptsBaseline(t *testing.T) {
 	if err := (Spec{ID: "rerank", Model: "a.GGUF", TaskType: TaskRerank, Port: 8082}).Validate(); err != nil {
 		t.Fatalf("minimal rerank spec rejected: %v", err)
 	}
+	if err := (Spec{ID: "asr", Model: "a.gguf", TaskType: TaskASR, Port: 8084, MMProj: "mmproj-a.gguf"}).Validate(); err != nil {
+		t.Fatalf("minimal ASR spec rejected: %v", err)
+	}
 }
 
 func TestSpecValidateRejectsUnsafeInput(t *testing.T) {
@@ -40,6 +43,9 @@ func TestSpecValidateRejectsUnsafeInput(t *testing.T) {
 		{"tiny ctx", func(s *Spec) { s.CtxSize = 128 }, ErrInvalidCtxSize},
 		{"huge ctx", func(s *Spec) { s.CtxSize = 999999 }, ErrInvalidCtxSize},
 		{"negative threads", func(s *Spec) { s.Threads = -1 }, ErrInvalidThreads},
+		{"ASR without mmproj", func(s *Spec) { s.TaskType = TaskASR }, ErrInvalidMMProj},
+		{"bad mmproj", func(s *Spec) { s.MMProj = "mmproj.bin" }, ErrInvalidMMProj},
+		{"mmproj on embedding", func(s *Spec) { s.MMProj = "mmproj.gguf" }, ErrMMProjNotAllowed},
 	} {
 		spec := validSpec()
 		tc.mutate(&spec)
@@ -61,6 +67,10 @@ func TestSpecNormalizeFillsDefaultsPerTaskType(t *testing.T) {
 	chat := Spec{ID: "c", Model: "m.gguf", TaskType: TaskChat}.Normalize()
 	if chat.Port != DefaultChatPort {
 		t.Fatalf("chat default port=%d", chat.Port)
+	}
+	asr := Spec{ID: "a", Model: "m.gguf", TaskType: TaskASR, MMProj: "mmproj.gguf"}.Normalize()
+	if asr.Port != DefaultASRPort {
+		t.Fatalf("asr default port=%d", asr.Port)
 	}
 	explicit := Spec{ID: "e", Model: "m.gguf", TaskType: TaskEmbedding, Port: 9100, CtxSize: 2048, Threads: 2}.Normalize()
 	if explicit.Port != 9100 || explicit.CtxSize != 2048 || explicit.Threads != 2 {
@@ -198,6 +208,9 @@ func TestTaskTimeoutAllowsColdEmbeddingInference(t *testing.T) {
 	}
 	if got := TaskChat.taskTimeout(); got < 30*time.Second {
 		t.Fatalf("chat probe budget = %s, too short for CPU prompt processing", got)
+	}
+	if got := TaskASR.taskTimeout(); got < 30*time.Second {
+		t.Fatalf("asr probe budget = %s, too short for CPU inference", got)
 	}
 	if got, want := TaskRerank.taskTimeout(), 3*time.Second; got != want {
 		t.Fatalf("rerank probe budget = %s, want %s", got, want)

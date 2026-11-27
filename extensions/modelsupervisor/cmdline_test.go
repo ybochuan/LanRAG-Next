@@ -78,6 +78,24 @@ func TestArgvChatOmitsModeFlagAndEnablesJinja(t *testing.T) {
 	}
 }
 
+func TestArgvASRAddsProjectorWithoutModeFlag(t *testing.T) {
+	asr := Spec{ID: "asr", Model: "a.gguf", TaskType: TaskASR, Port: 8084, CtxSize: 4096, Threads: 8,
+		MMProj: "mmproj-a.gguf", MMProjPath: `D:\models\mmproj-a.gguf`}
+	argv, err := asr.Argv("bin", `D:\models\a.gguf`, "")
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, `--mmproj D:\models\mmproj-a.gguf`) {
+		t.Fatalf("ASR argv missing projector: %v", argv)
+	}
+	for _, unwanted := range []string{"--embedding", "--rerank", "--jinja"} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("ASR must not carry %s: %v", unwanted, argv)
+		}
+	}
+}
+
 func TestArgvDisablesGPUWhenNotRequested(t *testing.T) {
 	spec := validSpec()
 	no := false

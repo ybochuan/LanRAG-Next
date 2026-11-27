@@ -57,6 +57,7 @@
 
           <dl class="facts">
             <div><dt>{{ $t('workbench.supervisor.task') }}</dt><dd>{{ taskLabel(item.task_type) }}</dd></div>
+            <div v-if="item.mmproj"><dt>{{ $t('workbench.supervisor.mmprojLabel') }}</dt><dd>{{ item.mmproj }}</dd></div>
             <div><dt>{{ $t('workbench.supervisor.port') }}</dt><dd>{{ item.port }}</dd></div>
             <div><dt>{{ $t('workbench.supervisor.gpuLayers') }}</dt><dd>{{ item.gpu_layers > 0 ? `-ngl ${item.gpu_layers}` : $t('workbench.supervisor.pureCpu') }}</dd></div>
             <div><dt>{{ $t('workbench.supervisor.process') }}</dt><dd>{{ item.pid || '—' }}</dd></div>
@@ -149,6 +150,13 @@
             <t-form-item v-else :label="$t('workbench.supervisor.modelFile')" name="model">
               <t-select v-model="form.model" :options="modelOptions" :placeholder="$t('workbench.supervisor.chooseGGUFPlaceholder')" />
             </t-form-item>
+            <t-form-item v-if="form.task_type === 'asr'" :label="$t('workbench.supervisor.mmprojLabel')" name="mmproj">
+              <div v-if="desktop" class="model-picker">
+                <t-button variant="outline" :disabled="busy" @click="chooseMMProjFile">{{ $t('workbench.supervisor.chooseMMProj') }}</t-button>
+                <span v-if="selectedMMProjPath" class="model-name" :title="selectedMMProjPath">{{ form.mmproj }}</span>
+              </div>
+              <t-select v-else v-model="form.mmproj" :options="mmprojOptions" :placeholder="$t('workbench.supervisor.chooseMMProj')" />
+            </t-form-item>
             <t-form-item :label="$t('workbench.supervisor.taskLabel')" name="task_type">
               <t-select v-model="form.task_type" :options="taskTypeOptions" />
             </t-form-item>
@@ -165,7 +173,7 @@
             </t-form-item>
           </div>
           <div class="form-actions">
-            <t-button theme="primary" type="submit" :loading="busy" :disabled="desktop ? !selectedModelPath : !catalogData?.models.length">{{ $t('workbench.supervisor.startAction') }}</t-button>
+            <t-button theme="primary" type="submit" :loading="busy" :disabled="desktop ? (!selectedModelPath || (form.task_type === 'asr' && !selectedMMProjPath)) : !catalogData?.models.length">{{ $t('workbench.supervisor.startAction') }}</t-button>
           </div>
           <p class="hint">
             {{ $t('workbench.supervisor.layersHint') }}
@@ -237,6 +245,7 @@ let statusTimer: ReturnType<typeof setInterval> | undefined
 const form = reactive({
   id: '',
   model: '',
+  mmproj: '',
   task_type: 'embedding' as api.TaskType,
   port: 8081,
   use_gpu: true,
@@ -245,6 +254,7 @@ const form = reactive({
 
 const catalogData = ref<api.Catalog>()
 const selectedModelPath = ref('')
+const selectedMMProjPath = ref('')
 
 async function chooseModelFile() {
   formError.value = ''
@@ -257,11 +267,24 @@ async function chooseModelFile() {
     formError.value = fail(cause)
   }
 }
+
+async function chooseMMProjFile() {
+  formError.value = ''
+  try {
+    const path = await api.pickModelFile()
+    if (!path) return
+    selectedMMProjPath.value = path
+    form.mmproj = path.split(/[\\/]/).pop() || ''
+  } catch (cause) {
+    formError.value = fail(cause)
+  }
+}
 // Status badge uses the shared tag palette instead of bespoke colours.
 const statusTheme=(status:string)=>({running:'success',failed:'danger',starting:'warning',stopping:'warning'} as Record<string,string>)[status]||'default'
 // TDesign select options built from the local catalog and the fixed task list.
 const modelOptions=computed(()=>((catalogData.value?.models??[]).map(file=>({label:`${file.name}（${formatSize(file.size_bytes)}）`,value:file.name}))))
-const taskTypeOptions=computed(()=>[{label:t('workbench.supervisor.taskEmbedding'),value:'embedding'},{label:t('workbench.supervisor.taskRerank'),value:'rerank'},{label:t('workbench.supervisor.taskChat'),value:'chat'}])
+const mmprojOptions=computed(()=>((catalogData.value?.models??[]).filter(file=>file.name.toLowerCase().includes('mmproj')).map(file=>({label:`${file.name}（${formatSize(file.size_bytes)}）`,value:file.name}))))
+const taskTypeOptions=computed(()=>[{label:t('workbench.supervisor.taskEmbedding'),value:'embedding'},{label:t('workbench.supervisor.taskRerank'),value:'rerank'},{label:t('workbench.supervisor.taskChat'),value:'chat'},{label:t('workbench.supervisor.taskASR'),value:'asr'}])
 
 async function loadCatalog() {
   try {
@@ -287,19 +310,23 @@ function formatSize(bytes: number) {
 function taskLabel(task: api.TaskType) {
   if (task === 'rerank') return t('workbench.supervisor.taskRerank')
   if (task === 'chat') return t('workbench.supervisor.taskChat')
+  if (task === 'asr') return t('workbench.supervisor.taskASR')
   return t('workbench.supervisor.taskEmbedding')
 }
 
 // Ports 8081/8082 are the defaults the Core database already points at, and 8083
 // is the free slot next to them. Switching the task flips the suggested port
 // instead of silently reusing the other task's endpoint.
-const TASK_PORTS: Record<string, number> = { embedding: 8081, rerank: 8082, chat: 8083 }
+const TASK_PORTS: Record<string, number> = { embedding: 8081, rerank: 8082, chat: 8083, asr: 8084 }
 
 watch(
   () => form.task_type,
   (task) => {
-    if (form.port === 8081 || form.port === 8082 || form.port === 8083) {
+    if (form.port === 8081 || form.port === 8082 || form.port === 8083 || form.port === 8084) {
       form.port = TASK_PORTS[task] ?? 8081
+    }
+    if (task === 'asr' && !form.mmproj) {
+      form.mmproj = mmprojOptions.value[0]?.value || ''
     }
   }
 )
@@ -415,7 +442,8 @@ async function probeOne(id: string) {
 async function doStart(item: api.Instance) {
   acting.value = item.id
   error.value = ''
-  const spec = { id: item.id, model: item.model, model_path: item.model_path, task_type: item.task_type,
+  const spec = { id: item.id, model: item.model, model_path: item.model_path,
+    mmproj: item.mmproj, mmproj_path: item.mmproj_path, task_type: item.task_type,
     port: item.port, use_gpu: item.gpu_layers > 0, gpu_layers: item.gpu_layers }
   try {
     await api.start(
@@ -468,10 +496,16 @@ async function doAdd() {
   busy.value = true
   formError.value = ''
   try {
+    if (form.task_type === 'asr' && !form.mmproj) {
+      formError.value = t('workbench.supervisor.mmprojRequired')
+      return
+    }
     const payload: api.SpecInput = {
       id: form.id,
       model: form.model,
       model_path: desktop ? selectedModelPath.value : undefined,
+      mmproj: form.task_type === 'asr' ? form.mmproj : undefined,
+      mmproj_path: form.task_type === 'asr' && desktop ? selectedMMProjPath.value : undefined,
       task_type: form.task_type,
       port: form.port,
       use_gpu: form.use_gpu
@@ -489,7 +523,9 @@ async function doAdd() {
     await api.start(payload)
     form.id = ''
     form.model = ''
+    form.mmproj = ''
     selectedModelPath.value = ''
+    selectedMMProjPath.value = ''
     form.gpu_layers = ''
     await reload()
   } catch (cause) {

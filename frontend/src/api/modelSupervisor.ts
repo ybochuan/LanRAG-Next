@@ -18,7 +18,7 @@ const WIRE_VERSION = '1'
 
 export type InstanceStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed'
 export type Reachability = 'loopback' | 'gateway' | 'unverified'
-export type TaskType = 'embedding' | 'rerank' | 'chat'
+export type TaskType = 'embedding' | 'rerank' | 'chat' | 'asr'
 
 /**
  * The base URL to configure in the core model settings. It is only an address:
@@ -43,6 +43,9 @@ export interface Instance {
   id: string
   model: string
   model_path?: string
+  /** Audio projector required by ASR (and optional for multimodal chat). */
+  mmproj?: string
+  mmproj_path?: string
   task_type: TaskType
   port: number
   status: InstanceStatus
@@ -113,6 +116,8 @@ export interface SpecInput {
   id: string
   model: string
   model_path?: string
+  mmproj?: string
+  mmproj_path?: string
   task_type: TaskType
   port: number
   use_gpu?: boolean

@@ -225,6 +225,14 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, statusFor(err), codeFor(err), err.Error())
 		return
 	}
+	if request.Spec.MMProj != "" {
+		_, projectorSize, err := s.Manager.ProjectorPath(request.Spec)
+		if err != nil {
+			writeError(w, statusFor(err), codeFor(err), err.Error())
+			return
+		}
+		size += projectorSize
+	}
 	// A CPU-only instance never touches the card, so a VRAM budget says nothing
 	// about whether it fits. Gating it on free VRAM would refuse a start that
 	// cannot possibly exhaust the GPU — the guard must measure the resource the
