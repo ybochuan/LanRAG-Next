@@ -72,6 +72,28 @@ func fakeServer(t *testing.T, dim int, healthStatus int, taskStatus int) (*httpt
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	})
+	mux.HandleFunc("/v1/audio/transcriptions", func(w http.ResponseWriter, r *http.Request) {
+		if taskStatus != http.StatusOK {
+			w.WriteHeader(taskStatus)
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			http.Error(w, "not multipart", http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "missing file", http.StatusBadRequest)
+			return
+		}
+		defer func() { _ = file.Close() }()
+		if header.Filename != "probe.wav" || r.FormValue("model") == "" {
+			http.Error(w, "bad audio form", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":""}`))
+	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server, portOf(t, server.URL)
@@ -132,6 +154,29 @@ func TestProbeChatUsesCompletionRoute(t *testing.T) {
 
 // A chat instance pointed at a server that only serves embeddings must fail the
 // task stage rather than pass on /health alone.
+func TestProbeASRUsesTranscriptionRoute(t *testing.T) {
+	_, port := fakeServer(t, 0, http.StatusOK, http.StatusOK)
+	prober := &Prober{LocalCore: true}
+	spec := Spec{ID: "asr", Model: "Qwen3-ASR-0.6B-Q8_0.gguf", TaskType: TaskASR, MMProj: "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf", Port: port, CtxSize: 4096, Threads: 8}
+	result := prober.Check(context.Background(), spec)
+	if result.Reachability != ReachLoopback {
+		t.Fatalf("reachability = %q, note = %q", result.Reachability, result.Note)
+	}
+	if result.AudioVerified == nil || !*result.AudioVerified {
+		t.Fatalf("audio_verified = %v, want true", result.AudioVerified)
+	}
+}
+
+func TestProbeChatLeavesAudioVerificationUnset(t *testing.T) {
+	_, port := fakeServer(t, 0, http.StatusOK, http.StatusOK)
+	prober := &Prober{LocalCore: true}
+	spec := Spec{ID: "chat", Model: "chat.gguf", TaskType: TaskChat, Port: port, CtxSize: 4096, Threads: 8}
+	result := prober.Check(context.Background(), spec)
+	if result.AudioVerified != nil {
+		t.Fatalf("chat probe reported audio_verified: %v", *result.AudioVerified)
+	}
+}
+
 func TestProbeChatRejectsEmbeddingOnlyServer(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })

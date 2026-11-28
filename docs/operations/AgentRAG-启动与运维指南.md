@@ -519,7 +519,8 @@ wsl: 无法配置网络设置 (networkingMode Mirrored)，正在改用 networkin
 | `AGENTRAG_RECONCILE_INTERVAL` | 一键脚本默认 `5s`；直接运行 Host 默认 `1m` |
 | 生命周期扫描 | 启动先补扫，后续默认每 24 小时扫描 |
 | `ENV_FILE` | 显式指向仓库 `.env`；原生 Lite 默认自动加载的是 `.env.lite` |
-| `SSRF_DISABLE` | 本机脚本默认 `true`，沿用已批准的本地模型接入开关；可显式设 `false` 恢复原生检查 |
+| `SSRF_DISABLE` | 本机脚本默认 `false`，保持原生 SSRF 检查开启 |
+| `SSRF_WHITELIST_EXTRA` | 启动器按实际 endpoint 精确放行 `127.0.0.1`、`localhost` 及 MinerU/docreader/模型主机名；显式设置时优先，不使用通配符 |
 | `CORE_PORT` | 一键脚本默认 8080（本机保存的是 18880），可覆盖；Host 的 8090 不可覆盖 |
 | `CORE_BINARY` | 默认仓库根 `WeKnora-lite`，可指向另一份已编译 Linux 核心 |
 | `AGENTRAG_LAUNCHER_CONFIG` | 默认 `data/agentrag-launcher.json`，保存私有机器凭证及范围 |
@@ -529,9 +530,9 @@ wsl: 无法配置网络设置 (networkingMode Mirrored)，正在改用 networkin
 | `DOCREADER_ADDR` / `DOCREADER_TRANSPORT` | 由启动器按 50051 是否真的可达决定（可达写 `127.0.0.1:50051` / `grpc`，否则留空）；显式设置时优先 |
 | `AGENTRAG_DOCREADER_IMAGE` | docreader 容器镜像；docker.io 不可达时用它固定本地已有镜像 |
 
-配置优先级为当前进程环境变量 → 已保存私有配置 → 默认值。更换已有实例的原生库路径或端口时，显式传入 `DB_PATH` / `CORE_PORT`；配置保存后下次继续沿用。若 `.env` 的 DB 路径使用复杂变量表达式，启动器会要求显式 `DB_PATH`，避免猜测后选错原生库。`AGENTRAG_RUN_DIR` 必须是空目录且不能是符号链接；每次启动使用独立目录，旧日志保留。
+配置优先级为当前进程环境变量 → 已保存私有配置 → 默认值。更换已有实例的原生库路径或端口时，显式传入 `DB_PATH` / `CORE_PORT`；配置保存后下次继续沿用。若 `.env` 的 DB 路径使用复杂变量表达式，启动器会要求显式 `DB_PATH`，避免猜测后选错原生库。`AGENTRAG_RUN_DIR` 必须是空目录且不能是符号链接；每次启动使用独立目录，旧日志保留。旧版保存的 `SSRF_DISABLE=true` 会在下次 `prepare` 时一次性迁移为 `false` 并按实际 endpoint 生成精确白名单；若确实需要关闭 SSRF 检查，显式设置环境变量 `SSRF_DISABLE=true` 仍会优先保留。
 
-私有目录在 Git 忽略范围内；Linux 创建时使用限制权限。WSL 挂载盘还受 Windows ACL/挂载权限控制，不能单凭 `chmod` 就宣称完成了 Windows 侧访问隔离。不要分享整个运行目录或 `private.env`。
+私有目录在 Git 忽略范围内。启动器保存 `agentrag-launcher.json` 时，Linux/POSIX 下设为 `0600`；Windows 下对当前用户设置 ACL（`icacls <文件> /inheritance:r /grant:r <用户>:F`）。WSL 挂载盘还受 Windows ACL/挂载权限控制，不能单凭 `chmod` 就宣称完成了 Windows 侧访问隔离。不要分享整个运行目录或 `private.env`。
 
 上述忽略规则覆盖默认路径；自定义 `AGENTRAG_LAUNCHER_CONFIG` / `AGENTRAG_RUN_DIR` 时，选择仓库外的私有目录，或自行确认该路径已忽略。
 
@@ -584,7 +585,7 @@ SERVER_HOST=127.0.0.1 SERVER_PORT="$CORE_PORT" ./WeKnora-lite
 
 ```bash
 cd /mnt/d/LanRAG-Next
-ENV_FILE="$PWD/.env" WEKNORA_WEB_DIR="$PWD/web" SSRF_DISABLE=true ./WeKnora-lite
+ENV_FILE="$PWD/.env" WEKNORA_WEB_DIR="$PWD/web" SSRF_DISABLE=false SSRF_WHITELIST_EXTRA=127.0.0.1,localhost ./WeKnora-lite
 ```
 
 ## 8. 健康检查和日志

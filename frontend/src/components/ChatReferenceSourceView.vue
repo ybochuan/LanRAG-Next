@@ -10,6 +10,7 @@
         <p v-if="statusText" class="reference-source__status" :class="`is-${status}`">{{ statusText }}</p>
       </div>
       <div ref="toolbarSlot" class="reference-source__toolbar" />
+      <slot name="actions" />
       <t-button v-if="mode === 'file' && target.knowledgeBaseId && target.knowledgeId" variant="text" size="small" @click="openReader">
         {{ t('reader.readOriginal') }}
       </t-button>
@@ -69,7 +70,7 @@ import { buildProtectedFileRequest, resolveProtectedFileAccess } from '@/utils/p
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { readerRoute } from '@/views/document-reader/model'
+import { citationDestination, manualCitationFingerprint, readerQuestion, readerRoute } from '@/views/document-reader/model'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 import { getChunkByIdOnly, getKnowledgeDetails } from '@/api/knowledge-base/index'
@@ -101,10 +102,20 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const router = useRouter()
-
-function openReader() {
+async function openReader() {
   const { knowledgeBaseId, knowledgeId } = props.target
-  if (knowledgeBaseId && knowledgeId) void router.push({ ...readerRoute({ kb: knowledgeBaseId, id: knowledgeId }), state: { readerSource: true } })
+  const doc = readerQuestion({ kb: knowledgeBaseId, id: knowledgeId })?.left
+  if (!doc) return
+  const version = loadVersion
+  const from = router.currentRoute.value
+  const { useDocumentReaderStore } = await import('@/stores/documentReader')
+  if (version !== loadVersion || router.currentRoute.value !== from) return
+  const reader = useDocumentReaderStore()
+  const origin = reader.questionOrigin(from.params.chatid)
+  const { left, right, side } = citationDestination(doc, origin)
+  const request = locate.value
+  const citation = request && reader.captureCitation(doc, verifiedChunk.value ? sourceHash.value || manualHash.value : '', request)
+  void router.push({ ...readerRoute(left, right), state: { readerSource: true, readerSide: side, readerCitation: citation || undefined } })
 }
 const chatResources = useChatResourcesStore()
 // Provenance of the cited document: multi-KB (and cross-tenant shared) answers
@@ -123,6 +134,8 @@ const locators = ref<SourceLocator[]>([])
 const chunkContent = ref('')
 const chunkType = ref('')
 const sourceHash = ref('')
+const manualHash = ref('')
+const verifiedChunk = ref(false)
 const edited = ref(false)
 const imageDigest = ref<string>()
 const imageContext = ref<SourceLocateRequest['imageContext']>()
@@ -186,6 +199,7 @@ async function loadMeta(version: number) {
   meta.knowledgeType = ''
   meta.title = props.target.title || ''
   sourceHash.value = ''
+  manualHash.value = ''
   kbName.value = ''
   // Non-blocking: the shared keyed cache dedupes concurrent lookups and the
   // same endpoint already serves the KB page this panel's "open document"
@@ -201,6 +215,9 @@ async function loadMeta(version: number) {
     if (version !== loadVersion) return
     const data = res?.data || {}
     sourceHash.value = data.file_hash || ''
+    if (data.type === 'manual' && typeof data.metadata?.content === 'string') {
+      manualHash.value = manualCitationFingerprint(data.metadata.content)
+    }
     meta.fileName = meta.fileName || data.file_name || ''
     meta.fileType = data.file_type || ''
     meta.knowledgeSource = meta.knowledgeSource || data.source || ''
@@ -212,6 +229,7 @@ async function loadMeta(version: number) {
 }
 
 async function loadChunk(version: number) {
+  verifiedChunk.value = false
   locators.value = parseSourceLocators(props.target.locators)
   chunkContent.value = props.target.content || ''
   edited.value = false
@@ -236,6 +254,7 @@ async function loadChunk(version: number) {
       return
     }
     loadedCurrent = true
+    verifiedChunk.value = true
     locators.value = parseSourceLocators(current.source_locators)
     edited.value = (current.content_revision || 0) > 0 && !locators.value.length
     chunkContent.value = String(current.content || '')
@@ -309,7 +328,8 @@ function buildLocate(): SourceLocateRequest {
   const selected = selectLocatorsForSentence(locators.value, anchor)
   const quotes = chunkContent.value ? selectQuoteForSentence(chunkContent.value, anchor) : []
   const scope = sourceQuoteText(chunkContent.value || props.target.content || '')
-  const unavailable = edited.value || locators.value.some((loc) => loc.source_hash && sourceHash.value && loc.source_hash !== sourceHash.value)
+  const sourceLocators = [...locators.value, ...parseSourceLocators(props.target.locators)]
+  const unavailable = edited.value || sourceLocators.some(loc => loc.source_hash && sourceHash.value && loc.source_hash !== sourceHash.value)
   return { locators: unavailable ? [] : selected, quotes: unavailable ? [] : quotes, token: ++locateToken, sentence: anchor, sourceMarkdown: unavailable ? undefined : chunkContent.value, imageDigest: unavailable ? undefined : imageDigest.value, imageContext: unavailable ? undefined : imageContext.value, scope: unavailable ? '' : scope, unavailable }
 }
 

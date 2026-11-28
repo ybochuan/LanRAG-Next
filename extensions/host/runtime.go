@@ -119,6 +119,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	var workbenchImporter *attachment.Importer
 	var cleanupService *cleanup.Service
 	var retentionService *retention.Service
+	var tagHealth *taggov.Preconditioner
 	var scopes []ingest.Scope
 	if cfg.Mode == "worker" {
 		client, err := weknora.NewClient(cfg.UpstreamURL, cfg.APIKey, cfg.TenantID)
@@ -146,6 +147,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 		sourceRuns = provenance.NewRuns(db, lineage.NewComponentVerifier(reader, sourceRegistry), sourceAuthority, []byte(cfg.ManagementKey))
 		sourceLedger = provenance.New(db, lineage.NewAuthority(sourceRegistry, sourceRuns))
 		apiStore := taggov.NewHTTPStore(client)
+		tagHealth = taggov.NewPreconditioner(apiStore)
 		writer, err = taggov.NewWriter(apiStore, 64)
 		if err != nil {
 			return errors.New("tag writer initialization failed")
@@ -307,7 +309,7 @@ func Serve(ctx context.Context, cfg Config, l net.Listener, report func(string))
 	server := bridge.NewServerWithServices(services)
 	{
 		original := server.Handler
-		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithSources(sourceRegistry).WithBusiness(businessService).WithCleanup(cleanupService).WithAttachments(workbenchAttachments).WithFeedbackNotifier(feedbackNotifier.Signal)
+		manager := management.New(db, cfg.ManagementKey, lifecycleScopes).WithTagHealth(tagHealth).WithSources(sourceRegistry).WithBusiness(businessService).WithCleanup(cleanupService).WithAttachments(workbenchAttachments).WithFeedbackNotifier(feedbackNotifier.Signal)
 		if upstream != nil {
 			manager.WithNativeSQLite(cfg.NativeDBPath, upstream.DocumentTitles)
 			manager.WithRenditions(lineage.NewRenditions(sourceRegistry, upstream.OriginalSHA256))

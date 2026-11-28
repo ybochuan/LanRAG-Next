@@ -242,6 +242,8 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	kbgrp.GET("/:id/lifecycle/rules", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
 	kbgrp.PUT("/:id/lifecycle/rules", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)
 	kbgrp.GET("/:id/lifecycle/reviews", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.GET("/:id/lifecycle/governance-health", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
+	kbgrp.PUT("/:id/lifecycle/governance-health/retry", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)
 	kbgrp.GET("/:id/lifecycle/business/:business_action", g.Viewer(), g.KBAccessRead("id"), handler.ExtensionLifecycle)
 	kbgrp.PUT("/:id/lifecycle/business/:business_action", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ExtensionLifecycle)
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))

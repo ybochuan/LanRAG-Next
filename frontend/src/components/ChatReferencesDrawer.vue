@@ -57,7 +57,9 @@
           :target="sourceTarget"
           :active="visible"
           @unavailable="onSourceUnavailable"
-        />
+        >
+          <template #actions><slot name="source-actions" /></template>
+        </ChatReferenceSourceView>
 
         <div v-else ref="listElement" class="chat-references-panel__body">
           <div v-if="sections.length === 0" class="chat-references-panel__empty">
@@ -196,6 +198,7 @@ import {
   buildReferenceSections,
   formatReferenceSnippet,
   resolveReferenceHighlightKey,
+  resolveReferenceSource,
   type ReferenceListItem,
 } from '@/utils/referenceSources'
 
@@ -279,8 +282,11 @@ function canOpenSource(item: ReferenceListItem) {
 
 function openItemSource(item: ReferenceListItem) {
   if (!drawer || !item.knowledgeId) return
+  const chunkId = item.sourceChunkId || item.chunkId
+  const source = resolveReferenceSource(references.value, { chunkId, knowledgeBaseId: item.knowledgeBaseId })
   drawer.openSource({
-    chunkId: item.sourceChunkId || item.chunkId,
+    ...source,
+    chunkId,
     knowledgeId: item.knowledgeId,
     knowledgeBaseId: item.knowledgeBaseId,
     title: item.title,

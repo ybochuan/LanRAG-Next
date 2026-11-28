@@ -1387,6 +1387,7 @@ const {
   embedChannelId: () => (props.embeddedMode ? props.embedChannelId : undefined),
   embedToken: () => (props.embeddedMode ? props.embedToken : undefined),
   sessionId: () => props.sessionId,
+  messageId: () => persistedAssistantId(props.session),
 });
 
 const referencesDrawer = useChatReferencesDrawer();

@@ -9,11 +9,11 @@ import type * as readerStore from './documentReader'
 
 const source = readFileSync(new URL('./documentReader.ts', import.meta.url), 'utf8')
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-function setup() {
+function setup(storage?: Pick<Storage, 'getItem' | 'setItem'>) {
   const auth = vue.reactive({ currentUserId: 'reviewer', effectiveTenantId: 1 })
   const modules: Record<string, unknown> = { pinia, vue, '@/views/document-reader/model': model, './auth': { useAuthStore: () => auth } }
   const exports = {} as typeof readerStore
-  new Function('require', 'exports', code)((id: string) => modules[id], exports)
+  new Function('require', 'exports', 'sessionStorage', code)((id: string) => modules[id], exports, storage)
   const scope = pinia.createPinia()
   return { auth, session: exports.useDocumentReaderStore(scope), workbenchTarget: exports.workbenchTarget, stop: () => pinia.disposePinia(scope) }
 }
@@ -55,4 +55,23 @@ test('scope changes clear return snapshots before a Back event can consume them'
     auth.currentUserId = 'other'
     assert.equal(session.takeWorkbench(path, userToken), undefined)
   } finally { stop() }
+})
+
+test('reader question restores both panes for the same session and account after navigation', () => {
+  const data = new Map<string, string>()
+  const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value) } }
+  const { session, stop } = setup(storage)
+  const origin = { left: { kb: 'kb', id: 'a' }, right: { kb: 'kb', id: 'b' } }
+  session.rememberQuestionOrigin('question-session', origin)
+  stop()
+  const reopened = setup(storage)
+  try {
+    assert.deepEqual(reopened.session.questionOrigin('question-session'), origin)
+    assert.equal(reopened.session.questionOrigin('other-chat'), undefined)
+    reopened.auth.effectiveTenantId++
+    assert.equal(reopened.session.questionOrigin('question-session'), undefined)
+    reopened.auth.effectiveTenantId--
+    reopened.auth.currentUserId = 'another-reader'
+    assert.equal(reopened.session.questionOrigin('question-session'), undefined)
+  } finally { reopened.stop() }
 })

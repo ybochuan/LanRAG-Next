@@ -4,7 +4,8 @@ import type { LocationQuery } from 'vue-router'
 import type { AttachmentReference } from '@/api/attachmentWorkbench'
 import type { BusinessSection, CorrectionFilters, CorrectionState, RelationFilters } from '@/api/business'
 import type { FamilyTab } from '@/api/families'
-import { readerKey, type ReaderDocument, type ReaderIntent } from '@/views/document-reader/model'
+import { readerID, readerKey, readReaderQuestion, type ReaderDocument, type ReaderIntent, type ReaderQuestion } from '@/views/document-reader/model'
+import type { SourceLocateRequest } from '@/utils/sourceLocator'
 import { useAuthStore } from './auth'
 
 const workbenchQueryKeys = new Set([
@@ -92,13 +93,27 @@ export interface WorkbenchReturn extends WorkbenchReaderRequest {
 
 interface ReaderTab { doc: ReaderDocument; title?: string }
 
+export interface ReaderCitation {
+  id: string
+  doc: ReaderDocument
+  fileHash: string
+  locate: SourceLocateRequest
+}
+
 export const useDocumentReaderStore = defineStore('document-reader', () => {
   const auth = useAuthStore()
   const scope = computed(() => JSON.stringify([auth.currentUserId, auth.effectiveTenantId]))
   const tabs = shallowRef<ReaderTab[]>([])
   const workbench = shallowRef<(WorkbenchReturn & { id: string })>()
+  const citation = shallowRef<ReaderCitation>()
+  const questionOrigins = new Map<string, ReaderQuestion>()
 
-  watch(scope, () => { tabs.value = []; workbench.value = undefined }, { flush: 'sync' })
+  watch(scope, () => {
+    tabs.value = []
+    workbench.value = undefined
+    citation.value = undefined
+    questionOrigins.clear()
+  }, { flush: 'sync' })
 
   function visit(doc: ReaderDocument) {
     const key = readerKey(doc)
@@ -132,5 +147,37 @@ export const useDocumentReaderStore = defineStore('document-reader', () => {
     if (workbench.value?.id === id) workbench.value = undefined
   }
 
-  return { scope, tabs, workbench, visit, name, close, captureWorkbench, takeWorkbench, discardWorkbench }
+  function captureCitation(doc: ReaderDocument, fileHash: string, locate: SourceLocateRequest) {
+    citation.value = { id: crypto.randomUUID(), doc, fileHash, locate }
+    return citation.value.id
+  }
+
+  function storedQuestionOrigins(): [string, string][] {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(`weknora:reader-questions:${scope.value}`) || '[]')
+      return Array.isArray(value) ? value.filter(row => Array.isArray(row) && readerID(row[0]) && typeof row[1] === 'string').slice(-24) : []
+    } catch { return [] }
+  }
+
+  function rememberQuestionOrigin(sessionId: string, question: ReaderQuestion) {
+    if (!readerID(sessionId)) return
+    questionOrigins.set(sessionId, question)
+    if (questionOrigins.size > 24) {
+      const oldest = questionOrigins.keys().next().value
+      if (oldest) questionOrigins.delete(oldest)
+    }
+    try {
+      const entries = storedQuestionOrigins().filter(([id]) => id !== sessionId)
+      entries.push([sessionId, JSON.stringify(question)])
+      sessionStorage.setItem(`weknora:reader-questions:${scope.value}`, JSON.stringify(entries.slice(-24)))
+    } catch { /* In-memory origins are still available. */ }
+  }
+
+  function questionOrigin(sessionId: unknown) {
+    const id = readerID(sessionId)
+    if (id) return questionOrigins.get(id) ?? readReaderQuestion(storedQuestionOrigins().find(row => row[0] === id)?.[1])
+  }
+
+  return { scope, tabs, workbench, citation, visit, name, close, captureWorkbench, takeWorkbench, discardWorkbench,
+    captureCitation, rememberQuestionOrigin, questionOrigin }
 })

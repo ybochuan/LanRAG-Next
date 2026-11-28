@@ -53,7 +53,9 @@ func (t TaskType) probePath() string {
 	switch t {
 	case TaskRerank:
 		return "/v1/rerank"
-	case TaskChat, TaskASR:
+	case TaskASR:
+		return "/v1/audio/transcriptions"
+	case TaskChat:
 		return "/v1/chat/completions"
 	default:
 		return "/v1/embeddings"

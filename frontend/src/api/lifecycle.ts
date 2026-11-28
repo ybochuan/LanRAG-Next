@@ -12,6 +12,10 @@ export interface CleanupTask {tenant_id:number;knowledge_base_id:string;document
 export interface CleanupSummary {total:number;pending:number;awaiting:number;held:number;failed:number;due_soon:number;actionable:number}
 export interface CleanupList {tasks:CleanupTask[];total:number;counts:Partial<Record<CleanupStatus,number>>;actionable:number}
 export interface Overview {counts:Record<LifecycleState,number>;total:number;page:number;page_size:number;documents:DocumentRow[];rules:ResolvedRules;rule_revision:number;can_write:boolean;cleanup?:CleanupSummary;degraded?:boolean;degraded_reason?:string}
+export interface GovernanceTagHealth {ready:boolean;missing:string[];error?:string}
+export interface GovernanceOutboxHealth {pending:number;processing:number;dead:number;blocked:number;oldest_pending_seconds:number}
+export interface GovernanceTagFailures {total:number;last_reason?:string;last_occurred_at?:string}
+export interface GovernanceHealth {knowledge_base_id:string;tags:GovernanceTagHealth;outbox:GovernanceOutboxHealth;tag_failures:GovernanceTagFailures}
 export interface LifecycleEvent {event_id:string;from_state:string;to_state:string;reason:string;occurred_at:string;source_event_id?:string}
 export interface Detail {snapshot:{current:{state:LifecycleState;last_event_id:string};effective_state?:LifecycleState;annotations:Annotations;review_overdue:boolean;attachment_parent_document_id?:string};events:LifecycleEvent[];events_truncated:boolean;evaluation_status?:string;business_family?:DocumentFamily|null;can_write?:boolean}
 export interface ReviewAlert {alert_id:string;document_id:string;review_due:string;delivery_state:string;delivered_at?:string;acknowledged_at?:string;unread?:boolean;title?:string;knowledge_base_id?:string}
@@ -43,3 +47,7 @@ export const acknowledgeReview=(kb:string,alertId:string)=>
   unwrap<{alert_id:string;acknowledged:boolean}>(put(`${base(kb)}/business/notification_ack`,{operation_id:`ack-${alertId}`,expected_revision:0,business:{id:alertId,payload:{}}})).then(value=>{invalidateCache('document-picker-active');return value})
 export const supplements=(kb:string,id:string)=>unwrap<SupplementDetail>(get(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`))
 export const saveSupplements=(kb:string,id:string,body:{expected_revision:number;operation_id:string;parents:string[];parent_knowledge_base_ids?:string[]})=>unwrap<SupplementDetail>(put(`${base(kb)}/documents/${encodeURIComponent(id)}/supplements`,body)).then(value=>{invalidateCache('document-picker-active');return value})
+// governanceHealth reports the read-only tag-precondition and outbox state of
+// one knowledge base; retryBlocked releases only items parked by tag_precondition.
+export const governanceHealth=(kb:string)=>unwrap<GovernanceHealth>(get(`${base(kb)}/governance-health`))
+export const retryBlocked=(kb:string)=>unwrap<{retried:number}>(put(`${base(kb)}/governance-health/retry`,{expected_revision:0}))

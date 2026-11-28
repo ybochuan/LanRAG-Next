@@ -55,9 +55,12 @@ func adoptManualSchema(ctx context.Context, tx *sql.Tx) error {
 	}
 	defer reference.Close()
 	reference.SetMaxOpenConns(1)
-	migrations := []string{lifecycleMigration, ingestTagMigration, parserMigration, lifecyclePolicyMigration, reviewAlertsMigration, provenanceMigration, lifecycleConsistencyMigration, lineageSourcesMigration, supplementsMigration, provenanceRunsMigration, businessMigration, qaFeedbackMigration, guidanceBudgetMigration, attachmentSemanticsMigration, attachmentLinksMigration, attachmentCleanupMigration, documentRelationsMigration, attachmentRevisionsMigration, revisionSplitsMigration, repealNoticesMigration, clauseRelationsMigration, parserRenditionsMigration, businessFamiliesMigration, familyReplacementsMigration, familyCutoverMigration, familyMemberHistoryMigration, familySuggestionsMigration, feedbackReviewContextMigration, documentAvailabilityMigration, crossKBRelationsMigration, crossKBRelationsSupplementMigration, feedbackAcceptanceMigration}
-	for i, migration := range migrations {
-		if _, err := reference.ExecContext(ctx, migration); err != nil {
+	// The manual-schema contract covers the first 32 published migrations. The
+	// ordered catalog is the single source for that prefix; no separate list can
+	// drift when a migration file is edited.
+	const manualSchemaMigrationCount = 32
+	for i := 1; i <= manualSchemaMigrationCount; i++ {
+		if _, err := reference.ExecContext(ctx, migrationSQL(i)); err != nil {
 			return err
 		}
 		expected, err := schemaSnapshot(ctx, reference)
@@ -83,7 +86,7 @@ func adoptManualSchema(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "CREATE TABLE ext_schema_migrations(version INTEGER PRIMARY KEY)"); err != nil {
 			return err
 		}
-		for n := 1; n <= i+1; n++ {
+		for n := 1; n <= i; n++ {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(?)", n); err != nil {
 				return err
 			}

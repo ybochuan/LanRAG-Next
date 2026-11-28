@@ -1,4 +1,4 @@
-import { useRouter } from 'vue-router'
+import { useRouter, type HistoryState } from 'vue-router'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -22,7 +22,7 @@ export function useStartChat() {
    * @param kbIds Knowledge bases to scope the new chat to; empty means no constraint
    * @param fileIds Specific knowledge/file ids to attach as context
    */
-  const startChat = (query: string, kbIds: string[] = [], fileIds: string[] = []) => {
+  const startChat = (query: string, kbIds: string[] = [], fileIds: string[] = [], state?: HistoryState) => {
     const q = (query || '').trim()
     if (!q) return
 
@@ -34,7 +34,7 @@ export function useStartChat() {
     }
 
     menuStore.setPrefillQuery(q)
-    router.push('/platform/creatChat')
+    return router.push(state ? { name: 'globalCreatChat', state } : '/platform/creatChat')
   }
 
   return { startChat }

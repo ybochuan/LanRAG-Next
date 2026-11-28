@@ -16,6 +16,24 @@ type Catalog interface {
 	Catalog(context.Context, Scope) ([]Tag, error)
 }
 
+// TagPreconditionError reports missing canonical tags that a projection requires.
+// It is permanent until an operator creates those tags in the native KB.
+type TagPreconditionError struct{ Missing []string }
+
+func (e *TagPreconditionError) Error() string {
+	return "tag_precondition: canonical tags missing: " + strings.Join(e.Missing, ", ")
+}
+
+// Permanent lets the outbox distinguish a configuration precondition from a
+// transient transport failure without importing this package.
+func (e *TagPreconditionError) Permanent() bool { return true }
+
+// IsTagPrecondition reports whether err is a missing-canonical-tag condition.
+func IsTagPrecondition(err error) bool {
+	var target *TagPreconditionError
+	return errors.As(err, &target)
+}
+
 // Mapping persists verified canonical-name to native-ID bindings per tenant/KB.
 type Mapping struct {
 	db      *store.DB
@@ -62,7 +80,7 @@ func (m *Mapping) resolve(ctx context.Context, scope Scope, name string, createF
 		}
 	}
 	if selected.ID == "" {
-		return Tag{}, errors.New("canonical tag not configured in native KB")
+		return Tag{}, &TagPreconditionError{Missing: []string{name}}
 	}
 	err = m.db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO ext_kb_tag_mapping(tenant_id,knowledge_base_id,canonical_name,tag_id,verified_at) VALUES(?,?,?,?,?)

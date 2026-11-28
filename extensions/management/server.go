@@ -37,6 +37,7 @@ type Server struct {
 	nativeDB       string
 	titles         func(context.Context, string, []string) (map[string]string, error)
 	feedbackNotify func(context.Context, uint64, string, string)
+	tagHealth      TagHealth
 }
 
 // WithNativeSQLite supplies the read-only join and its scoped API fallback.
@@ -58,6 +59,9 @@ func (s *Server) WithFeedbackNotifier(fn func(context.Context, uint64, string, s
 }
 
 func (s *Server) WithAttachments(a *attachmentworkbench.Service) *Server { s.attachments = a; return s }
+
+// WithTagHealth enables the read-only governance health summary.
+func (s *Server) WithTagHealth(h TagHealth) *Server { s.tagHealth = h; return s }
 
 // WithSources enables explicit declarations using the real native snapshot reader.
 func (s *Server) WithSources(r *lineage.Registry) *Server { s.sources = r; return s }
@@ -175,7 +179,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveRendition(w, r, req)
 		return
 	}
-	mutation := req.Action == "put_annotations" || req.Action == "put_rules" || req.Action == "put_supplements" || strings.HasPrefix(req.Action, "business_") && !businessRead(req.Action)
+	mutation := req.Action == "put_annotations" || req.Action == "put_rules" || req.Action == "put_supplements" || req.Action == "retry_blocked" || strings.HasPrefix(req.Action, "business_") && !businessRead(req.Action)
 	if mutation && !req.CanWrite {
 		writeError(w, 403, "read_only")
 		return
@@ -307,6 +311,14 @@ func (s *Server) execute(ctx context.Context, r Request) (any, error) {
 			}
 		}
 		return s.rules(ctx, r)
+	case "governance_health":
+		return s.governanceHealth(ctx, r)
+	case "retry_blocked":
+		count, err := outbox.NewStore(s.db).RetryBlocked(ctx, outbox.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, time.Now().UTC())
+		if err != nil {
+			return nil, errDatabase
+		}
+		return map[string]any{"retried": count}, nil
 	case "reviews":
 		alerts, err := review.NewService(s.db, time.Now).List(ctx, outbox.Scope{TenantID: r.TenantID, KnowledgeBaseID: r.KnowledgeBaseID}, 1000)
 		if err != nil {

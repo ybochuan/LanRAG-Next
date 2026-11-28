@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readerIntent, readerKey, readerQuery, relationGroup } from './model'
+import { citationDestination, citationLocate, readerIntent, readerKey, readerQuery, readReaderQuestion, readerQuestion, relationGroup } from './model'
 
 test('keeps both comparison scopes and pinned version identities', () => {
   const left = { kb: 'kb-a', id: 'doc-a', version: 'version:one' }
@@ -35,4 +35,33 @@ test('groups citations separately from companion rules, attachments and notes', 
   assert.equal(relationGroup('implements'), 'companion')
   assert.equal(relationGroup('template_for'), 'attachments')
   assert.equal(relationGroup('reading_note'), 'reading')
+})
+test('reader question uses only valid current documents', () => {
+  const left = { kb: 'kb-a', id: 'doc-a' }
+  const right = { kb: 'kb-b', id: 'doc-b' }
+  assert.deepEqual(readerQuestion(left, right), { left, right })
+  assert.equal(readerQuestion(left, { ...right, version: 'old' }), undefined)
+  assert.equal(readerQuestion(left, { ...right, id: left.id }), undefined)
+  assert.equal(readReaderQuestion('{"left":{"kb":"kb-a","id":"doc-a"},"right":{"id":"missing-kb"}}'), undefined)
+})
+
+test('citation destination restores the original pane order and focuses the cited document', () => {
+  const left = { kb: 'kb-a', id: 'doc-a' }
+  const right = { kb: 'kb-b', id: 'doc-b' }
+  const scope = readReaderQuestion(JSON.stringify({ left, right }))
+  assert.deepEqual(citationDestination(right, scope), { left, right, side: 'B' })
+  assert.deepEqual(citationDestination(left, scope), { left, right, side: 'A' })
+  const other = { kb: left.kb, id: 'doc-c' }
+  assert.deepEqual(citationDestination(other, scope), { left: other, side: 'A' })
+})
+
+test('citation is downgraded when the read original has a different or unverifiable fingerprint', () => {
+  const request = { token: 2, quotes: ['reference'], locators: [{ type: 'docx', block: 3 }] }
+  assert.equal(citationLocate(request, 'original-hash', 'original-hash'), request)
+  for (const currentHash of ['new-hash', undefined]) {
+    assert.deepEqual(citationLocate(request, 'original-hash', currentHash), {
+      token: 2, quotes: [], locators: [], unavailable: true,
+    })
+  }
+  assert.equal(citationLocate(request, '', '')?.unavailable, true)
 })

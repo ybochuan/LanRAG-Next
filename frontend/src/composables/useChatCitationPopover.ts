@@ -13,6 +13,7 @@ export type ChatCitationPopoverOptions = {
   embedChannelId?: () => string | undefined
   embedToken?: () => string | undefined
   sessionId?: () => string | undefined
+  messageId?: () => string
 }
 
 export function useChatCitationPopover(rootRef: Ref<HTMLElement | null>, options?: ChatCitationPopoverOptions) {
@@ -20,6 +21,7 @@ export function useChatCitationPopover(rootRef: Ref<HTMLElement | null>, options
   return useCitationPopover(rootRef, {
     mode: 'chat',
     getKnowledgeReferences: options?.getKnowledgeReferences,
+    getMessageId: options?.messageId,
     getCacheScope: () => {
       const channel = options?.embedChannelId?.()
       const token = options?.embedToken?.()

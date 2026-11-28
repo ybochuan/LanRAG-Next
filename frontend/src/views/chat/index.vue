@@ -216,7 +216,12 @@
     <KnowledgeBaseEditorModal v-if="!embeddedMode" :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
         :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
-    <ChatReferencesDrawer />
+    <ChatReferencesDrawer>
+        <template #source-actions>
+            <AnswerFeedback v-if="!embeddedMode && referenceFeedbackMessage"
+                :message="referenceFeedbackMessage" :session-id="String(session_id || '')" inline />
+        </template>
+    </ChatReferencesDrawer>
     <ChatAttachmentPreviewDrawer />
     <SandboxSidePanel v-if="!embeddedMode" :session-id="session_id"
         :agent-id="useSettingsStoreInstance.selectedAgentId"
@@ -270,6 +275,7 @@ import { useChatStreamHandler, isAwaitingInput, isPromptCard } from '@/composabl
 import { useChatScrollFollow } from '@/composables/useChatScrollFollow';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
+import AnswerFeedback from './components/AnswerFeedback.vue';
 import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
@@ -468,6 +474,10 @@ const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
+const referenceFeedbackMessage = computed(() => {
+    const id = referencesDrawer.messageId.value;
+    return id ? messagesList.find(message => message.id === id || persistedAssistantId(message) === id) : undefined;
+});
 provide(childAgentTaskLookupKey, task => findChildAgentTask(messagesList, task));
 const promptDock = providePromptDock(messagesList);
 watch(promptDock.focusRequest, () => childTabs.select(''), { flush: 'sync' });

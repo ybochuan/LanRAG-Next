@@ -1,4 +1,6 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
+import { sha256 } from 'js-sha256'
+import type { SourceLocateRequest } from '@/utils/sourceLocator'
 
 export interface ReaderDocument {
   kb: string
@@ -50,6 +52,48 @@ export function readerKey(doc: ReaderDocument): string {
 
 export function readerRoute(left: ReaderDocument, right?: ReaderDocument, view?: ReaderIntent['view']) {
   return { name: 'document-reader', query: readerQuery({ left, right, view }) }
+}
+
+export type ReaderQuestion = { left: ReaderDocument; right?: ReaderDocument }
+
+function questionDocument(value: unknown): ReaderDocument | undefined {
+  if (!value || typeof value !== 'object') return
+  const { kb, id, version, kind } = value as Partial<ReaderDocument>
+  if (version !== undefined || kind !== undefined) return
+  const validKB = readerID(kb)
+  const validID = readerID(id)
+  if (validKB && validID) return { kb: validKB, id: validID }
+}
+
+export function readerQuestion(left: unknown, right?: unknown): ReaderQuestion | undefined {
+  const first = questionDocument(left)
+  const second = questionDocument(right)
+  if (!first || (right !== undefined && !second) || second?.id === first.id) return
+  return second ? { left: first, right: second } : { left: first }
+}
+
+export function readReaderQuestion(value: unknown): ReaderQuestion | undefined {
+  if (typeof value !== 'string' || value.length > 1024) return
+  try {
+    const parsed = JSON.parse(value)
+    return readerQuestion(parsed?.left, parsed?.right)
+  } catch { /* Ignore invalid navigation state. */ }
+}
+
+export function citationDestination(doc: ReaderDocument, scope?: ReaderQuestion): ReaderQuestion & { side: 'A' | 'B' } {
+  if (scope && readerKey(scope.left) === readerKey(doc)) return { ...scope, side: 'A' }
+  if (scope?.right && readerKey(scope.right) === readerKey(doc)) return { ...scope, side: 'B' }
+  return { left: doc, side: 'A' }
+}
+
+export function citationLocate(request: SourceLocateRequest, expectedHash: string, currentHash?: string): SourceLocateRequest {
+  return !request.unavailable && expectedHash && expectedHash === currentHash
+    ? request
+    : { token: request.token, locators: [], quotes: [], unavailable: true }
+}
+
+export function manualCitationFingerprint(content: string | ArrayBuffer): string {
+  return `manual:${sha256(content)}`
 }
 
 export const relationGroups = ['references', 'companion', 'history', 'attachments', 'reading', 'other'] as const

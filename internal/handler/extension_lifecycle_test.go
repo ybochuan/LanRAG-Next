@@ -26,6 +26,7 @@ func (lifecycleDocStub) GetKnowledgeByID(context.Context, string) (*types.Knowle
 }
 
 func TestExtensionLifecycleHTTPAuthority(t *testing.T) {
+	t.Setenv("AGENTRAG_MANAGEMENT_KEY", "")
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
 		name, method, path, body string
@@ -45,6 +46,9 @@ func TestExtensionLifecycleHTTPAuthority(t *testing.T) {
 		{"viewer cannot export correction history", "GET", "/api/v1/knowledge-bases/kb/lifecycle/business/correction_history?document_id=doc&version_id=v1&id=feedback", "", types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleViewer}, 403},
 		{"business GET cannot publish", "GET", "/api/v1/knowledge-bases/kb/lifecycle/business/revision_publish", "", types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 400},
 		{"business cannot forge actor", "PUT", "/api/v1/knowledge-bases/kb/lifecycle/business/guidance_seed", `{"expected_revision":0,"operation_id":"seed","actor_id":"other","business":{"payload":{"text":"test","topic":"test"}}}`, types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 400},
+		{"viewer cannot retry blocked", "PUT", "/api/v1/knowledge-bases/kb/lifecycle/governance-health/retry", `{"expected_revision":0}`, types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleViewer}, 403},
+		{"governance health reaches facade", "GET", "/api/v1/knowledge-bases/kb/lifecycle/governance-health", "", types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 503},
+		{"governance retry reaches facade", "PUT", "/api/v1/knowledge-bases/kb/lifecycle/governance-health/retry", `{"expected_revision":0}`, types.Caller{TenantID: 7, UserID: "creator", Role: types.TenantRoleAdmin}, 503},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := gin.New()
@@ -60,6 +64,8 @@ func TestExtensionLifecycleHTTPAuthority(t *testing.T) {
 			r.PUT("/api/v1/knowledge-bases/:id/lifecycle/documents/:document_id/supplements", h.ExtensionLifecycle)
 			r.GET("/api/v1/knowledge-bases/:id/lifecycle/business/:business_action", h.ExtensionLifecycle)
 			r.PUT("/api/v1/knowledge-bases/:id/lifecycle/business/:business_action", h.ExtensionLifecycle)
+			r.GET("/api/v1/knowledge-bases/:id/lifecycle/governance-health", h.ExtensionLifecycle)
+			r.PUT("/api/v1/knowledge-bases/:id/lifecycle/governance-health/retry", h.ExtensionLifecycle)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
 			if w.Code != tc.want {

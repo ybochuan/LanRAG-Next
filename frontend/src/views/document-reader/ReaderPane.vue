@@ -6,6 +6,9 @@
       <div ref="toolbar" class="reader-pane-tools" />
       <slot name="actions" :metadata="result?.metadata" />
     </header>
+    <t-alert v-if="citationStatus" :theme="citationRequest?.unavailable || located?.found === false ? 'warning' : 'info'">
+      {{ t(citationStatus) }}
+    </t-alert>
     <t-alert v-if="pinned" theme="info">{{ $t('reader.pinnedUnavailable') }}</t-alert>
     <div v-else-if="loading" class="reader-pane-status" role="status">
       <t-loading size="small" /> {{ $t('reader.loadingFile') }}
@@ -25,9 +28,9 @@
         <t-alert v-if="renderIssue === 'fallback'" theme="info">{{ $t('reader.docx.fallback') }}</t-alert>
         <DocumentPreview :key="generation" :source-blob="result.blob"
           :file-type="result.metadata.file_type || ''" :file-name="result.metadata.file_name || title"
-          :toolbar-target="toolbar" :source-mode="sourceMode" :locate="locate"
+          :toolbar-target="toolbar" :source-mode="sourceMode" :locate="paneLocate"
           :fullscreen-enabled="fullscreenOwner" fill-height active disable-auto-focus
-          @located="emit('located', $event)" />
+          @located="onLocated" />
       </template>
     </template>
   </t-card>
@@ -36,22 +39,19 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
-import { useStartChat } from '@/components/GlobalCommandPalette/useStartChat'
-import { useDocumentReaderStore } from '@/stores/documentReader'
-import { useSettingsStore } from '@/stores/settings'
+import { useDocumentReaderStore, type ReaderCitation } from '@/stores/documentReader'
 import type { SourceLocateRequest } from '@/utils/sourceLocator'
 import type { SourceLocateResult } from '@/components/document-preview.vue'
-import { readerKey, type ReaderDocument } from './model'
+import { citationLocate, manualCitationFingerprint, readerKey, readerQuestion, type ReaderDocument, type ReaderQuestion } from './model'
+import { useReaderQuickAnswer } from './useReaderQuickAnswer'
 import { isZrimoReadable, readCorrectionFile, readCurrentFile, readerError, zrimoFormat, type NativeReaderDocument } from './readerApi'
 import ZrimoReader from './ZrimoReader.vue'
 
 const DocumentPreview = defineAsyncComponent(() => import('@/components/document-preview.vue'))
-const props = defineProps<{ doc: ReaderDocument; side?: 'A' | 'B'; fullscreenOwner: boolean; sourceMode?: boolean; locate?: SourceLocateRequest; refresh?: number }>()
+const props = defineProps<{ doc: ReaderDocument; side?: 'A' | 'B'; fullscreenOwner: boolean; sourceMode?: boolean; locate?: SourceLocateRequest; refresh?: number; citation?: ReaderCitation; questionOrigin?: ReaderQuestion }>()
 const emit = defineEmits<{ ready: [document: ReaderDocument, metadata: NativeReaderDocument]; located: [result: SourceLocateResult]; settled: []; activate: [] }>()
 const session = useDocumentReaderStore()
-const settings = useSettingsStore()
-const { startChat } = useStartChat()
+const { openQuestion } = useReaderQuickAnswer()
 const { t } = useI18n()
 const toolbar = ref<HTMLElement>()
 const result = shallowRef<Awaited<ReturnType<typeof readCurrentFile>>>()
@@ -62,15 +62,52 @@ const generation = ref(0)
 const renderIssue = ref<'fallback' | 'tooLarge' | 'encrypted'>()
 const pinned = computed(() => (!!props.doc.version && !props.doc.kind) || error.value === 'unverified')
 const title = computed(() => props.doc.kind === 'correction' ? t('workbench.correction.title') : result.value?.metadata.title || result.value?.metadata.file_name || t('reader.original'))
-const useZrimo = computed(() => !renderIssue.value && !props.locate && !props.doc.kind && !props.doc.version &&
+const located = shallowRef<SourceLocateResult>()
+const manualHash = ref<string>()
+watch([result, () => props.citation], async ([file, citation], _, onCleanup) => {
+  manualHash.value = undefined
+  if (file?.metadata.type !== 'manual' || !citation?.fileHash.startsWith('manual:')) return
+  let cancelled = false
+  onCleanup(() => { cancelled = true })
+  try {
+    const bytes = await file.blob.arrayBuffer()
+    if (!cancelled) manualHash.value = manualCitationFingerprint(bytes)
+  } catch { if (!cancelled) manualHash.value = '' }
+}, { flush: 'sync' })
+const citationRequest = computed(() => {
+  const file = result.value
+  const citation = props.citation
+  if (!file || !citation) return
+  if (citation.fileHash.startsWith('manual:')) {
+    if (file.metadata.type !== 'manual') return citationLocate(citation.locate, citation.fileHash)
+    if (manualHash.value === undefined) return
+    return citationLocate(citation.locate, citation.fileHash, manualHash.value)
+  }
+  return citationLocate(citation.locate, citation.fileHash, file.metadata.file_hash)
+})
+const paneLocate = computed(() => props.locate ?? (citationRequest.value?.unavailable ? undefined : citationRequest.value))
+const citationStatus = computed(() => {
+  if (!citationRequest.value) return ''
+  if (citationRequest.value.unavailable) return 'chat.referenceSourceStale'
+  if (!located.value) return 'chat.referenceSourceLocating'
+  if (located.value.reason === 'ambiguous') return 'chat.referenceSourceAmbiguous'
+  if (!located.value.found) return 'chat.referenceSourceNotFound'
+  if (located.value.granularity === 'block') return 'chat.referenceSourceBlock'
+  return located.value.precise ? 'chat.referenceSourceExact' : 'chat.referenceSourcePartial'
+})
+watch(citationRequest, () => { located.value = undefined }, { flush: 'sync' })
+const useZrimo = computed(() => !renderIssue.value && !paneLocate.value && !props.doc.kind && !props.doc.version &&
   window.__RUNTIME_CONFIG__?.READER_DOCX_ENGINE !== 'native' && !!result.value && isZrimoReadable(result.value.metadata))
 
 function askSelection(location: string) {
   if (!useZrimo.value) return
-  const { id, kb } = props.doc
-  settings.selectAgent(BUILTIN_QUICK_ANSWER_ID)
-  settings.setFileKbMap({ [id]: kb })
-  startChat(t('reader.docx.selectionDraft', { title: title.value, location }), [], [id])
+  const question = readerQuestion(props.doc)
+  if (question) void openQuestion(t('reader.docx.selectionDraft', { title: title.value, location }), question, props.questionOrigin)
+}
+
+function onLocated(result: SourceLocateResult) {
+  located.value = result
+  emit('located', result)
 }
 
 watch(() => [readerKey(props.doc), session.scope, retry.value, props.sourceMode, props.refresh] as const, async (_, __, onCleanup) => {

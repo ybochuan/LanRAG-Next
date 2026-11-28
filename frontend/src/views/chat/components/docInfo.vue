@@ -66,6 +66,7 @@ import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
 import ContentPopup from './tool-results/ContentPopup.vue';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+import { persistedAssistantId } from '@/utils/steerStreamFork';
 
 const router = useRouter();
 const { t } = useI18n();
@@ -100,7 +101,7 @@ const expandedGroups = reactive({});
 const referBoxSwitch = () => {
     const refs = props.session?.knowledge_references;
     if (referencesDrawer && refs?.length) {
-        referencesDrawer.open({ references: refs });
+        referencesDrawer.open({ references: refs, messageId: persistedAssistantId(props.session) });
         return;
     }
     showReferBox.value = !showReferBox.value;

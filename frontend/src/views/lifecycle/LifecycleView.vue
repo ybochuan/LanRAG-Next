@@ -23,6 +23,7 @@
    <section v-if="workspaceView" id="panel-workspace" role="tabpanel" :aria-labelledby="'tab-workspace-'+workspaceView">
     <FamilyWorkspace v-if="workspaceView==='families'" ref="mainFamily" :key="kb" :scope="kb" :can-write="data?.can_write" :reader-return="mainReturn?.mainFamily" :reader-source="mainSource" @changed="loadAll" @locked="viewLocked=$event" @read="navigateReader($event,'main')" />
     <LineageView v-else-if="workspaceView==='lineage'" :key="kb+String(route.query.mode)+String(route.query.node||route.query.id)" :scope="kb" @open="openWorkspaceDocument" @correction="openVersionCorrections" />
+    <GovernanceHealthPanel v-else-if="workspaceView==='governance-health'" :key="kb" :scope="kb" :can-write="data?.can_write" />
     <template v-else-if="workspaceView==='feedback-materials'">
      <div class="feedback-tabs" role="tablist" :aria-label="$t('workbench.workspace.feedbackMaterials')" @keydown="moveTabFocus">
       <t-button id="tab-correction-documents" role="tab" aria-controls="panel-correction-documents" variant="text" :aria-selected="!feedbackReview" :tabindex="feedbackReview ? -1 : 0" :class="{selected:!feedbackReview}" :disabled="viewLocked" @click="showFeedbackMaterials">{{ $t('workbench.workspace.correctionDocuments') }}</t-button>
@@ -346,6 +347,7 @@ const FamilyWorkspace = defineAsyncComponent(() => import('../families/FamilyWor
 const BusinessView = defineAsyncComponent(() => import('../business/BusinessView.vue'))
 const CorrectionWorkspace = defineAsyncComponent(() => import('../feedback/CorrectionWorkspace.vue'))
 const LineageView = defineAsyncComponent(() => import('../lineage/LineageView.vue'))
+const GovernanceHealthPanel = defineAsyncComponent(() => import('./GovernanceHealthPanel.vue'))
 const tabs=[{key:'documents',labelKey:'workbench.tabs.documents'},{key:'cleanup',labelKey:'workbench.tabs.cleanup'},{key:'reviews',labelKey:'workbench.tabs.reviews'},{key:'rules',labelKey:'workbench.tabs.rules'}] as const
 const workspaceTabs=[
   {key:'families',labelKey:'workbench.workspace.families'},
@@ -353,6 +355,7 @@ const workspaceTabs=[
  {key:'feedback-materials',labelKey:'workbench.workspace.feedbackMaterials'},
  {key:'revisions',labelKey:'workbench.workspace.revisions'},
  {key:'lineage',labelKey:'workbench.workspace.lineage'},
+ {key:'governance-health',labelKey:'workbench.workspace.governanceHealth'},
 ] as const
 const detailGroups=[
  {labelKey:'workbench.lifecycle.groupGovernance',tabs:[{key:'life',labelKey:'workbench.detail.life'},{key:'revisions',labelKey:'workbench.detail.revisions'}]},
@@ -366,7 +369,7 @@ const { t, locale }=useI18n()
 const workspaceView=computed(()=>{
  const view=route.query.view
  if(view==='feedback-governance')return 'feedback-materials'
- return view==='families'||view==='lineage'||view==='associations'||view==='feedback-materials'||view==='revisions' ? view : ''
+ return view==='families'||view==='lineage'||view==='associations'||view==='feedback-materials'||view==='revisions'||view==='governance-health' ? view : ''
 })
 const auth=useAuthStore()
 const kbFence=requestFence()

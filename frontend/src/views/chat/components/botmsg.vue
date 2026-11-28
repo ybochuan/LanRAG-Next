@@ -278,6 +278,7 @@ const props = defineProps({
 const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitationClose, scheduleClose: scheduleCitationClose } = useChatCitationPopover(parentMd, {
     getKnowledgeReferences: () => props.session?.knowledge_references,
     sessionId: () => props.sessionId,
+    messageId: () => persistedAssistantId(props.session),
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)

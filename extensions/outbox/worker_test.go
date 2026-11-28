@@ -38,6 +38,30 @@ func TestParentCancellationRetainsJoinedBusinessFailure(t *testing.T) {
 	}
 }
 
+type permanentFailure struct{}
+
+func (permanentFailure) Error() string   { return "tag_precondition: missing canonical tag" }
+func (permanentFailure) Permanent() bool { return true }
+
+func TestWorkerBlocksPermanentFailureWithoutRetryBudget(t *testing.T) {
+	db, s := fixture(t)
+	enqueue(t, db, "one")
+	ctx := context.Background()
+	w := Worker{Store: s, Lease: time.Minute, RetryDelay: time.Second, MaxAttempts: 3, PollInterval: time.Second,
+		Now: func() time.Time { return testTime }, Report: func(error) {},
+		Handler: func(context.Context, Item) error { return permanentFailure{} }}
+	if worked, err := w.ProcessOne(ctx); !worked || err == nil {
+		t.Fatalf("permanent failure=%v %v", worked, err)
+	}
+	stats, err := s.Stats(ctx, Scope{7, "kb-a"}, testTime)
+	if err != nil || stats.Blocked != 1 || stats.Pending != 0 || stats.Dead != 0 {
+		t.Fatalf("blocked stats=%+v %v", stats, err)
+	}
+	if count, err := s.RetryBlocked(ctx, Scope{7, "kb-a"}, testTime); err != nil || count != 1 {
+		t.Fatalf("retry=%d %v", count, err)
+	}
+}
+
 func TestWorkerPersistsFailureThenDrainsHealthyBacklog(t *testing.T) {
 	db, s := fixture(t)
 	enqueue(t, db, "one")

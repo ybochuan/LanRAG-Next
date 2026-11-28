@@ -101,6 +101,10 @@ func (h *KnowledgeBaseHandler) ExtensionLifecycle(c *gin.Context) {
 		if mutation {
 			action = "put_annotations"
 		}
+	case c.FullPath() == "/api/v1/knowledge-bases/:id/lifecycle/governance-health":
+		action = "governance_health"
+	case c.FullPath() == "/api/v1/knowledge-bases/:id/lifecycle/governance-health/retry":
+		action = "retry_blocked"
 	case c.FullPath() == "/api/v1/knowledge-bases/:id/lifecycle/rules":
 		action = "rules"
 		if mutation {

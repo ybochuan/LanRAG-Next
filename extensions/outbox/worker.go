@@ -79,7 +79,13 @@ func (w *Worker) ProcessOne(ctx context.Context) (worked bool, err error) {
 	}
 	cancel()
 	if failure != nil {
-		persistErr := w.Store.Fail(ctx, item.ID, item.LeaseToken, w.now(), failure, w.RetryDelay, w.MaxAttempts)
+		var permanent interface{ Permanent() bool }
+		var persistErr error
+		if errors.As(failure, &permanent) && permanent.Permanent() {
+			persistErr = w.Store.Block(ctx, item.ID, item.LeaseToken, w.now(), failure)
+		} else {
+			persistErr = w.Store.Fail(ctx, item.ID, item.LeaseToken, w.now(), failure, w.RetryDelay, w.MaxAttempts)
+		}
 		return true, errors.Join(failure, persistErr)
 	}
 	return true, w.Store.Complete(ctx, item.ID, item.LeaseToken, w.now())

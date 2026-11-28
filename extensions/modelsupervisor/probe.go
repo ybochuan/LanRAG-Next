@@ -3,10 +3,12 @@ package modelsupervisor
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"os/exec"
@@ -32,6 +34,7 @@ const (
 type ProbeResult struct {
 	Reachability  Reachability `json:"reachability"`
 	EmbeddingDim  int          `json:"embedding_dim,omitempty"`
+	AudioVerified *bool        `json:"audio_verified,omitempty"`
 	LatencyMS     int64        `json:"health_latency_ms,omitempty"`
 	Note          string       `json:"note,omitempty"`
 	ObservedPorts []int        `json:"observed_ports,omitempty"`
@@ -132,6 +135,10 @@ func (p *Prober) Check(ctx context.Context, spec Spec) ProbeResult {
 		return result
 	}
 	result.EmbeddingDim = dim
+	if spec.TaskType == TaskASR {
+		verified := true
+		result.AudioVerified = &verified
+	}
 	if p.LocalCore {
 		result.Reachability = ReachLoopback
 		result.Note = "reachable from Windows Desktop"
@@ -165,23 +172,98 @@ func (p *Prober) get(ctx context.Context, url string) (int, error) {
 	return response.StatusCode, nil
 }
 
+// transcription sends one second of 16 kHz mono 16-bit PCM silence through the
+// real speech endpoint. A server can answer /health and even /v1/chat/completions
+// while the multimodal projector is missing; only this request proves the audio
+// path the core will use is actually wired.
+func (p *Prober) transcription(ctx context.Context, base string, spec Spec) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "probe.wav")
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(silenceWAV()); err != nil {
+		return err
+	}
+	if err := writer.WriteField("model", spec.ID); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+spec.TaskType.probePath(), bytes.NewReader(body.Bytes()))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response, err := p.taskClient(spec.TaskType).Do(request)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = response.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", response.StatusCode, truncate(string(data), 200))
+	}
+	var decoded struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return fmt.Errorf("decode transcription: %w", err)
+	}
+	return nil
+}
+
+// silenceWAV builds a canonical PCM WAV file (RIFF/WAVE, 16 kHz, mono, 16-bit)
+// holding one second of silence. It is generated in memory so the probe needs no
+// fixture and the payload stays small enough for a health request.
+func silenceWAV() []byte {
+	const (
+		sampleRate = 16000
+		channels   = 1
+		bits       = 16
+		seconds    = 1
+	)
+	dataSize := sampleRate * channels * bits / 8 * seconds
+	out := make([]byte, 44+dataSize)
+	copy(out[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(out[4:8], uint32(36+dataSize))
+	copy(out[8:12], "WAVE")
+	copy(out[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(out[16:20], 16)
+	binary.LittleEndian.PutUint16(out[20:22], 1)
+	binary.LittleEndian.PutUint16(out[22:24], channels)
+	binary.LittleEndian.PutUint32(out[24:28], sampleRate)
+	binary.LittleEndian.PutUint32(out[28:32], sampleRate*channels*bits/8)
+	binary.LittleEndian.PutUint16(out[32:34], channels*bits/8)
+	binary.LittleEndian.PutUint16(out[34:36], bits)
+	copy(out[36:40], "data")
+	binary.LittleEndian.PutUint32(out[40:44], uint32(dataSize))
+	return out
+}
+
 // task exercises the endpoint the core actually calls. A 200 on /health only
 // proves the process is up; it does not prove the task flag was passed, so an
 // embedding instance without --embedding would look healthy and then fail every
 // real request.
 func (p *Prober) task(ctx context.Context, spec Spec) (int, error) {
 	url := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(spec.Port))
+	if spec.TaskType == TaskASR {
+		return 0, p.transcription(ctx, url, spec)
+	}
 	var payload any
 	switch spec.TaskType {
 	case TaskEmbedding:
 		payload = map[string]any{"input": "ping"}
 	case TaskRerank:
 		payload = map[string]any{"query": "ping", "documents": []string{"alpha", "beta"}, "top_n": 1}
-	case TaskChat, TaskASR:
+	case TaskChat:
 		// One token is enough to prove the chat template loads and the model
 		// answers; asking for more would make a health probe cost real GPU time.
-		// ASR uses the same endpoint because the audio endpoint needs a real
-		// audio file, while this still proves the process accepts inference.
 		payload = map[string]any{
 			"messages":   []map[string]string{{"role": "user", "content": "ping"}},
 			"max_tokens": 1,
@@ -225,7 +307,7 @@ func (p *Prober) task(ctx context.Context, spec Spec) (int, error) {
 		}
 		return len(decoded.Data[0].Embedding), nil
 	}
-	if spec.TaskType == TaskChat || spec.TaskType == TaskASR {
+	if spec.TaskType == TaskChat {
 		// A completion with no choices means the request was accepted by the HTTP
 		// layer but not served, which is exactly the "wrong mode flag" shape.
 		var decoded struct {

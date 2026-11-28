@@ -197,6 +197,48 @@ class LauncherConfigTest(unittest.TestCase):
                 self.assertEqual(restored["MINERU_ENDPOINT"], "http://127.0.0.1:8000")
                 self.assertEqual(restored["AGENTRAG_PARSER_UPSTREAM_URL"], "http://127.0.0.1:8000")
 
+    def test_defaults_keep_ssrf_enabled_with_an_exact_whitelist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = {
+                "AGENTRAG_TENANT_ID": "7", "AGENTRAG_KB_IDS": "kb-a",
+                "AGENTRAG_EXT_DB": "data/ext.db", "MINERU_ENDPOINT": "http://mineru.lan:8000",
+            }
+            with patch.object(launcher, "ROOT", root), patch.object(launcher, "STATE", root / "private.json"), patch.dict(os.environ, settings, clear=True):
+                launcher.prepare(root / "private.env")
+                cfg = launcher.load()
+                self.assertEqual(cfg["SSRF_DISABLE"], "false")
+                hosts = cfg["SSRF_WHITELIST_EXTRA"].split(",")
+                self.assertIn("127.0.0.1", hosts)
+                self.assertIn("localhost", hosts)
+                self.assertIn("mineru.lan", hosts)
+                self.assertNotIn("*", cfg["SSRF_WHITELIST_EXTRA"])
+                self.assertIn("docreader.lan", launcher.ssrf_whitelist("http://mineru.lan:8000", "docreader.lan:8080").split(","))
+
+    def test_legacy_ssrf_disable_is_migrated_to_an_exact_whitelist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(launcher, "ROOT", root), patch.object(launcher, "STATE", root / "private.json"), \
+                 patch.dict(os.environ, {"AGENTRAG_TENANT_ID": "7", "AGENTRAG_KB_IDS": "kb-a"}, clear=True):
+                launcher.save({"AGENTRAG_TENANT_ID": "7", "AGENTRAG_KB_IDS": "kb-a", "SSRF_DISABLE": "true"})
+                launcher.prepare(root / "private.env")
+                cfg = launcher.load()
+                self.assertEqual(cfg["SSRF_DISABLE"], "false")
+                self.assertIn("127.0.0.1", cfg["SSRF_WHITELIST_EXTRA"].split(","))
+                self.assertNotIn("*", cfg["SSRF_WHITELIST_EXTRA"])
+                launcher.save({**cfg, "SSRF_DISABLE": "true"})
+                with patch.dict(os.environ, {"SSRF_DISABLE": "true"}):
+                    launcher.prepare(root / "private.env")
+                self.assertEqual(launcher.load()["SSRF_DISABLE"], "true")
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes and symlinks")
+    def test_launcher_state_permissions_are_restricted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(launcher, "STATE", root / "private.json"):
+                launcher.save({"AGENTRAG_WEKNORA_API_KEY": "local-test-not-secret"})
+                self.assertEqual(launcher.STATE.stat().st_mode & 0o777, 0o600)
+
     @unittest.skipIf(os.name == "nt", "POSIX file modes and symlinks")
     def test_private_environment_permissions_and_link_refusal(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -73,6 +73,8 @@
 import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
+import { useDocumentReaderStore } from '@/stores/documentReader';
+import { readReaderQuestion } from '@/views/document-reader/model';
 import { createSessions } from "@/api/chat/index";
 import { pickHostProjectDir } from '@/utils/desktopProjectDir';
 import { projectDirBasename, shouldRenderHostProjectSettings, withOptionalProjectDir } from '@/utils/hostWorkspace';
@@ -246,6 +248,9 @@ const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFil
 }
 
 async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) {
+    const readerQuestion = readReaderQuestion(router.options.history.state.readerQuestion);
+    const reader = readerQuestion ? useDocumentReaderStore() : undefined;
+    const readerScope = reader?.scope;
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
@@ -265,6 +270,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     try {
         const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));
         if (res.data && res.data.id) {
+            if (readerQuestion && reader?.scope === readerScope) reader?.rememberQuestionOrigin(res.data.id, readerQuestion);
             await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
             console.error('[createChat] Failed to create session');

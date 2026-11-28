@@ -61,6 +61,13 @@
           <t-button v-for="item in panelActions" :key="item.id" size="small"
             :variant="panel === item.id ? 'outline' : 'text'" :theme="panel === item.id ? 'primary' : 'default'"
             :aria-expanded="panel === item.id" @click="togglePanel(item.id)">{{ $t(item.label) }}</t-button>
+          <t-dropdown v-if="currentQuestion || comparisonQuestion" :options="questionActions" :disabled="questionOpening"
+            @click="onQuestionAction">
+            <t-button size="small" variant="outline" :loading="questionOpening">
+              <template #icon><t-icon name="chat" /></template>
+              {{ $t('reader.qa.menu') }}
+            </t-button>
+          </t-dropdown>
         </div>
         <div v-if="right" class="reader-compare-actions">
           <t-button v-if="!right.kind" size="small" variant="text" @click="swap">{{ $t('reader.swap') }}</t-button>
@@ -103,13 +110,15 @@
         </t-card>
         <div ref="panes" class="reader-panes" :class="{ 'reader-panes--compare': right && !narrow }" :style="{ '--reader-split': split + 'fr', '--reader-rest': 100 - split + 'fr' }">
           <ReaderPane v-if="!right || !narrow || activeSide === 'A'" :doc="left" :side="right ? 'A' : undefined"
-            :fullscreen-owner="!right || activeSide === 'A'" :refresh="refresh" source-mode @activate="activeSide = 'A'" @ready="onPaneReady">
+            :fullscreen-owner="!right || activeSide === 'A'" :refresh="refresh" :citation="citationFor(left)"
+            :question-origin="comparisonQuestion" source-mode @activate="activeSide = 'A'" @ready="onPaneReady">
             <template #actions="{ metadata }"><t-button v-if="metadata && canDownload(left.kb)" variant="text" size="small" :loading="downloading.includes(readerKey(left))" @click="download(left, metadata)">{{ $t('reader.download') }}</t-button></template>
           </ReaderPane>
           <PanelResizeHandle v-if="right && !narrow" edge="right" :label="$t('reader.split')"
             :value="split" :min="40" :max="60" @start="splitAtStart = split" @resize="resizeSplit" />
           <ReaderPane v-if="right && (!narrow || activeSide === 'B')" :doc="right" side="B"
-            :fullscreen-owner="activeSide === 'B'" :refresh="refresh" source-mode @activate="activeSide = 'B'" @ready="onPaneReady">
+            :fullscreen-owner="activeSide === 'B'" :refresh="refresh" :citation="citationFor(right)"
+            :question-origin="comparisonQuestion" source-mode @activate="activeSide = 'B'" @ready="onPaneReady">
             <template #actions="{ metadata }"><t-button v-if="metadata && !right.kind && canDownload(right.kb)" variant="text" size="small" :loading="downloading.includes(readerKey(right))" @click="download(right, metadata)">{{ $t('reader.download') }}</t-button></template>
           </ReaderPane>
         </div>
@@ -135,7 +144,8 @@ import { relationSentence } from '../business/model'
 import ReaderPane from './ReaderPane.vue'
 import ReaderHistory from './ReaderHistory.vue'
 import ReaderAttachments from './ReaderAttachments.vue'
-import { readerIntent, readerKey, readerRoute, relationGroup, relationGroups, type ReaderDocument } from './model'
+import { readerIntent, readerKey, readerQuestion, readerRoute, relationGroup, relationGroups, type ReaderDocument } from './model'
+import { useReaderQuickAnswer } from './useReaderQuickAnswer'
 import { ReaderError, readerError, readerMetadata, readerTitles, sameReaderFile, type NativeReaderDocument } from './readerApi'
 import { useReaderPickerFiles } from './readerPicker'
 import { relationIdentity, sameKBRelations, verifyRelationTargets, type VerifiedRelation } from './readerRelations'
@@ -148,6 +158,7 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 const session = useDocumentReaderStore()
+const { openQuestion } = useReaderQuickAnswer()
 const root = ref<HTMLElement>()
 const panes = ref<HTMLElement>()
 const narrow = ref(false)
@@ -158,6 +169,21 @@ const refresh = ref(0)
 const intent = computed(() => readerIntent(route.query))
 const left = computed(() => intent.value?.left)
 const right = computed(() => intent.value?.right)
+const currentQuestion = computed(() => readerQuestion(activeSide.value === 'B' && right.value ? right.value : left.value))
+const comparisonQuestion = computed(() => right.value ? readerQuestion(left.value, right.value) : undefined)
+const questionOpening = ref(false)
+const questionActions = computed(() => [
+  { value: 'current', content: t('reader.qa.current'), disabled: !currentQuestion.value },
+  ...(right.value ? [{ value: 'compare', content: t('reader.qa.compare'), disabled: !comparisonQuestion.value }] : []),
+  { value: 'applicability', content: t('reader.qa.applicability'), disabled: !currentQuestion.value },
+  { value: 'exception_to', content: t('reader.qa.exceptions'), disabled: !currentQuestion.value },
+  { value: 'conflicts_with', content: t('reader.qa.conflicts'), disabled: !currentQuestion.value },
+])
+
+function citationFor(doc: ReaderDocument) {
+  const citation = session.citation
+  if (citation && citation.id === router.options.history.state.readerCitation && readerKey(citation.doc) === readerKey(doc)) return citation
+}
 
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const kbLoading = ref(false)
@@ -236,6 +262,11 @@ watch(() => left.value && readerKey(left.value), () => {
   activeSide.value = 'A'
   if (left.value) session.visit(left.value)
 }, { immediate: true, flush: 'sync' })
+
+watch(() => route.fullPath, () => {
+  if (router.options.history.state.readerSide === 'B' && right.value) activeSide.value = 'B'
+  else if (router.options.history.state.readerSide === 'A') activeSide.value = 'A'
+}, { immediate: true })
 
 watch(() => intent.value?.view, view => { if (view) panel.value = view }, { immediate: true })
 watch(() => !!right.value, (comparing, wasComparing) => {
@@ -326,6 +357,32 @@ function resizeSplit(delta: number) {
 function onPaneReady(doc: ReaderDocument, metadata: NativeReaderDocument) {
   const title = metadata.title || metadata.file_name || doc.id
   session.name(doc, title)
+}
+
+async function onQuestionAction({ value }: { value?: string | number }) {
+  if (questionOpening.value) return
+  const origin = comparisonQuestion.value
+  if (value === 'exception_to' || value === 'conflicts_with') {
+    const doc = currentQuestion.value?.left
+    if (doc) void router.push({ name: 'documents', query: { kb: doc.kb, view: 'associations', relationDocument: doc.id, relationType: value } })
+    return
+  }
+  if (value !== 'current' && value !== 'compare' && value !== 'applicability') return
+  const question = value === 'compare' ? origin : value === 'applicability' ? origin ?? currentQuestion.value : currentQuestion.value
+  if (!question) return
+  const path = route.fullPath
+  const account = session.scope
+  questionOpening.value = true
+  try {
+    const [first, second] = await Promise.all([readerMetadata(question.left), question.right && readerMetadata(question.right)])
+    if (route.fullPath !== path || session.scope !== account) return
+    const name = (doc: NativeReaderDocument) => doc.title || doc.file_name || doc.id
+    const key = value === 'applicability' ? (second ? 'applicabilityPairDraft' : 'applicabilityDraft')
+      : second ? 'compareDraft' : 'currentDraft'
+    await openQuestion(t(`reader.qa.${key}`, { title: name(first), first: name(first), second: second ? name(second) : '' }), question, origin)
+  } catch (error) {
+    if (route.fullPath === path && session.scope === account) MessagePlugin.error(t(`reader.error.${readerError(error)}`))
+  } finally { questionOpening.value = false }
 }
 async function openRelation(item: PresentedRelation, compare: boolean) {
   const doc = left.value

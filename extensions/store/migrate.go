@@ -2,202 +2,129 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
-	_ "embed"
+	"embed"
 	"fmt"
+	"io/fs"
+	"path"
+	"sort"
+	"strconv"
+	"strings"
 )
 
-//go:embed migrations/001_lifecycle.sql
-var lifecycleMigration string
-
-//go:embed migrations/002_ingest_taggov.sql
-var ingestTagMigration string
-
-//go:embed migrations/003_parser.sql
-var parserMigration string
-
-//go:embed migrations/004_lifecycle_policy.sql
-var lifecyclePolicyMigration string
-
-//go:embed migrations/005_review_alerts.sql
-var reviewAlertsMigration string
-
-//go:embed migrations/006_copy_provenance.sql
-var provenanceMigration string
-
-//go:embed migrations/008_lineage_sources.sql
-var lineageSourcesMigration string
-
-//go:embed migrations/009_supplements.sql
-var supplementsMigration string
-
-//go:embed migrations/010_provenance_runs.sql
-var provenanceRunsMigration string
-
-//go:embed migrations/011_business_workflows.sql
-var businessMigration string
-
-//go:embed migrations/012_qa_feedback.sql
-var qaFeedbackMigration string
-
-//go:embed migrations/013_guidance_budget.sql
-var guidanceBudgetMigration string
-
-//go:embed migrations/014_attachment_semantics.sql
-var attachmentSemanticsMigration string
-
-//go:embed migrations/015_attachment_links.sql
-var attachmentLinksMigration string
-
-//go:embed migrations/016_attachment_cleanup.sql
-var attachmentCleanupMigration string
-
-//go:embed migrations/017_document_relations.sql
-var documentRelationsMigration string
-
-//go:embed migrations/018_attachment_revisions.sql
-var attachmentRevisionsMigration string
-
-//go:embed migrations/019_revision_splits.sql
-var revisionSplitsMigration string
-
-//go:embed migrations/020_repeal_notices.sql
-var repealNoticesMigration string
-
-//go:embed migrations/021_clause_relations.sql
-var clauseRelationsMigration string
-
-//go:embed migrations/022_parser_renditions.sql
-var parserRenditionsMigration string
-
-//go:embed migrations/023_business_families.sql
-var businessFamiliesMigration string
-
-//go:embed migrations/024_family_replacements.sql
-var familyReplacementsMigration string
-
-//go:embed migrations/025_family_cutover.sql
-var familyCutoverMigration string
-
-//go:embed migrations/026_family_member_history.sql
-var familyMemberHistoryMigration string
-
-//go:embed migrations/027_family_suggestions.sql
-var familySuggestionsMigration string
-
-//go:embed migrations/028_feedback_review_context.sql
-var feedbackReviewContextMigration string
-
-//go:embed migrations/029_document_availability.sql
-var documentAvailabilityMigration string
-
-//go:embed migrations/030_cross_kb_relations.sql
-var crossKBRelationsMigration string
-
-//go:embed migrations/031_cross_kb_supplements.sql
-var crossKBRelationsSupplementMigration string
-
-//go:embed migrations/032_feedback_acceptance.sql
-var feedbackAcceptanceMigration string
-
-//go:embed migrations/033_review_acknowledgements.sql
-var reviewAcknowledgementsMigration string
-
-//go:embed migrations/034_cleanup_tasks.sql
-var cleanupTasksMigration string
-
-//go:embed migrations/035_evidence_retention.sql
-var evidenceRetentionMigration string
-
-//go:embed migrations/036_attachment_workbench.sql
-var attachmentWorkbenchMigration string
-
-//go:embed migrations/037_attachment_template_reference.sql
-var attachmentTemplateReferenceMigration string
-
-//go:embed migrations/038_reading_relations.sql
-var readingRelationsMigration string
-
-//go:embed migrations/039_answer_feedback.sql
-var answerFeedbackMigration string
-
-//go:embed migrations/040_annotation_checks.sql
-var annotationChecksMigration string
-
-//go:embed migrations/041_feedback_corrections.sql
-var feedbackCorrectionsMigration string
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
 
 // LatestSchemaVersion is the last published migration supported by this Host.
 const LatestSchemaVersion = 41
 
-//go:embed migrations/007_lifecycle_current_consistency.sql
-var lifecycleConsistencyMigration string
+type schemaMigration struct {
+	Version  int
+	File     string
+	SQL      string
+	Checksum string
+}
+
+// schemaMigrations is a deterministic, contiguous catalog of every published
+// migration. The checksum covers the SQL with CRLF normalized to LF so a
+// checkout on Windows and Linux verifies the same bytes.
+var schemaMigrations = loadSchemaMigrations()
+
+func loadSchemaMigrations() []schemaMigration {
+	names, err := fs.Glob(migrationFiles, "migrations/*.sql")
+	if err != nil {
+		panic("extension migrations: " + err.Error())
+	}
+	sort.Strings(names)
+	if len(names) != LatestSchemaVersion {
+		panic(fmt.Sprintf("extension migrations: found %d files, expected %d", len(names), LatestSchemaVersion))
+	}
+	result := make([]schemaMigration, 0, len(names))
+	for i, name := range names {
+		base := path.Base(name)
+		parts := strings.SplitN(base, "_", 2)
+		if len(parts) != 2 {
+			panic("extension migration has no numeric prefix: " + base)
+		}
+		version, err := strconv.Atoi(parts[0])
+		if err != nil || version != i+1 {
+			panic(fmt.Sprintf("extension migration %q is not the contiguous version %d", base, i+1))
+		}
+		body, err := migrationFiles.ReadFile(name)
+		if err != nil {
+			panic("extension migration read " + name + ": " + err.Error())
+		}
+		normalized := strings.ReplaceAll(string(body), "\r\n", "\n")
+		sum := sha256.Sum256([]byte(normalized))
+		result = append(result, schemaMigration{
+			Version:  version,
+			File:     base,
+			SQL:      normalized,
+			Checksum: fmt.Sprintf("%x", sum),
+		})
+	}
+	return result
+}
+
+func migrationSQL(version int) string {
+	if version < 1 || version > len(schemaMigrations) {
+		panic(fmt.Sprintf("extension migration %d is outside the published catalog", version))
+	}
+	return schemaMigrations[version-1].SQL
+}
+
+func migrationChecksum(version int) string {
+	if version < 1 || version > len(schemaMigrations) {
+		panic(fmt.Sprintf("extension migration %d is outside the published catalog", version))
+	}
+	return schemaMigrations[version-1].Checksum
+}
 
 func (db *DB) migrate(ctx context.Context) error {
 	return db.Write(ctx, func(tx *sql.Tx) error {
 		if err := adoptManualSchema(ctx, tx); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS ext_schema_migrations(version INTEGER PRIMARY KEY)"); err != nil {
+		if _, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS ext_schema_migrations(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL DEFAULT '')"); err != nil {
 			return err
 		}
-		var version int
-		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(version),0) FROM ext_schema_migrations").Scan(&version); err != nil {
+		if err := ensureMigrationChecksumColumn(ctx, tx); err != nil {
 			return err
 		}
-		if version > LatestSchemaVersion {
-			return fmt.Errorf("unsupported extension schema version %d", version)
+		applied, err := appliedMigrationChecksums(ctx, tx)
+		if err != nil {
+			return err
 		}
-		if version < 1 {
-			if _, err := tx.ExecContext(ctx, lifecycleMigration); err != nil {
-				return err
+		version := 0
+		for v := 1; v <= len(applied); v++ {
+			checksum, ok := applied[v]
+			if !ok {
+				return fmt.Errorf("extension schema migration history has a gap at version %d", v)
 			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(1)"); err != nil {
-				return err
+			if v > LatestSchemaVersion {
+				return fmt.Errorf("unsupported extension schema version %d", v)
 			}
+			expected := migrationChecksum(v)
+			switch checksum {
+			case "":
+				// Databases created before checksums existed are backfilled once
+				// from the exact published SQL rather than rejected.
+				if _, err := tx.ExecContext(ctx, "UPDATE ext_schema_migrations SET checksum=? WHERE version=?", expected, v); err != nil {
+					return err
+				}
+			case expected:
+			default:
+				return fmt.Errorf("extension schema migration %d checksum mismatch", v)
+			}
+			version = v
 		}
-		if version < 2 {
-			if _, err := tx.ExecContext(ctx, ingestTagMigration); err != nil {
-				return err
+		for v := version + 1; v <= len(schemaMigrations); v++ {
+			migration := schemaMigrations[v-1]
+			if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
+				return fmt.Errorf("apply extension schema migration %d (%s): %w", v, migration.File, err)
 			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(2)"); err != nil {
-				return err
-			}
-		}
-		if version < 3 {
-			if _, err := tx.ExecContext(ctx, parserMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(3)"); err != nil {
-				return err
-			}
-		}
-		if version < 4 {
-			if _, err := tx.ExecContext(ctx, lifecyclePolicyMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(4)"); err != nil {
-				return err
-			}
-		}
-		if version < 5 {
-			if _, err := tx.ExecContext(ctx, reviewAlertsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(5)"); err != nil {
-				return err
-			}
-		}
-		if version < 6 {
-			if _, err := tx.ExecContext(ctx, provenanceMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(6)"); err != nil {
-				return err
-			}
-		}
-		if version < 7 {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(7)"); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations(version,checksum) VALUES(?,?)", v, migration.Checksum); err != nil {
 				return err
 			}
 		}
@@ -206,282 +133,62 @@ func (db *DB) migrate(ctx context.Context) error {
 		// body instead of silently keeping the older one. The statements are
 		// idempotent because every CREATE is preceded by DROP IF EXISTS, which is
 		// also why this revision did not take a new version number.
-		if _, err := tx.ExecContext(ctx, lifecycleConsistencyMigration); err != nil {
+		if _, err := tx.ExecContext(ctx, schemaMigrations[6].SQL); err != nil {
 			return err
-		}
-		if version < 8 {
-			if _, err := tx.ExecContext(ctx, lineageSourcesMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(8)"); err != nil {
-				return err
-			}
-		}
-		if version < 9 {
-			if _, err := tx.ExecContext(ctx, supplementsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(9)"); err != nil {
-				return err
-			}
-		}
-
-		if version < 10 {
-			if _, err := tx.ExecContext(ctx, provenanceRunsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(10)"); err != nil {
-				return err
-			}
-		}
-		if version < 11 {
-			if _, err := tx.ExecContext(ctx, businessMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(11)"); err != nil {
-				return err
-			}
-		}
-		if version < 12 {
-			if _, err := tx.ExecContext(ctx, qaFeedbackMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(12)"); err != nil {
-				return err
-			}
-		}
-		if version < 13 {
-			if _, err := tx.ExecContext(ctx, guidanceBudgetMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(13)"); err != nil {
-				return err
-			}
-		}
-		if version < 14 {
-			if _, err := tx.ExecContext(ctx, attachmentSemanticsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(14)"); err != nil {
-				return err
-			}
-		}
-		if version < 15 {
-			if _, err := tx.ExecContext(ctx, attachmentLinksMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(15)"); err != nil {
-				return err
-			}
-		}
-		if version < 16 {
-			if _, err := tx.ExecContext(ctx, attachmentCleanupMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(16)"); err != nil {
-				return err
-			}
-		}
-		if version < 17 {
-			if _, err := tx.ExecContext(ctx, documentRelationsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(17)"); err != nil {
-				return err
-			}
-		}
-		if version < 18 {
-			if _, err := tx.ExecContext(ctx, attachmentRevisionsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(18)"); err != nil {
-				return err
-			}
-		}
-		if version < 19 {
-			if _, err := tx.ExecContext(ctx, revisionSplitsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(19)"); err != nil {
-				return err
-			}
-		}
-		if version < 20 {
-			if _, err := tx.ExecContext(ctx, repealNoticesMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(20)"); err != nil {
-				return err
-			}
-		}
-		if version < 21 {
-			if _, err := tx.ExecContext(ctx, clauseRelationsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(21)"); err != nil {
-				return err
-			}
-		}
-		if version < 22 {
-			if _, err := tx.ExecContext(ctx, parserRenditionsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(22)"); err != nil {
-				return err
-			}
-		}
-		if version < 23 {
-			if _, err := tx.ExecContext(ctx, businessFamiliesMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(23)"); err != nil {
-				return err
-			}
-		}
-		if version < 24 {
-			if _, err := tx.ExecContext(ctx, familyReplacementsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(24)"); err != nil {
-				return err
-			}
-		}
-		if version < 25 {
-			if _, err := tx.ExecContext(ctx, familyCutoverMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(25)"); err != nil {
-				return err
-			}
-		}
-		if version < 26 {
-			if _, err := tx.ExecContext(ctx, familyMemberHistoryMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(26)"); err != nil {
-				return err
-			}
-		}
-		if version < 27 {
-			if _, err := tx.ExecContext(ctx, familySuggestionsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(27)"); err != nil {
-				return err
-			}
-		}
-		if version < 28 {
-			if _, err := tx.ExecContext(ctx, feedbackReviewContextMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(28)"); err != nil {
-				return err
-			}
-		}
-		if version < 29 {
-			if _, err := tx.ExecContext(ctx, documentAvailabilityMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(29)"); err != nil {
-				return err
-			}
-		}
-		if version < 30 {
-			if _, err := tx.ExecContext(ctx, crossKBRelationsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(30)"); err != nil {
-				return err
-			}
-		}
-		if version < 31 {
-			if _, err := tx.ExecContext(ctx, crossKBRelationsSupplementMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(31)"); err != nil {
-				return err
-			}
-		}
-		if version < 32 {
-			if _, err := tx.ExecContext(ctx, feedbackAcceptanceMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(32)"); err != nil {
-				return err
-			}
-		}
-		if version < 33 {
-			if _, err := tx.ExecContext(ctx, reviewAcknowledgementsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(33)"); err != nil {
-				return err
-			}
-		}
-		if version < 34 {
-			if _, err := tx.ExecContext(ctx, cleanupTasksMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(34)"); err != nil {
-				return err
-			}
-		}
-		if version < 35 {
-			if _, err := tx.ExecContext(ctx, evidenceRetentionMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(35)"); err != nil {
-				return err
-			}
-		}
-		if version < 36 {
-			if _, err := tx.ExecContext(ctx, attachmentWorkbenchMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(36)"); err != nil {
-				return err
-			}
-		}
-		if version < 37 {
-			if _, err := tx.ExecContext(ctx, attachmentTemplateReferenceMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(37)"); err != nil {
-				return err
-			}
-		}
-		if version < 38 {
-			if _, err := tx.ExecContext(ctx, readingRelationsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(38)"); err != nil {
-				return err
-			}
-		}
-		if version < 39 {
-			if _, err := tx.ExecContext(ctx, answerFeedbackMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(39)"); err != nil {
-				return err
-			}
-		}
-		if version < 40 {
-			if _, err := tx.ExecContext(ctx, annotationChecksMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(40)"); err != nil {
-				return err
-			}
-		}
-		if version < 41 {
-			if _, err := tx.ExecContext(ctx, feedbackCorrectionsMigration); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO ext_schema_migrations VALUES(41)"); err != nil {
-				return err
-			}
 		}
 		return nil
 	})
+}
+
+func ensureMigrationChecksumColumn(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(ext_schema_migrations)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, kind string
+		var notNull, primary int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primary); err != nil {
+			return err
+		}
+		if name == "checksum" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, "ALTER TABLE ext_schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+func appliedMigrationChecksums(ctx context.Context, tx *sql.Tx) (map[int]string, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT version, checksum FROM ext_schema_migrations ORDER BY version")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[int]string)
+	for rows.Next() {
+		var version int
+		var checksum string
+		if err := rows.Scan(&version, &checksum); err != nil {
+			return nil, err
+		}
+		if version < 1 {
+			return nil, fmt.Errorf("invalid extension schema version %d", version)
+		}
+		if _, exists := result[version]; exists {
+			return nil, fmt.Errorf("duplicate extension schema version %d", version)
+		}
+		result[version] = checksum
+	}
+	return result, rows.Err()
 }

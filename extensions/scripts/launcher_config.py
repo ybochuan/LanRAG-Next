@@ -12,11 +12,12 @@ import shlex
 import sqlite3
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE = Path(os.environ.get("AGENTRAG_LAUNCHER_CONFIG", ROOT / "data/agentrag-launcher.json")).resolve()
-ALLOWED = set("AGENTRAG_MANAGEMENT_KEY AGENTRAG_MODE AGENTRAG_EXT_DB AGENTRAG_TENANT_ID AGENTRAG_KB_IDS AGENTRAG_WEKNORA_URL AGENTRAG_WEKNORA_API_KEY AGENTRAG_RECONCILE_INTERVAL MINERU_ENDPOINT AGENTRAG_PARSER_UPSTREAM_URL AGENTRAG_PARSER_UPSTREAM_KEY AGENTRAG_PARSER_PROXY_KEY AGENTRAG_PARSER_ARTIFACT_ROOT AGENTRAG_PARSER_SCOPES ENV_FILE DB_PATH CORE_PORT WEKNORA_WEB_DIR AGENTRAG_PARSER_PROXY_ADDR SSRF_DISABLE DOCREADER_ADDR DOCREADER_TRANSPORT".split())
+ALLOWED = set("AGENTRAG_MANAGEMENT_KEY AGENTRAG_MODE AGENTRAG_EXT_DB AGENTRAG_TENANT_ID AGENTRAG_KB_IDS AGENTRAG_WEKNORA_URL AGENTRAG_WEKNORA_API_KEY AGENTRAG_RECONCILE_INTERVAL MINERU_ENDPOINT AGENTRAG_PARSER_UPSTREAM_URL AGENTRAG_PARSER_UPSTREAM_KEY AGENTRAG_PARSER_PROXY_KEY AGENTRAG_PARSER_ARTIFACT_ROOT AGENTRAG_PARSER_SCOPES ENV_FILE DB_PATH CORE_PORT WEKNORA_WEB_DIR AGENTRAG_PARSER_PROXY_ADDR SSRF_DISABLE SSRF_WHITELIST_EXTRA DOCREADER_ADDR DOCREADER_TRANSPORT".split())
 HOOK_CREDENTIALS = ("AGENTRAG_CORRECTION_SOURCES_KEY", "AGENTRAG_BEFORE_GENERATE_KEY")
 ALLOWED.update(HOOK_CREDENTIALS)
 # Kept in the 0600 state file but never written into private.env: the Host and
@@ -36,6 +37,35 @@ DEFAULT_MODELS = [
 ]
 
 
+def restrict(path):
+    """Keep a credential-bearing file private to its owner.
+
+    The POSIX mode covers WSL/ext4 deployments. On native Windows os.chmod only
+    toggles the read-only bit, so the inherited DACL is replaced explicitly with
+    a single grant to the current user. Failure is fatal: silently leaving a
+    launcher secret world-readable is worse than refusing to launch.
+    """
+    try:
+        os.chmod(path, 0o600)
+        if os.name == "nt":
+            user = os.environ.get("USERNAME") or os.environ.get("USER") or os.environ.get("LOGNAME")
+            import subprocess
+            if not user:
+                try:
+                    result = subprocess.run(["whoami"], capture_output=True, text=True, check=False)
+                    user = result.stdout.strip() if result.returncode == 0 else ""
+                except OSError:
+                    user = ""
+            if not user:
+                raise RuntimeError("cannot determine the Windows user for launcher ACL")
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r", "/grant:r", user + ":F"],
+                check=True, capture_output=True,
+            )
+    except OSError as error:
+        raise RuntimeError("cannot restrict permissions on launcher secrets") from error
+
+
 def save(values):
     STATE.parent.mkdir(parents=True, exist_ok=True)
     temporary = STATE.with_name(STATE.name + "." + secrets.token_hex(6) + ".tmp")
@@ -43,6 +73,7 @@ def save(values):
     with os.fdopen(fd, "w", encoding="utf-8") as output:
         json.dump(values, output)
     os.replace(temporary, STATE)
+    restrict(STATE)
 
 
 def load():
@@ -77,6 +108,29 @@ def tcp_open(host, port, timeout=0.3):
 
 
 LOOPBACK_MINERU = "http://127.0.0.1:8000"
+
+
+def ssrf_whitelist(*urls):
+    """Hosts the core may reach without disabling SSRF.
+
+    Local model services listen on loopback; MinerU/docreader may live on the
+    WSL gateway. Only the actual endpoints are listed, never a wildcard, and the
+    global SSRF_DISABLE escape hatch stays off by default.
+    """
+    hosts = ["127.0.0.1", "localhost"]
+    for raw in urls:
+        if not raw:
+            continue
+        try:
+            value = str(raw).strip()
+            if value and "://" not in value:
+                value = "//" + value
+            host = urllib.parse.urlsplit(value).hostname
+        except ValueError:
+            continue
+        if host and host not in hosts:
+            hosts.append(host)
+    return ",".join(hosts)
 
 
 def networking_mode():
@@ -244,6 +298,19 @@ def prepare(output):
     if not port.isdigit() or not 1 <= int(port) <= 65535 or port == "8090":
         raise RuntimeError("invalid CORE_PORT")
     endpoint = normalize_mineru(setting("MINERU_ENDPOINT"))
+    # A launcher state written before the SSRF hardening can still carry the
+    # old blanket escape hatch. Migrate that exact legacy shape once, while
+    # keeping an explicit environment override authoritative.
+    requested_disable = os.environ.get("SSRF_DISABLE")
+    ssrf_disable = requested_disable if requested_disable is not None else saved.get("SSRF_DISABLE", "false")
+    if requested_disable is None and saved.get("SSRF_DISABLE", "").strip().lower() == "true":
+        ssrf_disable = "false"
+    ssrf_extra = setting("SSRF_WHITELIST_EXTRA") or ssrf_whitelist(
+        endpoint,
+        "http://127.0.0.1:" + port,
+        setting("AGENTRAG_PARSER_UPSTREAM_URL", endpoint),
+        setting("DOCREADER_ADDR"),
+    )
     values = {
         "AGENTRAG_MODE": "worker" if kb_ids else "probe", "AGENTRAG_EXT_DB": str(db),
         "AGENTRAG_TENANT_ID": str(tenant), "AGENTRAG_KB_IDS": kb_ids,
@@ -259,7 +326,8 @@ def prepare(output):
         "ENV_FILE": str(env_file), "DB_PATH": str(native),
         "CORE_PORT": port, "WEKNORA_WEB_DIR": str(path(setting("WEKNORA_WEB_DIR", "web"))),
         "AGENTRAG_PARSER_PROXY_ADDR": "http://127.0.0.1:8090",
-        "SSRF_DISABLE": setting("SSRF_DISABLE", "true"),
+        "SSRF_DISABLE": ssrf_disable,
+        "SSRF_WHITELIST_EXTRA": ssrf_extra,
         "AGENTRAG_MANAGEMENT_KEY": setting("AGENTRAG_MANAGEMENT_KEY") or secrets.token_urlsafe(32),
     }
     keys = [setting(name) or secrets.token_urlsafe(32) for name in HOOK_CREDENTIALS]
@@ -289,6 +357,7 @@ def emit_env(output):
                     continue
                 stream.write("export " + key + "=" + shlex.quote(str(value)) + "\n")
         os.replace(temporary, target)
+        restrict(target)
     finally:
         if temporary.exists(): temporary.unlink()
 

@@ -120,6 +120,34 @@ func TestRetryDeadVisibilityManualRetryAndBacklog(t *testing.T) {
 	}
 }
 
+func TestBlockedItemsStayOutOfDeadAndRetryTogether(t *testing.T) {
+	db, s := fixture(t)
+	enqueue(t, db, "one")
+	ctx := context.Background()
+	item, err := s.Claim(ctx, testTime, time.Minute)
+	if err != nil || item == nil {
+		t.Fatal(err)
+	}
+	if err := s.Block(ctx, item.ID, item.LeaseToken, testTime, errors.New("tag_precondition: missing gov:state:active")); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := s.Stats(ctx, Scope{7, "kb-a"}, testTime)
+	if err != nil || stats.Blocked != 1 || stats.Dead != 0 || stats.Pending != 0 {
+		t.Fatalf("blocked stats=%+v %v", stats, err)
+	}
+	if dead, err := s.ListDead(ctx, Scope{7, "kb-a"}, 10); err != nil || len(dead) != 0 {
+		t.Fatalf("blocked listed as dead=%v %v", dead, err)
+	}
+	count, err := s.RetryBlocked(ctx, Scope{7, "kb-a"}, testTime.Add(time.Second))
+	if err != nil || count != 1 {
+		t.Fatalf("retry blocked=%d %v", count, err)
+	}
+	item, err = s.Claim(ctx, testTime.Add(time.Second), time.Minute)
+	if err != nil || item == nil || item.RetryCount != 0 {
+		t.Fatalf("recovered=%v %v", item, err)
+	}
+}
+
 func TestConcurrentClaimersCannotOwnTheSameLiveItem(t *testing.T) {
 	db, s := fixture(t)
 	enqueue(t, db, "one")

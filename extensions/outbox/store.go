@@ -51,6 +51,7 @@ type Stats struct {
 	Pending          int
 	Processing       int
 	Dead             int
+	Blocked          int
 	OldestPendingAge time.Duration
 }
 
@@ -217,6 +218,53 @@ func (s *Store) Fail(ctx context.Context, id, token string, now time.Time, failu
 	})
 }
 
+// Block parks an item behind a permanent precondition without counting retry
+// attempts. The status stays "dead" so the schema CHECK remains valid, while a
+// "blocked:" last_error prefix distinguishes it from retry-exhausted items.
+func (s *Store) Block(ctx context.Context, id, token string, now time.Time, failure error) error {
+	if failure == nil || now.IsZero() {
+		return errors.New("valid blocked failure and time required")
+	}
+	if id == "" || token == "" {
+		return ErrLeaseLost
+	}
+	message := []rune("blocked: " + failure.Error())
+	if len(message) > 2048 {
+		message = message[:2048]
+	}
+	return s.db.Write(ctx, func(tx *sql.Tx) error {
+		return leaseUpdate(tx.ExecContext(ctx, `UPDATE ext_projection_outbox SET status='dead',next_retry_at=0,last_error=?,
+			processed_at=NULL,lease_token='',lease_until=NULL WHERE outbox_id=? AND status='processing' AND lease_token=?`,
+			string(message), id, token))
+	})
+}
+
+// RetryBlocked moves every blocked item in the scope back to pending. It never
+// revives retry-exhausted dead items.
+func (s *Store) RetryBlocked(ctx context.Context, scope Scope, now time.Time) (int, error) {
+	if err := scope.validate(); err != nil {
+		return 0, err
+	}
+	if now.IsZero() {
+		return 0, errors.New("retry time required")
+	}
+	var count int
+	err := s.db.Write(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `UPDATE ext_projection_outbox SET status='pending',retry_count=0,next_retry_at=?,last_error='',processed_at=NULL
+			WHERE tenant_id=? AND knowledge_base_id=? AND status='dead' AND last_error LIKE 'blocked:%'`, now.UnixMilli(), strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		count = int(n)
+		return nil
+	})
+	return count, err
+}
+
 // RetryDead explicitly resets a scoped dead item; it cannot revive processing/done.
 func (s *Store) RetryDead(ctx context.Context, scope Scope, id string, now time.Time) error {
 	if err := scope.validate(); err != nil {
@@ -252,7 +300,7 @@ func (s *Store) ListDead(ctx context.Context, scope Scope, limit int) ([]Item, e
 	}
 	items := make([]Item, 0)
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT `+columns+` FROM ext_projection_outbox WHERE tenant_id=? AND knowledge_base_id=? AND status='dead' ORDER BY created_at,outbox_id LIMIT ?`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, limit)
+		rows, err := tx.QueryContext(ctx, `SELECT `+columns+` FROM ext_projection_outbox WHERE tenant_id=? AND knowledge_base_id=? AND status='dead' AND (last_error IS NULL OR last_error NOT LIKE 'blocked:%') ORDER BY created_at,outbox_id LIMIT ?`, strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID, limit)
 		if err != nil {
 			return err
 		}
@@ -280,9 +328,11 @@ func (s *Store) Stats(ctx context.Context, scope Scope, now time.Time) (Stats, e
 	}
 	err := s.db.View(ctx, func(tx *sql.Tx) error {
 		var oldest sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(status='pending'),0),COALESCE(SUM(status='processing'),0),COALESCE(SUM(status='dead'),0),
+		err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(status='pending'),0),COALESCE(SUM(status='processing'),0),
+			COALESCE(SUM(status='dead' AND (last_error IS NULL OR last_error NOT LIKE 'blocked:%')),0),
+			COALESCE(SUM(status='dead' AND last_error LIKE 'blocked:%'),0),
 			MIN(CASE WHEN status IN ('pending','processing') THEN created_at END) FROM ext_projection_outbox WHERE tenant_id=? AND knowledge_base_id=?`,
-			strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID).Scan(&stats.Pending, &stats.Processing, &stats.Dead, &oldest)
+			strconv.FormatUint(scope.TenantID, 10), scope.KnowledgeBaseID).Scan(&stats.Pending, &stats.Processing, &stats.Dead, &stats.Blocked, &oldest)
 		if err != nil {
 			return err
 		}

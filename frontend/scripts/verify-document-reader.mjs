@@ -95,6 +95,10 @@ const detail = { snapshot: { current: { state: 'active', last_event_id: 'fixture
 const previewRequests = []
 const badWrites = []
 const chatSends = []
+const citationChat = 'reader-citation-fixture'
+const citationChunk = 'reader-citation-chunk'
+const citationText = 'Evidence in pane B'
+let sourceReplaced = false
 let browser
 try {
   browser = await chromium.launch({ executablePath: chromiumPath, headless: true })
@@ -117,6 +121,23 @@ try {
     if (request.method() === 'PUT' || request.method() === 'DELETE') badWrites.push(path)
     if (request.method() === 'POST' && /\/(?:sessions|knowledge-chat|agent-chat)(?:\/|$)/.test(path)) chatSends.push(path)
     if (path.endsWith('/auth/me')) return respond({ user, tenant, tenant_role: 'admin' })
+    if (path.endsWith(`/sessions/${citationChat}`)) return respond({
+      id: citationChat, title: 'Fixture answer with references', agent_config: { enabled: false },
+    })
+    if (path.endsWith(`/messages/${citationChat}/load`)) return respond([{
+      id: 'reader-citation-answer', role: 'assistant', is_completed: true,
+      content: `A comparison answer. <kb doc="${b.title}" chunk_id="${citationChunk}" kb_id="${knowledgeBase.id}" />`,
+      created_at: '2026-11-28T01:00:00Z',
+      knowledge_references: [{
+        id: citationChunk, knowledge_id: b.id, knowledge_base_id: knowledgeBase.id,
+        knowledge_title: b.title, knowledge_filename: b.file_name, content: citationText, chunk_type: 'text',
+        source_locators: [{ type: 'text', quote: citationText, source_hash: b.file_hash }],
+      }],
+    }])
+    if (path.endsWith(`/chunks/by-id/${citationChunk}`)) return respond({
+      id: citationChunk, knowledge_id: b.id, content: citationText, chunk_type: 'text',
+      source_locators: [{ type: 'text', quote: citationText, source_hash: sourceReplaced ? 'b-changed' : b.file_hash }],
+    })
     if (path.endsWith('/knowledge-bases')) return respond([knowledgeBase])
     if (path.endsWith(`/knowledge-bases/${knowledgeBase.id}`)) return respond(knowledgeBase)
     if (path.endsWith('/lifecycle')) return respond(overview)
@@ -137,7 +158,7 @@ try {
     const match = /\/knowledge\/([^/]+)(\/preview)?$/.exec(path)
     if (match && docs.has(match[1])) {
       const doc = docs.get(match[1])
-      if (!match[2]) return respond(doc)
+      if (!match[2]) return respond(doc.id === b.id && sourceReplaced ? { ...doc, file_hash: 'b-changed' } : doc)
       previewRequests.push(doc.id)
       if (doc.id === 'docx-denied') return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       if (docxFiles.has(doc.id)) {
@@ -195,6 +216,23 @@ try {
   await page.goto(origin + '/platform/reader?kb=kb-a&doc=policy-a&version=old-version')
   await page.getByText('Only the history record is available.', { exact: false }).waitFor()
   assert.equal(previewRequests.length, count, 'historical links must not fetch latest bytes')
+  assert.equal(await page.getByRole('button', { name: 'Document Q&A' }).count(), 0, 'historical readers cannot start a current-document question')
+
+  const compareReader = origin + '/platform/reader?kb=kb-a&doc=policy-a&compare=policy-b'
+  await page.goto(compareReader)
+  await page.getByText('Evidence in pane B', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Document Q&A' }).click()
+  await page.getByText('Ask about A and B', { exact: true }).click()
+  await page.waitForURL('**/platform/creatChat')
+  const compareDraft = await page.locator('textarea:visible').first().inputValue()
+  assert.ok(compareDraft.includes(a.title) && compareDraft.includes(b.title))
+  assert.match(compareDraft, /Rule in A, and Rule in B/)
+  const comparisonSettings = await page.evaluate(() => JSON.parse(localStorage.getItem('WeKnora_settings')))
+  assert.deepEqual(comparisonSettings.selectedKnowledgeBases, [])
+  assert.deepEqual(comparisonSettings.selectedFiles, [a.id, b.id])
+  const readerOrigin = await page.evaluate(() => JSON.parse(history.state.readerQuestion))
+  assert.deepEqual(readerOrigin, { left: { kb: knowledgeBase.id, id: a.id }, right: { kb: knowledgeBase.id, id: b.id } })
+  assert.deepEqual(chatSends, [], 'opening an A/B question only prepares the native composer')
 
   await page.setViewportSize({ width: 850, height: 700 })
   await page.goto(origin + '/platform/reader?kb=kb-a&doc=policy-a&compare=policy-b')
@@ -202,6 +240,26 @@ try {
   await page.getByText('B', { exact: true }).click()
   await page.getByText('Evidence in pane B', { exact: true }).waitFor()
   assert.equal(await page.getByText('Evidence in pane A', { exact: true }).count(), 0)
+  await page.getByRole('button', { name: 'Document Q&A' }).click()
+  await page.getByText('Ask about the current document', { exact: true }).click()
+  await page.waitForURL('**/platform/creatChat')
+  assert.match(await page.locator('textarea:visible').first().inputValue(), /Fixture Policy B/)
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('WeKnora_settings')).selectedFiles), [b.id])
+  await page.goto(compareReader)
+  await page.getByText('Evidence in pane A', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Document Q&A' }).click()
+  await page.getByText('Ask when the rules apply', { exact: true }).click()
+  await page.waitForURL('**/platform/creatChat')
+  assert.match(await page.locator('textarea:visible').first().inputValue(), /explicit exceptions/)
+  assert.deepEqual(chatSends, [], 'opening applicability and document questions never submits the draft')
+  await page.goto(compareReader)
+  await page.getByText('Evidence in pane A', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Document Q&A' }).click()
+  await page.getByText('View registered exceptions', { exact: true }).click()
+  await page.waitForURL('**/platform/documents?**')
+  assert.equal(new URL(page.url()).searchParams.get('relationDocument'), a.id)
+  assert.equal(new URL(page.url()).searchParams.get('relationType'), 'exception_to')
+  await page.goto(compareReader)
   await page.evaluate(() => localStorage.setItem('locale', 'zh-CN'))
   await page.reload()
   await page.getByRole('heading', { name: '文档阅读中心', exact: true }).waitFor()
@@ -501,6 +559,27 @@ try {
     })
     console.log('Reader complex dual-pane passed: PDF + PPTX, peakHeap=' + Math.round(dualMetrics.peak.heap / 1024 / 1024) + 'MiB, finalHeap=' + Math.round(dualMetrics.final.heap / 1024 / 1024) + 'MiB, peakNodes=' + dualMetrics.peak.nodes + ', singlePdfPeak=' + Math.round(singleMetrics.pdf.peak.heap / 1024 / 1024) + 'MiB')
   }
+  await page.setViewportSize({ width: 850, height: 700 })
+  await page.evaluate(({ userId, tenantId, citationChat, readerOrigin }) => {
+    localStorage.setItem('locale', 'en-US')
+    sessionStorage.setItem(`weknora:reader-questions:${JSON.stringify([userId, tenantId])}`, JSON.stringify([[citationChat, JSON.stringify(readerOrigin)]]))
+  }, { userId: user.id, tenantId: tenant.id, citationChat, readerOrigin })
+  const openCitation = async () => {
+    await page.locator(`.citation-kb[data-chunk-id="${citationChunk}"]`).click()
+    await page.locator('.reference-source').getByRole('button', { name: 'Rate and give feedback' }).waitFor()
+    await page.locator('.reference-source').getByRole('button', { name: 'Read original', exact: true }).click()
+    await page.waitForURL('**/platform/reader?**compare=policy-b')
+    await page.getByText(citationText, { exact: true }).waitFor()
+    assert.equal(await page.getByText('Evidence in pane A', { exact: true }).count(), 0)
+  }
+  await page.goto(origin + '/platform/chat/' + citationChat)
+  await openCitation()
+  await page.locator('.reader-panes').getByText('Located the source passage', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Back to source page', exact: true }).click()
+  await page.waitForURL('**/platform/chat/' + citationChat)
+  sourceReplaced = true
+  await openCitation()
+  await page.locator('.reader-panes').getByText('The source or content changed; this citation cannot be located precisely', { exact: true }).waitFor()
   assert.deepEqual(badWrites, [])
   console.log('Reader browser fixture passed: workbench restoration, same-KB comparison, keyboard and pointer resizing, pinned denial, narrow A/B, narrow 488px no overflow, en-US and zh-CN, read-only requests')
 } finally {

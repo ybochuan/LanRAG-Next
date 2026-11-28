@@ -23,6 +23,7 @@ export type CitationFloatState = {
 type CitationPopoverOptions = {
   mode: 'chat' | 'embed'
   getKnowledgeReferences?: () => CitationKnowledgeRef[] | null | undefined
+  getMessageId?: () => string
   getCacheScope: () => string
   fetchChunk: (chunkId: string) => Promise<{ data?: { content?: unknown } } | undefined>
   notFoundError?: () => string
@@ -175,9 +176,11 @@ export function useCitationPopover(rootRef: Ref<HTMLElement | null>, options: Ci
   const openDrawerForCitation = (payload: ReferenceHighlightTarget) => {
     const refs = options?.getKnowledgeReferences?.() || []
     if (!referencesDrawer || !refs.length) return false
+    const messageId = options.getMessageId?.()
     referencesDrawer.open({
       references: refs,
       highlight: payload,
+      ...(messageId ? { messageId } : {}),
     })
     return true
   }
